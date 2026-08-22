@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 /// @title ILiquidityCommitRegistry
 /// @notice On-chain coordination contract for bilateral CB liquidity provisioning.

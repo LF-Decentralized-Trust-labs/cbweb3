@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 /// @title ISpokeBridge
 /// @dev Interface for the Spoke-side Lock-and-Mint bridge (REQ-CAP-005, Scenario B).

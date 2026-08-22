@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 /// @title IFiatCentralBankMoney
 /// @dev Interface for the FiatCentralBankMoney (fCeBM) ERC-20 contract.
