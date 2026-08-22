@@ -8,7 +8,6 @@ package integration_test
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"testing"
@@ -28,12 +27,14 @@ func TestMain(m *testing.M) {
 		"spoke-b": cfg.BesuSpokeBURL,
 	})
 
+	// The suite no longer provisions. SKIP_UP=0 used to run `make spoke-all`, the
+	// legacy deploy/local bring-up; that target is gone, so the branch could only
+	// fail with "No rule to make target". The toolkit is the single provisioning
+	// path and it is driven from samples/, never from a test.
 	if !cfg.SkipUp {
-		fmt.Println("[scenario-a] SKIP_UP=0 — bringing the full stack up via `make spoke-all` (this WIPES the chain)...")
-		if err := runMake("spoke-all"); err != nil {
-			fmt.Printf("[scenario-a] `make spoke-all` failed: %v\n", err)
-			os.Exit(1)
-		}
+		fmt.Println("[scenario-a] SKIP_UP=0 is no longer supported: this suite does not provision.")
+		fmt.Println("[scenario-a] Bring a stack up first:  cd samples && ./deploy-all.sh")
+		os.Exit(1)
 	}
 
 	code := m.Run()
@@ -47,23 +48,13 @@ func TestMain(m *testing.M) {
 		fmt.Printf("[scenario-a] wrote on-chain evidence: %s\n", path)
 	}
 
+	// Teardown is the operator's call for the same reason: `make spoke-all-down` was
+	// the legacy path's, and the toolkit's stack is torn down from samples/.
 	if !cfg.SkipDown {
-		fmt.Println("[scenario-a] SKIP_DOWN=0 — tearing the stack down via `make spoke-all-down`...")
-		if err := runMake("spoke-all-down"); err != nil {
-			fmt.Printf("[scenario-a] `make spoke-all-down` failed: %v\n", err)
-		}
+		fmt.Println("[scenario-a] SKIP_DOWN=0 is no longer supported: this suite does not tear stacks down.")
 	}
 
 	os.Exit(code)
-}
-
-// runMake invokes a Makefile target from the scenario-a root.
-func runMake(target string) error {
-	cmd := exec.Command("make", target)
-	cmd.Dir = scenarioARoot()
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
 }
 
 // TestFullHappyPath exercises the Scenario A core workflow end-to-end against a
@@ -82,6 +73,8 @@ func runMake(target string) error {
 // Each phase is a subtest so it can be run selectively with -run, and so a failure
 // is attributed to a named step.
 func TestFullHappyPath(t *testing.T) {
+	cfg.requireComplete(t)
+
 	gateways := map[string]string{
 		"bank-a":         cfg.BankAURL,
 		"bank-b":         cfg.BankBURL,
@@ -209,22 +202,29 @@ func TestFullHappyPath(t *testing.T) {
 		// recipient is the BENEFICIARY (bank-b). Origin leg lands with the spoke-a
 		// financial correspondent (bank-c); counter leg lands with the beneficiary.
 		body := map[string]interface{}{
-			"trade_id":         tradeID,
-			"counterparty_b":   "bank-d",
-			"originator":       "bank-a",
-			"settlement_agent": "bank-a",
-			"custodian":        "bank-d",
-			"beneficiary":      "bank-b",
+			"trade_id": tradeID,
+			// Every party is a PALADIN IDENTITY, not a bank code. The api-gateway
+			// checks counterparty_b / settlement_agent / custodian / beneficiary /
+			// source_receiver / dest_receiver against the Pente roster before
+			// proposing, and the orchestrator resolves the bilateral Pente group by
+			// {originator, counterparty} membership — a bank code matches neither.
+			// These were bank-a/bank-b/bank-d, the legacy stack's codes, which the
+			// roster rejected with HTTP 400 "not members of the Paladin roster".
+			"counterparty_b":   cfg.IdentityCustodian,
+			"originator":       cfg.IdentityBankA,
+			"settlement_agent": cfg.IdentitySettlementAgent,
+			"custodian":        cfg.IdentityCustodian,
+			"beneficiary":      cfg.IdentityBankB,
 			"origin_amount":    cfg.OriginAmount,
 			"counter_amount":   cfg.CounterAmount,
-			"origin_currency":  "USD",
-			"counter_currency": "BRL",
+			"origin_currency":  cfg.OriginCurrency,
+			"counter_currency": cfg.CounterCurrency,
 			"rate":             "5.2",
 			"expiry_date":      time.Now().Add(time.Hour).Unix(),
-			"source_spoke_id": "spoke-a",
-			"dest_spoke_id":   "spoke-b",
-			"source_receiver": cfg.IdentityCorrespondentA,
-			"dest_receiver":   cfg.IdentityBankB,
+			"source_spoke_id":  cfg.SpokeAID,
+			"dest_spoke_id":    cfg.SpokeBID,
+			"source_receiver":  cfg.IdentityCorrespondentA,
+			"dest_receiver":    cfg.IdentityBankB,
 			"on_behalf":        false,
 		}
 		bankA.mustPost(t, "/api/v1/payments/fx/agreements", body, nil)

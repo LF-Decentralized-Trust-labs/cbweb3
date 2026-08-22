@@ -13,10 +13,12 @@ import (
 // onboardBank runs the PKI onboarding flow for a commercial bank through its home
 // central bank. It is idempotent: if the bank is already ACTIVE it returns at once.
 //
-// Onboarding is OFF by default (ONBOARD=1 to enable): `make spoke-all` pre-registers
-// the funded operators the happy path actually transacts with, so the core flow
-// does not depend on a runtime onboarding round-trip. This helper exists for the
-// opt-in case where the suite is run against a freshly nuked stack.
+// Onboarding is ON by default (ONBOARD=0 to skip). The comment here used to say the
+// opposite, describing the legacy `make spoke-all` bring-up, which pre-registered the
+// funded operators so the core flow needed no runtime onboarding. The toolkit does not
+// pre-register commercial banks — onboarding is what verifies them, and the HTLC lock
+// requires onlyVerified on both sides — so it is part of the happy path now, not an
+// opt-in extra. Skipping it is only useful on a re-run against an already-onboarded stack.
 //
 // Returns the on-chain participant-registration tx hash from the complete step —
 // the CB's auth service registers the participant on its spoke (governance-signed)

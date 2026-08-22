@@ -53,6 +53,24 @@ type mockZeto struct {
 	lockErr           error
 	unlockErr         error
 	transferLockedErr error
+
+	// countMu guards the counters above. They are incremented from concurrent
+	// SettleHTLC goroutines in the concurrency tests, so the increments themselves
+	// must be safe even when the assertions only read after a WaitGroup.
+	countMu sync.Mutex
+
+	// transferLockedEntered/Release let a test pin the FIRST TransferLocked call
+	// inside the adapter, so a second caller provably overlaps it instead of the
+	// test hoping the scheduler interleaves them. Both nil = no gating.
+	transferLockedEntered chan struct{}
+	transferLockedRelease chan struct{}
+}
+
+// transferLockedCount reads the counter under the lock.
+func (m *mockZeto) transferLockedCount() int {
+	m.countMu.Lock()
+	defer m.countMu.Unlock()
+	return m.transferLockedCalled
 }
 
 func (m *mockZeto) Mint(_ context.Context, _, _ string) (string, error) {
@@ -82,7 +100,14 @@ func (m *mockZeto) Unlock(_ context.Context, _ string) (string, error) {
 	return "mock-unlock-tx", nil
 }
 func (m *mockZeto) TransferLocked(_ context.Context, _, _, _ string) (string, error) {
+	m.countMu.Lock()
 	m.transferLockedCalled++
+	first := m.transferLockedCalled == 1
+	m.countMu.Unlock()
+	if first && m.transferLockedEntered != nil {
+		close(m.transferLockedEntered)
+		<-m.transferLockedRelease
+	}
 	if m.transferLockedErr != nil {
 		return "", m.transferLockedErr
 	}
@@ -908,6 +933,84 @@ func TestLockHTLC_NoSpokePrefixSkipsValidation(t *testing.T) {
 
 // --- Tests for SETTLING intermediate state and retry ---
 
+// TestSettleHTLC_SecondCallerDuringFlightDoesNotTransferTwice pins the first
+// settle inside the Zeto adapter and calls settle again while it is stuck there,
+// so the overlap is guaranteed rather than hoped for.
+//
+// Its sibling below races two goroutines and caught this defect only about one run
+// in six — reliably enough to break CI at random, not reliably enough to debug
+// against. What both assert is the invariant that matters: a locked note is
+// transferred exactly once, no matter how many callers reveal the secret at once.
+func TestSettleHTLC_SecondCallerDuringFlightDoesNotTransferTwice(t *testing.T) {
+	htlcMock := &mockHTLC{}
+	env := setupTestEnvFull(t, htlcMock, nil, "")
+	ctx := context.Background()
+
+	env.zeto.transferLockedEntered = make(chan struct{})
+	env.zeto.transferLockedRelease = make(chan struct{})
+
+	lockResp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_INFLIGHT",
+		Receiver:    "bank-b",
+		Amount:      "1000",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+
+	// Winner: blocks inside TransferLocked until we release it.
+	winner := make(chan error, 1)
+	go func() {
+		_, wErr := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
+			ContractId: lockResp.ContractId,
+			Secret:     lockResp.Secret,
+		})
+		winner <- wErr
+	}()
+
+	select {
+	case <-env.zeto.transferLockedEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first settle never reached TransferLocked")
+	}
+
+	// Second caller, provably concurrent with the first.
+	_, secondErr := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
+		ContractId: lockResp.ContractId,
+		Secret:     lockResp.Secret,
+	})
+	if secondErr == nil {
+		t.Fatal("concurrent second settle succeeded; it must be rejected while the first is in flight")
+	}
+	if got := status.Code(secondErr); got != codes.Aborted {
+		t.Errorf("concurrent second settle: expected codes.Aborted, got %v (%v)", got, secondErr)
+	}
+	if n := env.zeto.transferLockedCount(); n != 1 {
+		t.Fatalf("second caller must not transfer: expected TransferLocked called 1 time, got %d", n)
+	}
+
+	close(env.zeto.transferLockedRelease)
+	if wErr := <-winner; wErr != nil {
+		t.Fatalf("first settle failed: %v", wErr)
+	}
+	if n := env.zeto.transferLockedCount(); n != 1 {
+		t.Errorf("expected TransferLocked called exactly 1 time overall, got %d", n)
+	}
+
+	// The marker is released on return, so a later settle is not blocked by it —
+	// it takes the idempotent-success path because the record is now SETTLED.
+	if _, aErr := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
+		ContractId: lockResp.ContractId,
+		Secret:     lockResp.Secret,
+	}); aErr != nil {
+		t.Errorf("settle after completion should be idempotently successful, got %v", aErr)
+	}
+	if n := env.zeto.transferLockedCount(); n != 1 {
+		t.Errorf("idempotent settle must not transfer again, got %d", n)
+	}
+}
+
 func TestSettleHTLC_ConcurrentCallsOnlyOneSucceeds(t *testing.T) {
 	htlcMock := &mockHTLC{}
 	env := setupTestEnvFull(t, htlcMock, nil, "")
@@ -948,14 +1051,14 @@ func TestSettleHTLC_ConcurrentCallsOnlyOneSucceeds(t *testing.T) {
 			failures++
 		}
 	}
-	// At least one must succeed; the concurrent loser may get FailedPrecondition
-	// or may also succeed (idempotent) if the first completed before the second started.
+	// At least one must succeed; the concurrent loser gets Aborted while the winner
+	// is in flight, or an idempotent success if the winner finished first.
 	if successes < 1 {
 		t.Errorf("expected at least 1 success, got %d successes and %d failures", successes, failures)
 	}
 	// Token transfer should only happen once
-	if env.zeto.transferLockedCalled != 1 {
-		t.Errorf("expected zeto.TransferLocked called exactly 1 time, got %d", env.zeto.transferLockedCalled)
+	if n := env.zeto.transferLockedCount(); n != 1 {
+		t.Errorf("expected zeto.TransferLocked called exactly 1 time, got %d", n)
 	}
 }
 

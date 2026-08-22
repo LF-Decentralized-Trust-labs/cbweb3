@@ -21,39 +21,48 @@ records per-step on-chain evidence (transaction hash, block number, gas) into a
 machine-readable bundle. Timeout is 30 minutes because it is a real settlement, not a
 mock.
 
+It does **not** provision. Bring a stack up with the toolkit first, then run the suite
+against it — endpoints, operator logins and Paladin identities are derived from the same
+manifests the toolkit was applied with, so nothing has to be passed by hand:
+
 ```bash
-make -C ../.. scenario-a.test-integration   # brings the stack up if it is not already running
+cd ../../samples && ./deploy-all.sh          # the single provisioning path
+make -C ../.. scenario-a.test-integration    # run against it
+make -C ../.. scenario-a.test-integration-env  # show what it would use, without running
 ```
 
-> **This test does not pass on a clean local bring-up, and that is a provisioning gap
-> rather than a defect.** Ran on 2026-08-21: `TestFullHappyPath` fails at `Phase1_Login`
-> with `{"error":"invalid credentials"}`, and phases 2–8 then fail on the dependency.
-> Phase0 passes and all five gateways answer 200 on `/healthz`, so the stack is up.
+> **It passes, from scratch, in a single pass.** Measured 2026-08-22 against a stack
+> torn down and rebuilt with `samples/deploy-all.sh --clean` (Brazil = spoke-brl,
+> Colombia = spoke-cop): all nine phases green, exit 0, 92s. `Phase2_Onboard` took 15.8s
+> doing real PKI onboarding of all four banks — no inherited state — and settlement
+> completed in the same run.
 >
-> The reason is a deliberate design decision, not a bug. Since `f55ade5b`
-> (*feat(auth): require user (password grant) login for portals*, 2026-06-30) the auth
-> service accepts **only** the OIDC password grant: portal login must be a real Keycloak
-> **user** — the per-role admin users provisioned from `spec.adminUsers` — precisely so
-> an operator cannot log in with a realm client id/secret. `client_credentials` is
-> refused on purpose.
+> Five EVM transactions land in the evidence bundle, on a chain new enough for the block
+> numbers to show it: `fx_propose` (spoke-brl, block 505), `fx_accept` (spoke-cop, block
+> 361), both HTLC locks and the origin settle. Both legs reach `SETTLED`, so the atomic
+> cross-spoke path is exercised for real. Zeto/Paladin operations appear as privacy-layer
+> ids rather than EVM txs, which is correct.
 >
-> This test predates that decision. It authenticates with the `clientId`/`clientSecret`
-> pair from `backend/config/.env.infra.*`, which is exactly the credential type the
-> decision rejects. Compounding it, `deploy/local/keycloak/init.sh` creates the clients
-> and service accounts but **no users** — realms `bank-a`, `bank-b` and `central-bank-a`
-> hold zero — so there is currently no user for the supported path to authenticate as
-> either.
+> Independently corroborated by `samples/sample-tryout.sh` on the same stack: 26 steps,
+> 44 assertions, exit 0, no warnings — cross-spoke PvP settled *and* reserve redeemed,
+> with the balance deltas checked (tCeBM −5000, fCeBM +5000).
 >
-> Ruled out along the way, so nobody repeats the search: the client secrets are correct
-> and identical to what Keycloak holds; the `.env.infra.*` files all exist (they are
-> dotfiles, so a plain `ls` hides them); the clients live in **per-entity** realms, not
-> in `cbweb3`; the auth service reaches Keycloak fine at `http://keycloak:8080` and the
-> issuer on the minted token matches what it expects; and audience enforcement is off.
-> The 401 is the password grant refusing a client credential, nothing more.
+> Two things had to change to get here, and both were configuration rather than logic:
 >
-> What would close it: provision the per-role users locally the way the toolkit does
-> from `spec.adminUsers`, then have the test log in as one. Both are decisions for whoever
-> owns the local bring-up, so this file records the state rather than guessing at a fix.
+> 1. **The 401 is gone.** The suite authenticates with the toolkit's per-role operator
+>    accounts (`spec.adminUsers`) instead of realm client credentials. Since `f55ade5b`
+>    (*require user (password grant) login for portals*) the auth service accepts only
+>    the OIDC password grant, and the login endpoint's `clientId`/`clientSecret` JSON
+>    fields are the wire contract's names, not the credential type — a username and
+>    password is exactly what belongs in them. The old `deploy/local` bring-up provisioned
+>    clients but no users, which is why this could not work there.
+> 2. **Party identities are Paladin identities.** The FX propose sent bank codes
+>    (`bank-a`, `bank-b`, `bank-d`), which the api-gateway rejected with HTTP 400
+>    *"not members of the Paladin roster"*. The roster is an exact-match list of
+>    `funded_operator@<spoke>-<bank>` strings, and the orchestrator resolves the bilateral
+>    Pente group by `{originator, counterparty}` membership, so a bank code matches
+>    neither. Spoke ids and currencies came from the same place: `spoke-a`/`spoke-b` and
+>    `USD`/`BRL` name nothing in a toolkit topology.
 
 ## The scripted end-to-end walkthroughs
 

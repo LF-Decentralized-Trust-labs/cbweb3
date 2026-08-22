@@ -1000,6 +1000,15 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 				deps.SovereignBridgeChecker = sovereignSvc
 				deps.LCRRegistrar = &lcrHandlerAdapter{c: lcrClient}
 				deps.LPPositionRepo = lpRepo // 008-fix-cb-liquidity: enable GET /liquidity/positions
+				// Same repo as a writer, so sovereign deposit-side records the CB's own
+				// position and /liquidity/remove has an lp_id to address. Deliberately
+				// paired with the reader: a gateway that cannot LIST positions must not
+				// silently WRITE them either.
+				//
+				// Both inherit this block's gate on the LiquidityCommitRegistry client —
+				// which the sovereign seeding path itself no longer uses. Worth untangling,
+				// but doing it here would restructure wiring beyond this fix.
+				deps.LPPositionWriter = lpRepo
 			}
 			// Surface a counterpart CB's on-chain PENDING commit on the opposite side
 			// (cross-CB discovery). Only meaningful for CB gateways serving pool status directly.
