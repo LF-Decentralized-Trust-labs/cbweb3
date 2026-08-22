@@ -8,8 +8,11 @@ package app
 import (
 	"context"
 	"fmt"
+	"log"
 	"math/big"
+	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -263,7 +266,74 @@ func (c *PairRegistryClient) DeployDedicatedAMM(ctx context.Context, tokenA, tok
 	if _, err := evm.WaitForReceipt(ctx, c.ec, deployTx, "deploy AMM"); err != nil {
 		return "", fmt.Errorf("pair registry: %w", err)
 	}
+
+	c.applyDefaultFee(ctx, ammAddr)
 	return ammAddr.Hex(), nil
+}
+
+// defaultAMMFeeBps is the swap fee a freshly deployed corridor AMM is configured with.
+//
+// The contract's constructor leaves feeBps at 0, and the design documents a 30 bps fee
+// distributed to liquidity providers on every swap (docs/runbooks/contract-configuration.md,
+// docs/design/cooperative-liquidity.md). Under the old single static AMM that gap did
+// not show: the pool was configured once, out of band. Now every corridor deploys its
+// own AMM at propose time, and nothing was setting the fee — so a runtime-opened
+// corridor charged nothing and its providers earned nothing.
+const defaultAMMFeeBps = 30
+
+// applyDefaultFee sets the documented swap fee on a just-deployed AMM.
+//
+// Best-effort, and loudly so. The AMM already exists on-chain by the time this runs, so
+// returning an error here would fail the propose and strand a deployed pool. A corridor
+// with no fee still settles payments — it just pays its liquidity providers nothing —
+// which is a condition to shout about, not one to abort on.
+//
+// AMM_DEFAULT_FEE_BPS overrides the default; "0" is honoured as a deliberate choice and
+// skips the call entirely, so an operator wanting a fee-less corridor gets one without a
+// misleading error in the log.
+func (c *PairRegistryClient) applyDefaultFee(ctx context.Context, amm common.Address) {
+	feeBps := defaultAMMFeeBps
+	if raw := strings.TrimSpace(os.Getenv("AMM_DEFAULT_FEE_BPS")); raw != "" {
+		parsed, perr := strconv.Atoi(raw)
+		if perr != nil || parsed < 0 {
+			log.Printf("warning: AMM_DEFAULT_FEE_BPS=%q is not a non-negative integer; using %d", raw, defaultAMMFeeBps)
+		} else {
+			feeBps = parsed
+		}
+	}
+	if feeBps == 0 {
+		log.Printf("AMM %s deployed with feeBps=0 (AMM_DEFAULT_FEE_BPS=0): liquidity providers earn nothing on this corridor", amm.Hex())
+		return
+	}
+
+	transactor, err := bindings.NewAutomatedMarketMakerTransactor(amm, c.ec)
+	if err != nil {
+		log.Printf("warning: AMM %s deployed but its fee could NOT be set (bind: %v) — feeBps stays 0 and liquidity providers earn nothing", amm.Hex(), err)
+		return
+	}
+	opts, err := c.signer.TransactOpts(ctx)
+	if err != nil {
+		log.Printf("warning: AMM %s deployed but its fee could NOT be set (opts: %v) — feeBps stays 0 and liquidity providers earn nothing", amm.Hex(), err)
+		return
+	}
+	if gasPrice, gerr := c.ec.SuggestGasPrice(ctx); gerr == nil {
+		opts.GasPrice = gasPrice
+	}
+	// Same nonce counter as every other submission from this account — the deploy above
+	// took one, and bind would otherwise read PendingNonceAt and race it.
+	tx, err := c.signer.WithNonce(ctx, c.ec, func(nonce uint64) (*types.Transaction, error) {
+		opts.Nonce = new(big.Int).SetUint64(nonce)
+		return transactor.SetFeeBps(opts, big.NewInt(int64(feeBps)))
+	})
+	if err != nil {
+		log.Printf("warning: AMM %s deployed but setFeeBps(%d) failed (%v) — feeBps stays 0 and liquidity providers earn nothing", amm.Hex(), feeBps, err)
+		return
+	}
+	if _, err := evm.WaitForReceipt(ctx, c.ec, tx, "setFeeBps"); err != nil {
+		log.Printf("warning: AMM %s setFeeBps(%d) was submitted but not confirmed (%v) — verify feeBps on-chain", amm.Hex(), feeBps, err)
+		return
+	}
+	log.Printf("AMM %s deployed with feeBps=%d", amm.Hex(), feeBps)
 }
 
 // ConfirmPair submits a confirmPair transaction.
