@@ -43,7 +43,8 @@ Recorded deviations table of that file.
 ```
 scenario-b/
   contracts/             Foundry project (FXAgreement, AutomatedMarketMaker, LiquidityCommitRegistry, HTLC, tCeBM, ZetoToken, NotoToken, IdentityRegistry)
-  backend/services/      api-gateway, auth, compliance, fx, ledger-gateway, payment-orchestrator, payments
+  backend/services/      api-gateway, auth, compliance, payment-orchestrator, noc-agent, noc-backend
+                         (fx/, ledger-gateway/, payments/ are reserved names — empty, no Go code)
   frontend/apps/         bank, governance, supervisor, treasury, noc
   interop/hub-and-spoke/ Cacti-based relay
   provisioning/          Compose templates the toolkit renders (the only bring-up path)

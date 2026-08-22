@@ -108,7 +108,7 @@ cbweb3-platform/
 │   ├── tryouts/            Per-entity demo scripts
 │   └── README.md           Scenario A detailed documentation
 └── scenario-b/             Scenario B — International Hub with FX Liquidity
-    ├── backend/            Go microservices (api-gateway, auth, compliance, fx, ledger-gateway, payment-orchestrator, payments)
+    ├── backend/            Go microservices (api-gateway, auth, compliance, payment-orchestrator, noc-agent, noc-backend)
     ├── contracts/          Solidity smart contracts (Foundry) — AMM, registries, SpokeBridge
     ├── frontend/           React applications (bank, governance, supervisor, treasury, noc)
     ├── deploy/             Docker Compose infrastructure (hub + per-spoke Besu, Keycloak, Postgres, Paladin)

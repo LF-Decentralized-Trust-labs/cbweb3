@@ -204,9 +204,9 @@ scenario-b/
 │   │   ├── auth/           gRPC auth service (Keycloak OIDC)
 │   │   ├── compliance/     gRPC compliance (KYC/AML)
 │   │   ├── payment-orchestrator/  gRPC payment, bridge, and swap orchestration
-│   │   ├── payments/       Payment domain logic
-│   │   ├── fx/             FX pricing helpers
-│   │   ├── ledger-gateway/ Blockchain RPC/WS client
+│   │   ├── payments/       (reserved name — empty)
+│   │   ├── fx/             (reserved name — empty)
+│   │   ├── ledger-gateway/ (reserved name — empty)
 │   │   ├── noc-agent/      Per-network monitoring agent
 │   │   └── noc-backend/    NOC portal backend
 │   ├── shared/             Shared Go libraries
@@ -317,9 +317,9 @@ All backend services are written in **Go** and communicate via **gRPC** internal
 | **auth** | gRPC | OIDC/JWT validation, Keycloak integration, RBAC, nonce management |
 | **compliance** | gRPC | KYC/AML checks, on-chain IdentityRegistry queries, audit logging |
 | **payment-orchestrator** | gRPC | Payment coordination, bridge position tracking (including `RECONCILIATION_REQUIRED`), relayer worker |
-| **payments** | — | Payment domain logic |
-| **fx** | — | FX pricing helpers |
-| **ledger-gateway** | — | Blockchain RPC/WS client |
+| **payments** | — | **Not implemented** — reserved directory, zero Go files |
+| **fx** | — | **Not implemented** — reserved directory, zero Go files |
+| **ledger-gateway** | — | **Not implemented** — reserved directory, zero Go files |
 | **noc-agent** | — | Per-network monitoring agent (hub, spoke-a, spoke-b) |
 | **noc-backend** | REST | NOC portal backend |
 
