@@ -94,7 +94,6 @@ cd scenario-a/backend && go test ./...
 
 # E2E flows
 ./tryouts/tryout-fx-agreement-e2e.sh
-./tryouts/tryout-escrow-flow.sh
 ./tryouts/tryout-cacti-interop.sh
 ```
 

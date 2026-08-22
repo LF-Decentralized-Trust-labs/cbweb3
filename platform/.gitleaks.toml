@@ -37,9 +37,28 @@ useDefault = true
 #               The exemption keeps the gate green over dead assets, not because
 #               the assets are worth keeping. Intended resolution: DELETE the
 #               files and shrink this allowlist. A committed private key that no
-#               live deploy path consumes is pure liability. Removal is blocked
-#               only by scenario-{a,b}/make/*.mk still referencing them; it is
-#               tracked as the follow-up to R2-11.3, not as settled state.
+#               live deploy path consumes is pure liability.
+#
+#               MEASURED CORRECTION (2026-08-21). The plan above says removal is
+#               blocked "only by scenario-{a,b}/make/*.mk still referencing
+#               them". That is wrong, and deleting the files is not enough to
+#               free the exemptions. deploy/local/ and its make targets were
+#               removed, leaving the six Besu keys and the configTemplate.json
+#               glob at zero occurrences in the tree — and dropping them turned
+#               the gate red anyway: `leaks found: 120`.
+#
+#               The reason is the second scan step. `gitleaks git .` walks all
+#               ~2024 commits, so a deleted file still leaks from history, and
+#               these value exemptions are the only thing suppressing it there.
+#               A tree-only check (git grep on HEAD) cannot tell you an
+#               exemption is dead; it answers about one of the two scans.
+#
+#               So the shrink needs one of: rewriting history (not worth it for
+#               public dev keys), or .gitleaksignore fingerprints per historical
+#               finding (file:rule:line, and the file's own note explains why
+#               those are avoided — they lapse on edit). Until then these
+#               entries stay, and the label PROVISIONAL records intent, not an
+#               action that is available today.
 #
 # When you add an entry:
 #   - prefer a value in `regexes` over a path glob. A glob exempts the file from

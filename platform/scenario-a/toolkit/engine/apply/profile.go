@@ -106,8 +106,12 @@ func LocalProfileFromExDir(exDir, dataDir string, rpcPort int) LocalProfile {
 
 	p.PaladinCBURL = envOr("CBWEB3_PALADIN_CB_URL", "http://localhost:31648")
 
+	// provisioning/paladin/scripts, not deploy/local. These scripts are consumed by the
+	// deploy-contracts and create-zeto-token steps of THIS path — they were never legacy,
+	// they just happened to live in the legacy directory. Removing that directory without
+	// moving them broke the toolkit, which is how the coupling was found.
 	p.ScriptsDir = envOr("CBWEB3_SCRIPTS_DIR",
-		filepath.Join(root, "deploy", "local", "paladin", "scripts"))
+		filepath.Join(root, "provisioning", "paladin", "scripts"))
 
 	p.ComposeTemplatePath = envOr("CBWEB3_COMPOSE_TEMPLATE",
 		filepath.Join(root, "provisioning", "templates", "central-bank", "paladin-compose.yaml"))

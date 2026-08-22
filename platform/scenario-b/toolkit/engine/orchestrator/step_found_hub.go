@@ -230,6 +230,16 @@ func (c HubConfig) buildImage(ctx context.Context, image, dockerfileRel, context
 	return buildImageIn(ctx, c.Runner, c.scenarioBDir(), image, dockerfileRel, contextRel)
 }
 
+// accessTokenLifespanSeconds caps how long an issued access token stays valid. Short on
+// purpose: a leaked token is only useful for that window, and the portals refresh
+// silently through the refresh cookie.
+//
+// This control used to live in deploy/local/keycloak/init.sh, guarded by
+// TestDeployLocalAccessTokenLifespanIsShort. That path was removed as a duplicate of the
+// toolkit, which set no lifespan at all — so the guard would have gone silently with the
+// scripts. Set here on every realm the toolkit creates.
+const accessTokenLifespanSeconds = 300
+
 // buildBackendImage builds the api-gateway image (context: scenario-b/backend).
 func (c HubConfig) buildBackendImage(ctx context.Context) error {
 	return c.buildImage(ctx, hubBackendImage, "backend/services/api-gateway/Dockerfile", "backend")
@@ -251,11 +261,12 @@ func (c HubConfig) provisionKeycloakRealm(ctx context.Context) error {
 			"(%[1]s create realms -s realm=%[4]s -s enabled=true || true) && "+
 			// Local lab HTTP: relax sslRequired so the browser-direct NOC portal
 			// password grant is not rejected with "HTTPS required" (never in prod).
-			"(%[1]s update realms/%[4]s -s sslRequired=NONE || true) && "+
+			"(%[1]s update realms/%[4]s -s sslRequired=NONE -s accessTokenLifespan=%[8]d || true) && "+
 			"(%[1]s create clients -r %[4]s -s clientId=%[5]s -s secret=%[6]s -s enabled=true "+
 			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[7]s || true) && ",
 		kc, "admin", mustInfraSecret(secretsDirOf(c.HubEnvFile), "KC_ADMIN_PASSWORD"),
-		hubKeycloakRealm, hubKeycloakClient, hubKeycloakSecret, audienceMapperArg(keycloakBackendAudience))
+		hubKeycloakRealm, hubKeycloakClient, hubKeycloakSecret, audienceMapperArg(keycloakBackendAudience),
+		accessTokenLifespanSeconds)
 	// Public noc-portal client so the hub's co-located NOC portal can password-grant
 	// against this realm (hub NOC operator users are a separate follow-up — found-hub
 	// does not yet provision operator accounts).

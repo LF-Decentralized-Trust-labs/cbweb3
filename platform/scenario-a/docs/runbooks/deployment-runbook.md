@@ -1,5 +1,28 @@
 # Deployment Runbook — CBWeb3 Platform
 
+> ### O caminho `deploy/local` foi removido
+>
+> Este runbook ainda descreve, em várias seções, a subida por `make deploy.up-*`,
+> `make dev.up-<entidade>` e `make spoke-all`. **Esses alvos não existem mais.** O
+> caminho legado `deploy/local` foi removido porque duplicava o toolkit e ficava atrás
+> dele: o pino do Besu nunca chegou lá, e credenciais por entidade e senha no Redis só
+> chegaram porque uma PR tocou as duas árvores de propósito.
+>
+> A única forma de subir um stack agora é o toolkit:
+>
+> ```bash
+> cd samples && ./deploy-all.sh
+> ```
+>
+> Os alvos que agem SOBRE um stack em execução seguem valendo — contratos, tryouts,
+> baselines de performance, evidência, testes. O que mudou é quem cria o stack. Os
+> valores padrão de porta desses alvos ainda apontam para o stack removido; passe as
+> URLs do toolkit explicitamente até a migração daqueles alvos.
+>
+> As seções abaixo que instruem a usar os alvos removidos estão desatualizadas e serão
+> reescritas em trabalho próprio — este aviso existe para que ninguém siga instrução
+> morta no meio do caminho.
+
 > **Deliverable 9** · CBDC System Deployment
 
 This runbook describes the complete procedure for bringing up the CBWeb3 environment, from prerequisites through operational endpoint verification.
@@ -372,9 +395,7 @@ Per-entity scripts:
 
 ```bash
 ./tryouts/tryout-spoke-a-bank-a.sh   # Onboarding + payment Bank-A
-./tryouts/tryout-spoke-a-bank-c.sh   # Onboarding + payment Bank-C
 ./tryouts/tryout-spoke-b-bank-b.sh   # Onboarding + payment Bank-B
-./tryouts/tryout-spoke-b-bank-d.sh   # Onboarding + payment Bank-D
 ```
 
 ---

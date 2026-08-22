@@ -152,7 +152,10 @@ The table below is derived from the script dispatcher (`tryouts/tryout-scenario-
 | **US5** | `us5` | Bilateral PairRegistry propose + rejection tests + confirm | Implemented |
 | **US6** | `us6` | CurrencyRegistry register / list / reject duplicates / remove (skipped when `CURRENCY_REGISTRY_CONTRACT_ADDRESS` is unset) | Implemented |
 
-The commercial-bank cross-currency swap is not one of these numbered stories; it has its own script, `tryouts/tryout-commercial-swap-e2e.sh` (see also `tryout-cross-currency-full-lifecycle.sh`). See [`tests/TEST-CATALOG.md`](tests/TEST-CATALOG.md) for the full, per-test status inventory.
+The commercial-bank cross-currency swap is not one of these numbered stories. It is driven
+end to end by `samples/sample-tryout.sh` (bridge-in → sovereign AMM → bridge-out, plus the
+asynchronous residue return), which replaced the separate swap and lifecycle scripts that
+targeted the retired deploy/local topology.
 
 ---
 
@@ -398,8 +401,6 @@ E2E walkthroughs and per-flow demos live under `tryouts/`, including:
 
 ```bash
 bash tryouts/tryout-scenario-b-e2e.sh all          # US1/US2/US3/US5/US6 walkthrough
-bash tryouts/tryout-commercial-swap-e2e.sh         # commercial-bank swap flow
-bash tryouts/tryout-cross-currency-full-lifecycle.sh
 bash tryouts/tryout-cacti-interop.sh               # relay interop
 ```
 

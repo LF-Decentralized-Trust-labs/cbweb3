@@ -11,8 +11,16 @@ proto-gen:
 proto-lint:
 	@cd apis/proto && buf lint
 
+# The git input is resolved relative to the CWD, so it must name the REPOSITORY root
+# (three levels up from apis/proto) plus the subdir holding the module — pointing at a
+# bare `.git` from inside apis/proto made buf try to clone apis/proto/.git, which does
+# not exist, and git answered with its generic "correct access rights" message.
+#
+# The baseline is develop, not main: main carries ZERO .proto files (the whole API layer
+# landed on develop and has never been merged), so comparing against it could not detect
+# a break — there was no prior API there to break.
 proto-breaking:
-	@cd apis/proto && buf breaking --against '.git#branch=main'
+	@cd apis/proto && buf breaking --against '../../../.git#branch=develop,subdir=scenario-a/apis/proto'
 
 # ── Solidity contracts ────────────────────────────────────────────────────────
 contracts.setup:
@@ -100,7 +108,7 @@ contracts.register-participants: contracts.register-participants-spoke-a contrac
 contracts.deploy-cbweb3-besu: contracts.deploy-hub
 
 contracts.sync-addresses:
-	@./deploy/local/tools/sync-contracts.sh
+	@./tools/sync-contracts.sh
 
 contracts.deploy-all-with-sync: contracts.deploy-all contracts.sync-addresses contracts.register-participants
 

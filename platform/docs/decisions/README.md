@@ -14,11 +14,37 @@ plano de implementação, esforço/cronograma e tabela de Status / Sign-off.
 | [ADR-003](ADR-003-privacidade-no-hub.md) | Privacidade no hub do Scenario B | 9.2 | Proposto |
 | [ADR-004](ADR-004-ambiente-de-staging.md) | Ambiente de staging (topologia e caminho para produção) | 12.5 | Proposto |
 | ADR-005 (a abrir) | Escalabilidade N-spoke do Scenario A (A-ARCH-1) | A-ARCH-1 / T-P1-15 | A abrir — promover `docs/scenario-a-n-spoke-scalability-plan.md` |
+| [ADR-006](ADR-006-isolamento-de-rede-do-hub.md) | Isolamento de rede do hub do Scenario B | R1-11.4 | Aceito e implementado |
+| [ADR-007](ADR-007-rebase-de-chain-ids.md) | Rebase dos chain IDs (80000+ → 1337+) | R1-11.4 | Aceito; coordenação LNET pendente |
+| [ADR-008](ADR-008-sessao-por-cookie-nos-portais.md) | Sessão por cookie HttpOnly nos portais | R1-11.4 | Aceito e implementado |
 
 > **ADR-005 é bloqueante para a Wave 3.** T-P1-15 (A-ARCH-1) gate T-P1-16 e T-P1-19.
 > O documento `docs/scenario-a-n-spoke-scalability-plan.md` é um plano de design
 > sólido, mas ainda é um rascunho de time (sem opções, recomendação nem status de
 > sign-off); deve ser promovido para este diretório como ADR-005 na mesma estrutura.
+
+## ADRs retrospectivos (006 a 008)
+
+Os ADRs 001 a 004 são **propostas** aguardando sign-off. Os 006 a 008 são **registros
+retrospectivos**: documentam decisão já tomada e implementada, escritos porque o finding
+R1-11.4 apontou que decisões estruturais da plataforma não tinham ADR. Decisão
+implementada sem registro é indistinguível de acidente para quem chega depois.
+
+Por isso a estrutura deles difere: não há "recomendação a aprovar", há decisão em vigor,
+as alternativas que existiam no momento, e as consequências — inclusive as ruins. Onde
+resta dependência externa (acordo com a LNET no ADR-007) ou lacuna de desenho (defesa
+CSRF no ADR-008), está declarada em vez de omitida.
+
+Duas das cinco decisões que o R1-11.4 nomeia **já estavam cobertas** e não geraram ADR
+novo: `Zeto_Anon` e a não-adoção do Noto, ambas decididas no
+[ADR-001](ADR-001-privacidade-vs-auditabilidade.md), cuja Opção B (implementar o domínio
+Noto) foi explicitamente rejeitada em favor de Zeto com encryption-to-authority.
+
+## Índice de viewpoints
+
+O outro item do R1-11.4 — índice de viewpoints IEEE 1016 / ISO 42010 — está em
+[`../architecture/viewpoints.md`](../architecture/viewpoints.md), que mapeia stakeholder →
+preocupação → viewpoint → documento existente, e declara as lacunas que restam.
 
 ## Nota de escopo de numeração
 

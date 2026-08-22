@@ -1,5 +1,28 @@
 # Deployment Runbook — CBWeb3 Platform · Scenario B
 
+> ### O caminho `deploy/local` foi removido
+>
+> Este runbook ainda descreve, em várias seções, a subida por `make deploy.up-*`,
+> `make dev.up-<entidade>` e `make spoke-all`. **Esses alvos não existem mais.** O
+> caminho legado `deploy/local` foi removido porque duplicava o toolkit e ficava atrás
+> dele: o pino do Besu nunca chegou lá, e credenciais por entidade e senha no Redis só
+> chegaram porque uma PR tocou as duas árvores de propósito.
+>
+> A única forma de subir um stack agora é o toolkit:
+>
+> ```bash
+> cd samples && ./deploy-all.sh
+> ```
+>
+> Os alvos que agem SOBRE um stack em execução seguem valendo — contratos, tryouts,
+> baselines de performance, evidência, testes. O que mudou é quem cria o stack. Os
+> valores padrão de porta desses alvos ainda apontam para o stack removido; passe as
+> URLs do toolkit explicitamente até a migração daqueles alvos.
+>
+> As seções abaixo que instruem a usar os alvos removidos estão desatualizadas e serão
+> reescritas em trabalho próprio — este aviso existe para que ninguém siga instrução
+> morta no meio do caminho.
+
 > **Project:** RG-T4567 · Suboperation ATN/KS-21330-RG
 > **Authors:** Lucas Campelo, Samuel Venzi
 > **Date:** 2026-05-29
@@ -1123,9 +1146,8 @@ bash tryouts/tryout-scenario-b-e2e.sh us2   # MLP bilateral liquidity
 bash tryouts/tryout-scenario-b-e2e.sh us3   # commercial bank cross-currency swap
 bash tryouts/tryout-scenario-b-e2e.sh us5   # PairRegistry bilateral approval
 
-# Additional scenario scripts
-bash tryouts/tryout-commercial-swap-e2e.sh
-bash tryouts/tryout-cross-currency-full-lifecycle.sh
+# The full commercial-bank path (corridor → liquidity → tokenisation → swap → redeem)
+cd samples && ./sample-tryout.sh
 ```
 
 To skip the `make scenario-b.up` step if the stack is already running:
