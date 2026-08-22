@@ -294,8 +294,11 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"HUB_WS_PORT":          itoa(c.WSPort),
 		"HUB_P2P_PORT":         itoa(c.P2PPort),
 		// shared entity vars (infra/keycloak/backend/frontend/noc)
-		"CONTAINER_PREFIX":     c.ContainerPrefix,
-		"ENTITY":               "hub",
+		"CONTAINER_PREFIX": c.ContainerPrefix,
+		"ENTITY":           "hub",
+		// The hub is a single institution, so its own code is fixed. Participants registered on
+		// the hub registry carry THEIR institution's code, not this one.
+		"INSTITUTION_CODE":     "hub",
 		"ENTITY_NET_PREFIX":    c.NetPrefix,
 		"ENTITY_VOLUME_PREFIX": c.VolumePrefix,
 		"ENTITY_RPC_PORT":      itoa(c.RPCPort),

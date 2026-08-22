@@ -427,3 +427,43 @@ func TestJoinComposeEnvNeverInheritsEnforcement(t *testing.T) {
 	}
 	t.Fatal("RELAY_REQUIRE_SIGNATURE is not set at all on a bank — it would inherit the operator's export")
 }
+
+// ── Institution identity (R2-H-4) ────────────────────────────────────────────
+
+// The institution code is what the services hash into the on-chain institutionId, and the AMM
+// circuit-breaker resume quorum counts distinct institutions. If two central banks resolve the
+// same code they become one institution to the contract, the 2-of-N can never be met, and a
+// paused AMM stays paused. This is the same trap RELAY_KEY_ID exists to avoid, one layer down.
+func TestInstitutionCodeDiffersBetweenCentralBanks(t *testing.T) {
+	br := SpokeConfig{SpokeID: "spoke-brl", RPCPort: 33645, InstitutionCode: "central-bank-brazil"}
+	ar := SpokeConfig{SpokeID: "spoke-ars", RPCPort: 33745, InstitutionCode: "central-bank-argentina"}
+	if br.institutionCode() == ar.institutionCode() {
+		t.Fatalf("both central banks resolved the institution code %q", br.institutionCode())
+	}
+}
+
+func TestInstitutionCodeFallsBackToTheSpokeID(t *testing.T) {
+	c := SpokeConfig{SpokeID: "spoke-brl", RPCPort: 33645}
+	if got := c.institutionCode(); got != "spoke-brl" {
+		t.Fatalf("fallback institution code = %q, want spoke-brl", got)
+	}
+}
+
+// INSTITUTION_CODE must reach the compose env, and must never equal ENTITY — that is the
+// topology role, identical on every central bank.
+func TestComposeEnvCarriesAnInstitutionCodeDistinctFromTheRole(t *testing.T) {
+	c := SpokeConfig{
+		SpokeID: "spoke-brl", RPCPort: 33645, Entity: "central-bank",
+		InstitutionCode: "central-bank-brazil",
+	}
+	env := envMap(c.ComposeEnv())
+	if env["INSTITUTION_CODE"] != "central-bank-brazil" {
+		t.Fatalf("INSTITUTION_CODE = %q, want central-bank-brazil", env["INSTITUTION_CODE"])
+	}
+	if env["INSTITUTION_CODE"] == env["ENTITY"] {
+		t.Fatalf("the institution code must differ from ENTITY (%q), which is the role", env["ENTITY"])
+	}
+	if env["INSTITUTION_CODE"] == env["BANK_CODE"] {
+		t.Fatal("the institution code must differ from BANK_CODE, which the template sets to the role")
+	}
+}

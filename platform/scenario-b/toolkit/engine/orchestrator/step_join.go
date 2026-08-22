@@ -297,9 +297,14 @@ func (c JoinConfig) ComposeEnv() []string {
 	}
 	vars := map[string]string{
 		// besu (join template)
-		"BESU_IMAGE":           c.BesuImage,
-		"CONTAINER_PREFIX":     c.ContainerPrefix,
-		"ENTITY":               c.Entity,
+		"BESU_IMAGE":       c.BesuImage,
+		"CONTAINER_PREFIX": c.ContainerPrefix,
+		"ENTITY":           c.Entity,
+		// Institution identity for on-chain participant registration (institutionId =
+		// keccak256(INSTITUTION_CODE)). On a bank ENTITY is already the bank id and therefore
+		// unique, unlike on a central bank where it is the role — passed explicitly so the
+		// services never have to fall back to BANK_CODE and guess which shape it has.
+		"INSTITUTION_CODE":     c.Entity,
 		"ENTITY_NET_PREFIX":    c.NetPrefix,
 		"ENTITY_VOLUME_PREFIX": c.VolumePrefix,
 		"ENTITY_RPC_PORT":      itoa(c.RPCPort),

@@ -58,14 +58,31 @@ func EnsureGovernanceParticipant(
 	if ca != nil {
 		certPEM = ca.CertPEM()
 	}
+	// Resolve this institution's code once. The persisted record and the on-chain institutionId
+	// must derive from the same value: reading it twice with divergent defaults would let the
+	// database and the chain disagree about which institution this wallet belongs to, and the AMM
+	// resume quorum trusts the chain's answer.
+	//
+	// BANK_CODE cannot serve as that value here — the compose template sets it to the entity ROLE,
+	// so every central bank carries "central-bank" and all of them would hash to ONE institution.
+	// Two central banks would then be unable to form the 2-of-N resume quorum at all.
+	const institutionName = "Banco Central"
+	institutionCode, unique := registry.InstitutionCodeFromEnv(os.Getenv)
+	if !unique {
+		log.Printf("bootstrap: WARNING institution code %q came from BANK_CODE, which is the entity "+
+			"role and is shared by every entity of that role; set INSTITUTION_CODE to this entity's "+
+			"unique id or the AMM resume quorum will treat these central banks as one institution",
+			institutionCode)
+	}
+
 	if err := repo.UpsertParticipant(ctx, repository.Participant{
 		UserID:          userID,
-		InstitutionName: "Banco Central",
+		InstitutionName: institutionName,
 		Role:            "ROLE_GOVERNANCE",
 		Status:          "ACTIVE",
 		WalletAddress:   walletAddr,
 		CertificateData: certPEM,
-		BankCode:        getEnv("GOVERNANCE_BANK_CODE", ""),
+		BankCode:        institutionCode,
 	}); err != nil {
 		return fmt.Errorf("bootstrap: upsert governance participant: %w", err)
 	}
@@ -74,7 +91,11 @@ func EnsureGovernanceParticipant(
 	// (R1-10.6 / R2-10.6): registerParticipant alone would leave the CB in Pending, so canGovern
 	// would be false and every FXAgreement governance call would revert. EnsureVerifiedParticipant
 	// completes the Pending->Verified promotion and is idempotent across restarts (no demotion).
-	if _, err := registry.EnsureVerifiedParticipant(ctx, bc, walletAddr, "Banco Central", "ROLE_GOVERNANCE", [32]byte{}); err != nil {
+	// The institutionId source is the same one every other registration path uses.
+	if _, err := registry.EnsureVerifiedParticipant(
+		ctx, bc, walletAddr, institutionName, "ROLE_GOVERNANCE", [32]byte{},
+		registry.InstitutionIDForParticipant(institutionCode, institutionName),
+	); err != nil {
 		log.Printf("bootstrap: on-chain register+verify failed (non-fatal): %v", err)
 	}
 

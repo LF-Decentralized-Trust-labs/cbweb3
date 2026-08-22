@@ -7,6 +7,7 @@ import {AutomatedMarketMaker} from "../src/AutomatedMarketMaker.sol";
 import {IAutomatedMarketMaker} from "../src/interfaces/IAutomatedMarketMaker.sol";
 import {TokenizedCentralBankMoney} from "../src/TokenizedCentralBankMoney.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IIdentityRegistry} from "../src/interfaces/IIdentityRegistry.sol";
 import {IdentityRegistryLibrary} from "../src/libraries/IdentityRegistryLibrary.sol";
 import {DeployAMM} from "../script/AutomatedMarketMaker.s.sol";
 import {IERC20Errors} from "@openzeppelin-contracts/interfaces/draft-IERC6093.sol";
@@ -40,23 +41,43 @@ contract AutomatedMarketMakerTest is Test {
         identityRegistry = new IdentityRegistry(admin);
         vm.startPrank(admin);
         identityRegistry.registerParticipant(
-            liquidityProvider, "LP Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+            liquidityProvider,
+            "LP Bank",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            bytes32("inst-liquidityProvider")
         );
         identityRegistry.verifyParticipant(liquidityProvider);
         identityRegistry.registerParticipant(
-            swapper, "Commercial Bank A", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+            swapper,
+            "Commercial Bank A",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            bytes32("inst-swapper")
         );
         identityRegistry.verifyParticipant(swapper);
         identityRegistry.registerParticipant(
-            governanceA, "Central Bank A", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            governanceA,
+            "Central Bank A",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-governanceA")
         );
         identityRegistry.verifyParticipant(governanceA);
         identityRegistry.registerParticipant(
-            governanceB, "Central Bank B", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            governanceB,
+            "Central Bank B",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-governanceB")
         );
         identityRegistry.verifyParticipant(governanceB);
         identityRegistry.registerParticipant(
-            governanceC, "Central Bank C", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            governanceC,
+            "Central Bank C",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-governanceC")
         );
         identityRegistry.verifyParticipant(governanceC);
         vm.stopPrank();
@@ -662,6 +683,160 @@ contract AutomatedMarketMakerTest is Test {
         amm.proposeResume();
     }
 
+    // ---------- Institution-keyed quorum (R2-H-4) ----------
+
+    /// @dev Registers a second governance wallet for an institution that is ALREADY registered,
+    ///      reusing its institution code. This is the shape the quorum has to survive: not an
+    ///      attacker, but one central bank that legitimately runs two governance keys.
+    function _registerSibling(address wallet, string memory legalName, bytes32 institutionId) private {
+        vm.startPrank(admin);
+        identityRegistry.registerParticipant(
+            wallet, legalName, IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0), institutionId
+        );
+        identityRegistry.verifyParticipant(wallet);
+        vm.stopPrank();
+    }
+
+    function test_Revert_Resume_SecondKeyOfSameInstitution_CannotFormQuorum() public {
+        address governanceASibling = makeAddr("governanceASibling");
+        _registerSibling(governanceASibling, "Central Bank A (second key)", bytes32("inst-governanceA"));
+
+        vm.prank(governanceA);
+        amm.pause("incident");
+        vm.prank(governanceA);
+        bytes32 proposalId = amm.proposeResume();
+
+        // Both wallets pass onlyGovernance and are distinct addresses, so the address-keyed check
+        // lets this through. The institution check is the only thing standing between one central
+        // bank and a self-served resume.
+        vm.prank(governanceASibling);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAutomatedMarketMaker.AMM__InstitutionAlreadySigned.selector, proposalId, bytes32("inst-governanceA")
+            )
+        );
+        amm.signResume(proposalId);
+
+        assertTrue(amm.isPaused(), "one institution must not resume on its own");
+        assertEq(amm.resumeSignatures(proposalId), 1, "the refused signature must not be counted");
+
+        // A genuinely different institution still completes the quorum.
+        vm.prank(governanceB);
+        amm.signResume(proposalId);
+        assertFalse(amm.isPaused(), "two distinct institutions resume normally");
+    }
+
+    /// @dev The mirror case: the sibling proposes and the original key tries to complete. Order must
+    ///      not matter — otherwise the control is only half present.
+    function test_Revert_Resume_SiblingKeyProposes_OriginalKeyCannotComplete() public {
+        address governanceASibling = makeAddr("governanceASibling");
+        _registerSibling(governanceASibling, "Central Bank A (second key)", bytes32("inst-governanceA"));
+
+        vm.prank(governanceASibling);
+        amm.pause("incident");
+        vm.prank(governanceASibling);
+        bytes32 proposalId = amm.proposeResume();
+
+        vm.prank(governanceA);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAutomatedMarketMaker.AMM__InstitutionAlreadySigned.selector, proposalId, bytes32("inst-governanceA")
+            )
+        );
+        amm.signResume(proposalId);
+        assertTrue(amm.isPaused(), "still paused");
+    }
+
+    /// @dev A governance wallet whose registry entry carries no institution id cannot vote at all.
+    ///      Counting it would admit bytes32(0) as an institution, and every such wallet shares that
+    ///      value — two of them would form a quorum as one "institution".
+    ///
+    ///      Reaching this state needs a registry read that returns zero for a wallet canGovern() still
+    ///      accepts, which is exactly the shape of a chain provisioned BEFORE this change: those
+    ///      participants were stored under the 4-argument registerParticipant and hold no id. The read
+    ///      is mocked rather than staged through the registry because the registry now refuses to
+    ///      create such a participant at all — see the migration note in the deployment runbook.
+    function test_Revert_Resume_SignerWithZeroInstitutionId() public {
+        vm.prank(governanceA);
+        amm.pause("incident");
+        vm.prank(governanceA);
+        bytes32 proposalId = amm.proposeResume();
+
+        vm.mockCall(
+            address(identityRegistry),
+            abi.encodeWithSelector(IIdentityRegistry.getInstitutionId.selector, governanceB),
+            abi.encode(bytes32(0))
+        );
+
+        vm.prank(governanceB);
+        vm.expectRevert(abi.encodeWithSelector(IAutomatedMarketMaker.AMM__InvalidInstitutionId.selector, governanceB));
+        amm.signResume(proposalId);
+
+        vm.clearMockedCalls();
+        assertTrue(amm.isPaused(), "an unattributable signature must not resume the AMM");
+    }
+
+    // ---------- Epoch binding (R2-H-2, never ported to Scenario B until now) ----------
+
+    /// @dev A proposal abandoned during one incident must not be usable to lift a later one. Without
+    ///      the epoch stamp, the signature gathered under pause #1 combines with a single fresh
+    ///      signature under pause #2 and resumes on one live act instead of two.
+    function test_Revert_Resume_ProposalFromAnEarlierPauseEpoch() public {
+        vm.prank(governanceA);
+        amm.pause("incident one");
+        uint256 firstEpoch = amm.pauseEpoch();
+
+        // Abandoned: proposed under pause #1, never signed to quorum.
+        vm.prank(governanceA);
+        bytes32 staleProposal = amm.proposeResume();
+
+        // Pause #1 is lifted by a proper 2-of-N on a different proposal.
+        vm.prank(governanceB);
+        bytes32 liveProposal = amm.proposeResume();
+        vm.prank(governanceC);
+        amm.signResume(liveProposal);
+        assertFalse(amm.isPaused(), "pause one lifted by two institutions");
+
+        // Second incident: the stale proposal must be refused, not counted.
+        vm.prank(governanceA);
+        amm.pause("incident two");
+        assertEq(amm.pauseEpoch(), firstEpoch + 1, "each pause opens a new epoch");
+
+        vm.prank(governanceB);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAutomatedMarketMaker.AMM__ProposalExpired.selector, staleProposal, firstEpoch, firstEpoch + 1
+            )
+        );
+        amm.signResume(staleProposal);
+        assertTrue(amm.isPaused(), "a superseded proposal cannot lift the current pause");
+    }
+
+    function test_Resume_FreshProposalPerPauseEpoch_Works() public {
+        vm.prank(governanceA);
+        amm.pause("incident one");
+        vm.prank(governanceA);
+        bytes32 first = amm.proposeResume();
+        vm.prank(governanceB);
+        amm.signResume(first);
+        assertFalse(amm.isPaused());
+
+        // A new block: proposalId is keccak256(proposer, block.number, block.timestamp), so the same
+        // proposer proposing twice in one block would collide with the first proposal rather than
+        // create a second one.
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
+
+        vm.prank(governanceA);
+        amm.pause("incident two");
+        vm.prank(governanceA);
+        bytes32 second = amm.proposeResume();
+        assertTrue(second != first, "a fresh pause must yield a fresh proposal id");
+        vm.prank(governanceB);
+        amm.signResume(second);
+        assertFalse(amm.isPaused(), "a fresh proposal per pause resumes normally");
+    }
+
     // ---------- Constructor ----------
 
     function test_Revert_Constructor_ZeroAddressTokenA() public {
@@ -780,7 +955,11 @@ contract AutomatedMarketMakerTest is Test {
         whale = makeAddr("whale");
         vm.startPrank(admin);
         identityRegistry.registerParticipant(
-            whale, "Whale Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+            whale,
+            "Whale Bank",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            bytes32("inst-whale")
         );
         identityRegistry.verifyParticipant(whale);
         vm.stopPrank();

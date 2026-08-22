@@ -460,7 +460,7 @@ func TestOnboardParticipant(t *testing.T) {
 		}}
 		var verifiedWallet string
 		bc := &fakeRegistry{
-			registerFn: func(_ context.Context, wallet, _, _ string, _ [32]byte) (string, error) {
+			registerFn: func(_ context.Context, wallet, _, _ string, _, _ [32]byte) (string, error) {
 				if wallet != "0xWALLET" {
 					t.Fatalf("wallet=%q", wallet)
 				}
@@ -490,7 +490,7 @@ func TestOnboardParticipant(t *testing.T) {
 			return kms.KeyInfo{Address: "0xW"}, nil
 		}}
 		bc := &fakeRegistry{
-			registerFn: func(_ context.Context, _, _, _ string, _ [32]byte) (string, error) { return "0xTX", nil },
+			registerFn: func(_ context.Context, _, _, _ string, _, _ [32]byte) (string, error) { return "0xTX", nil },
 			verifyFn:   func(_ context.Context, _ string) (string, error) { return "", errors.New("verify revert") },
 		}
 		_, err := svc(fullKC(), nil, k, bc, nil, "").OnboardParticipant(ctx, &authv1.OnboardParticipantRequest{
@@ -513,7 +513,7 @@ func TestOnboardParticipant(t *testing.T) {
 		k := &fakeKMS{createKeyFn: func(_ context.Context, _ string) (kms.KeyInfo, error) {
 			return kms.KeyInfo{Address: "0xW"}, nil
 		}}
-		bc := &fakeRegistry{registerFn: func(_ context.Context, _, _, _ string, _ [32]byte) (string, error) {
+		bc := &fakeRegistry{registerFn: func(_ context.Context, _, _, _ string, _, _ [32]byte) (string, error) {
 			return "", errors.New("revert")
 		}}
 		_, err := svc(fullKC(), nil, k, bc, nil, "").OnboardParticipant(ctx, &authv1.OnboardParticipantRequest{

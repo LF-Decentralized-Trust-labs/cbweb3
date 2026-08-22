@@ -43,7 +43,7 @@ func TestNoopRegistryClient(t *testing.T) {
 
 	zeroHash := "0x0000000000000000000000000000000000000000000000000000000000000000"
 
-	if h, err := c.RegisterParticipant(ctx, "0x1", "n", "r", [32]byte{}); err != nil || h != zeroHash {
+	if h, err := c.RegisterParticipant(ctx, "0x1", "n", "r", [32]byte{}, [32]byte{1}); err != nil || h != zeroHash {
 		t.Errorf("RegisterParticipant: %q %v", h, err)
 	}
 	if h, err := c.UpdateStatus(ctx, "0x1", 2); err != nil || h != zeroHash {

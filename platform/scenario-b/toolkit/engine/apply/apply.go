@@ -129,7 +129,7 @@ func applyObserve(ctx context.Context, o Options, pd *manifest.ParticipantDeploy
 		KeycloakURL:     manifestNOCKeycloakURL(pd),   // portal VITE_KEYCLOAK_URL (CB/hub realm)
 		LauncherURL:     manifestNOCLauncherURL(pd),   // portal VITE_LAUNCHER_URL (back-to-launcher)
 		AMMGatewayURL:   manifestNOCAMMGatewayURL(pd), // backend AMM_GATEWAY_URL (Pool Stability)
-		ProxyEnabled:    pd.Spec.Proxy == "enable",  // serve portal + backend under the per-host proxy
+		ProxyEnabled:    pd.Spec.Proxy == "enable",    // serve portal + backend under the per-host proxy
 		// BackendPort/PortalPort fall back to the local convention in WithDefaults;
 		// spec.noc may carry explicit ports in a later phase.
 	}
@@ -218,7 +218,10 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		Entity:          firstNonEmpty(pd.Spec.Topology.Role, "central-bank"),
 		// The manifest name is unique by construction (the container prefix is built from it),
 		// which the topology role is not — every central bank shares the role "central-bank".
-		RelayKeyID:          prefix,
+		RelayKeyID: prefix,
+		// Same reasoning as RelayKeyID: the institution id must be unique per central bank, and
+		// the topology role is not. Every wallet this CB registers is stamped with this code.
+		InstitutionCode:     prefix,
 		RPCPort:             rpcPort,
 		WSPort:              wsPort,
 		P2PPort:             p2pPort,
@@ -346,34 +349,34 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 	rpcPort, wsPort, p2pPort := nodePorts(pd.Spec.Node)
 	prefix := sanitizePrefix(pd.Metadata.Name) // e.g. "bank-itau"
 	cfg := orchestrator.JoinConfig{
-		TemplatesDir:    filepath.Join(root, "scenario-b", "provisioning", "templates"),
-		OutDir:          outDir,
-		BankID:          pd.Spec.BankID,
-		Institution:     firstNonEmpty(pd.Spec.DisplayName, pd.Spec.BankID),
-		SpokeID:         pd.Spec.Spoke.ID,
-		SpokeChainID:    uint64(pd.Spec.Spoke.ChainID),
-		Currency:        pd.Spec.Spoke.Currency,                       // cross-checked against the spoke bundle in consume-spoke-bundle
-		BankRPC:         firstNonEmpty(o.SpokeRPC, localRPC(rpcPort)), // RPC of the bank's own node (wait-sync gate)
-		SpokeBundlePath: bundlePath,
-		DataDir:         dataDir,
-		BankEnvFile:     filepath.Join(dataDir, ".env.bank"),
-		KeycloakEnv:     []string{filepath.Join(dataDir, ".env.bank")},
-		VolumePrefix:    prefix,
-		ContainerPrefix: "sc-b-cbweb3-" + prefix,
-		NetPrefix:       prefix,
-		Entity:          prefix,
-		RPCPort:         rpcPort,
-		WSPort:          wsPort,
-		P2PPort:         p2pPort,
-		HubRPC:          firstNonEmpty(o.HubRPC, sb.HubRPC), // routable hub RPC from the spoke bundle
-		RelayEndpoint:      manifestRelayEndpoint(pd),      // the relay's own REST endpoint → CACTI_API_URL
-		RelayContainerName: manifestRelayContainerName(pd), // relay container for noc-agent log collection
-		NOCBackendURL:      manifestNOCBackendURL(pd),      // where this bank's noc-agent pushes
-		FrontendHost:    pd.Spec.FrontendHost,
-		LauncherEnabled: pd.Spec.Launcher == "enable",
-		LauncherPort:    pd.Spec.LauncherPort,
-		AdminUsers:      toOrchestratorAdminUsers(pd.Spec.AdminUsers),
-		ProxyEnabled:    pd.Spec.Proxy == "enable",
+		TemplatesDir:       filepath.Join(root, "scenario-b", "provisioning", "templates"),
+		OutDir:             outDir,
+		BankID:             pd.Spec.BankID,
+		Institution:        firstNonEmpty(pd.Spec.DisplayName, pd.Spec.BankID),
+		SpokeID:            pd.Spec.Spoke.ID,
+		SpokeChainID:       uint64(pd.Spec.Spoke.ChainID),
+		Currency:           pd.Spec.Spoke.Currency,                       // cross-checked against the spoke bundle in consume-spoke-bundle
+		BankRPC:            firstNonEmpty(o.SpokeRPC, localRPC(rpcPort)), // RPC of the bank's own node (wait-sync gate)
+		SpokeBundlePath:    bundlePath,
+		DataDir:            dataDir,
+		BankEnvFile:        filepath.Join(dataDir, ".env.bank"),
+		KeycloakEnv:        []string{filepath.Join(dataDir, ".env.bank")},
+		VolumePrefix:       prefix,
+		ContainerPrefix:    "sc-b-cbweb3-" + prefix,
+		NetPrefix:          prefix,
+		Entity:             prefix,
+		RPCPort:            rpcPort,
+		WSPort:             wsPort,
+		P2PPort:            p2pPort,
+		HubRPC:             firstNonEmpty(o.HubRPC, sb.HubRPC), // routable hub RPC from the spoke bundle
+		RelayEndpoint:      manifestRelayEndpoint(pd),          // the relay's own REST endpoint → CACTI_API_URL
+		RelayContainerName: manifestRelayContainerName(pd),     // relay container for noc-agent log collection
+		NOCBackendURL:      manifestNOCBackendURL(pd),          // where this bank's noc-agent pushes
+		FrontendHost:       pd.Spec.FrontendHost,
+		LauncherEnabled:    pd.Spec.Launcher == "enable",
+		LauncherPort:       pd.Spec.LauncherPort,
+		AdminUsers:         toOrchestratorAdminUsers(pd.Spec.AdminUsers),
+		ProxyEnabled:       pd.Spec.Proxy == "enable",
 	}
 	cfg.WithDefaults()
 	if o.DryRun {

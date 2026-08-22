@@ -14,6 +14,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/complianceclient"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/keycloak"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
 	pki "github.com/LACNetNetworks/cbweb3-platform/backend/shared/identity"
 	authv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/auth/v1"
 	"google.golang.org/grpc/codes"
@@ -224,7 +225,12 @@ func (s *identityService) CompleteOnboarding(ctx context.Context, req *authv1.Co
 		// verifyParticipant (VERIFIER_ROLE) promotes it to Verified so it can transact. Without
 		// the verify step the just-onboarded bank would be left Pending and every downstream
 		// onlyVerified/canGovern check (HTLC.lock, FXAgreement) would revert.
-		hash, chainErr := s.blockchainClient.RegisterParticipant(ctx, participant.WalletAddress, participant.InstitutionName, participant.Role, [32]byte{})
+		// The institutionId comes from the participant's bank code, which is the identity every
+		// wallet of one institution shares — see registry.InstitutionIDForParticipant. It is what
+		// lets the AMM resume quorum count institutions instead of keys, so a bank onboarding a
+		// second wallet for itself must reuse the same code rather than invent one.
+		institutionID := registry.InstitutionIDForParticipant(participant.BankCode, participant.InstitutionName)
+		hash, chainErr := s.blockchainClient.RegisterParticipant(ctx, participant.WalletAddress, participant.InstitutionName, participant.Role, [32]byte{}, institutionID)
 		if chainErr != nil {
 			return nil, status.Errorf(codes.Internal, "complete onboarding: on-chain registration: %v", chainErr)
 		}

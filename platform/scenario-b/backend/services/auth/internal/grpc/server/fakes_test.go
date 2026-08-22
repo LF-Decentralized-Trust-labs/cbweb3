@@ -239,16 +239,20 @@ func (f *fakeNonce) GetAndDelete(ctx context.Context, userID string) (string, bo
 // ---------------------------------------------------------------------------
 
 type fakeRegistry struct {
-	registerFn    func(ctx context.Context, wallet, name, role string, zk [32]byte) (string, error)
+	registerFn    func(ctx context.Context, wallet, name, role string, zk, institutionID [32]byte) (string, error)
 	verifyFn      func(ctx context.Context, wallet string) (string, error)
 	canTransactFn func(ctx context.Context, address string) (bool, error)
 }
 
-func (f *fakeRegistry) RegisterParticipant(ctx context.Context, wallet, name, role string, zk [32]byte) (string, error) {
+func (f *fakeRegistry) RegisterParticipant(ctx context.Context, wallet, name, role string, zk, institutionID [32]byte) (string, error) {
 	if f.registerFn != nil {
-		return f.registerFn(ctx, wallet, name, role, zk)
+		return f.registerFn(ctx, wallet, name, role, zk, institutionID)
 	}
 	return "", errUnset
+}
+
+func (f *fakeRegistry) GetInstitutionID(_ context.Context, _ string) ([32]byte, error) {
+	return [32]byte{}, nil
 }
 
 func (f *fakeRegistry) VerifyParticipant(ctx context.Context, wallet string) (string, error) {

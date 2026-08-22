@@ -282,7 +282,7 @@ contract AutomatedMarketMakerPairedDepositTest is Test {
     // ---------- helpers ----------
 
     function _register(address who, string memory name, IdentityRegistryLibrary.ParticipantRole role) internal {
-        identityRegistry.registerParticipant(who, name, role, bytes32(0));
+        identityRegistry.registerParticipant(who, name, role, bytes32(0), keccak256(abi.encodePacked("inst-", who)));
         identityRegistry.verifyParticipant(who);
     }
 
