@@ -33,7 +33,7 @@ o sign-off não exija ler o ADR inteiro.
 
 | ADR | Decisão pendente | Quem assina | Bloqueia |
 |-----|------------------|-------------|----------|
-| ADR-001 | Migrar `Zeto_Anon` → `_Enc` + caminho de disclosure, ou aceitar formalmente que o REQ-COM-005 não tem meio criptográfico nesta fase | IDB, LNet | `[R1-§7.3 / R2-A-ARCH-3]`; a parte de auditoria de `[R1-9.2]` |
+| ADR-001 | Migrar `Zeto_Anon` para uma variante com encryption-to-authority (candidato `Zeto_AnonEncNullifierNonRepudiation`, a confirmar na PoC) + caminho de disclosure, ou aceitar formalmente que o REQ-COM-005 não tem meio criptográfico nesta fase | IDB, LNet | `[R1-§7.3 / R2-A-ARCH-3]`; a parte de auditoria de `[R1-9.2]` |
 | ADR-002 | Portal como orquestrador de política + toolkit como executor, ou manter o self-service atual como decisão | IDB, LNet, CEMLA | `[R1-§7.2 / R2-A-ARCH-2]` |
 | ADR-003 | Descope formal da privacidade no hub (o mecanismo já foi decidido: sem Paladin) + emenda à constituição | IDB, LNet | `[R1-9.2]` e `[R2-9.2]` — o mesmo finding em dois relatórios |
 | ADR-004 | Topologia do staging e quem o opera | IDB, LNet | `[R2-12.5]` (fora do escopo in-repo) |
@@ -62,9 +62,15 @@ resta dependência externa (acordo com a LNET no ADR-007) ou lacuna de desenho (
 CSRF no ADR-008), está declarada em vez de omitida.
 
 Duas das cinco decisões que o R1-11.4 nomeia **já estavam cobertas** e não geraram ADR
-novo: `Zeto_Anon` e a não-adoção do Noto, ambas decididas no
-[ADR-001](ADR-001-privacidade-vs-auditabilidade.md), cuja Opção B (implementar o domínio
-Noto) foi explicitamente rejeitada em favor de Zeto com encryption-to-authority.
+novo: `Zeto_Anon` e a não-adoção do Noto, ambas **tratadas** no
+[ADR-001](ADR-001-privacidade-vs-auditabilidade.md), que recomenda migrar para uma
+variante com encryption-to-authority e rejeitar a Opção B (domínio Noto).
+
+Note a diferença entre *tratadas* e *decididas*: o ADR-001 está em **Proposto**. O
+`Zeto_Anon` é hoje o estado implantado e o que o ADR propõe **abandonar**, não uma
+decisão em vigor; a rejeição do Noto é recomendação, não decisão tomada. Enquanto o
+sign-off não vier, o que vale é o estado implantado — sem canal de auditoria
+criptográfico — e é essa a limitação que a tabela acima pede para resolver.
 
 ## Índice de viewpoints
 

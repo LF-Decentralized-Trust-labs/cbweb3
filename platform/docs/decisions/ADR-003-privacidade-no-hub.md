@@ -37,6 +37,13 @@ a encontraria:
 - **Prioridade**: baixa no momento. Não bloqueia entrega; o que bloqueia o fechamento
   do finding é o sign-off do descope, não engenharia.
 
+**Proveniência**: alinhamento técnico entre a arquitetura CBWeb3 (AH/GL) e a
+contraparte técnica do cliente, 2026-07-28, registrado no cartão do finding **R2-9.2**
+no tracker do projeto. Não há artefato no repositório por trás dessa decisão além deste
+ADR — é exatamente por isso que ela está transcrita aqui: um cartão de tracker não
+sobrevive à migração de ferramenta, e esta é a decisão que rebaixa a Opção A de cara
+para fechada.
+
 ---
 
 ## Contexto
@@ -121,6 +128,33 @@ volumes atribuíveis** por participante — por exemplo, tornar os commits do
 - Introduz complexidade de modelagem (o que é agregado público vs. atribuível
   privado) que precisa de validação regulatória.
 
+### Opção C — Descope formal com controles compensatórios
+
+Registrar formalmente que o hub opera em texto claro nesta fase, com sign-off
+IDB/LNet, apoiado em controles compensatórios: rede permissionada (QBFT, membros
+conhecidos), isolamento de rede, trilha de auditoria e — como **ação requerida** —
+**restringir a autoridades quem consegue ler o hub**. Desde a migração para o toolkit
+isso não é mais remover peers (o hub tem um único nó), e sim restringir o alcance da
+RPC do hub, hoje distribuída a todo backend de entidade e publicada no host. Tratar
+privacidade no hub como trabalho futuro explicitamente fora do escopo atual.
+
+**Prós**
+- Reconhece a realidade da implementação e do escopo do D6 v2 sem introduzir risco
+  técnico alto no caminho crítico.
+- A rede é permissionada (QBFT, membros conhecidos), o que limita a superfície de
+  exposição a um conjunto fechado e auditável — **embora o conjunto de leitores não
+  seja hoje exclusivamente de autoridades**. O conjunto de **nós** já é (um único
+  `hub-validator`); o de **leitores por RPC** não, porque todo backend de entidade
+  recebe `HUB_BESU_RPC_URL` e a porta é publicada no host (ver contexto). Restringir
+  o alcance dessa RPC é **pré-requisito** desta opção, não uma premissa já satisfeita.
+- Desbloqueia a entrega mantendo a decisão documentada e revisável.
+
+**Contras**
+- Posições de liquidez soberana permanecem visíveis ao conjunto de validadores do
+  hub; depende da confiança nesse conjunto.
+- Exige sign-off explícito e reabertura futura se o conjunto de validadores crescer
+  ou a sensibilidade aumentar.
+
 ### Opção D — Pseudo-anonimidade por rotação de endereços (direção escolhida para reavaliação)
 
 Manter o hub em claro, mas gerar endereços por transação, de modo que posições e
@@ -141,31 +175,6 @@ movimentos não sejam trivialmente atribuíveis a uma instituição. Registrada 
 - Exige gestão de chaves/endereços por transação e reconciliação contábil do lado da
   instituição.
 
-### Opção C — Descope formal com controles compensatórios
-
-Registrar formalmente que o hub opera em texto claro nesta fase, com sign-off
-IDB/LNet, apoiado em controles compensatórios: rede permissionada (QBFT, membros
-conhecidos), isolamento de rede, trilha de auditoria e — como **ação requerida** —
-**restringir a membership do hub a autoridades** (removendo os peers de bancos
-comerciais hoje presentes). Tratar privacidade no hub como trabalho futuro
-explicitamente fora do escopo atual.
-
-**Prós**
-- Reconhece a realidade da implementação e do escopo do D6 v2 sem introduzir risco
-  técnico alto no caminho crítico.
-- A rede é permissionada (QBFT, membros conhecidos), o que limita a superfície de
-  exposição a um conjunto fechado e auditável de nós — **embora esse conjunto não
-  seja hoje exclusivamente de autoridades** (ver contexto: há peers de bancos
-  comerciais no hub). Fechar a membership do hub a autoridades é **pré-requisito**
-  desta opção, não uma premissa já satisfeita.
-- Desbloqueia a entrega mantendo a decisão documentada e revisável.
-
-**Contras**
-- Posições de liquidez soberana permanecem visíveis ao conjunto de validadores do
-  hub; depende da confiança nesse conjunto.
-- Exige sign-off explícito e reabertura futura se o conjunto de validadores crescer
-  ou a sensibilidade aumentar.
-
 ---
 
 ## Recomendação
@@ -177,10 +186,12 @@ seletiva amadurecer.
 Justificativa: a rede do hub é permissionada (QBFT, membros conhecidos), o que
 reduz o risco relativo de operar em claro frente à complexidade e ao risco de
 regressão de cifrar o AMM (Opção A). A privacidade forte permanece onde mais importa
-— entre bancos dentro dos spokes. **Ressalva factual**: hoje o hub inclui peers de
-bancos comerciais (`bank-a`, `bank-b`), de modo que o conjunto de observadores não é
-exclusivamente de autoridades; **restringir a membership do hub a autoridades é ação
-requerida** (ver plano) e condição para a validade do controle compensatório. A
+— entre bancos dentro dos spokes. **Ressalva factual** (revista em 2026-08-22): o
+conjunto de **nós** do hub já é só o validador, mas o de **leitores** não — todo
+backend de entidade, bancos comerciais inclusive, recebe a RPC do hub, que ainda por
+cima é publicada no host. O conjunto de observadores, portanto, não é exclusivamente
+de autoridades; **restringir o alcance da RPC do hub é ação requerida** (ver plano) e
+condição para a validade do controle compensatório. A
 decisão precisa de **sign-off IDB/LNet** por envolver visibilidade de liquidez
 soberana, e deve ser registrada como limitação conhecida com gatilho de reabertura.
 
@@ -220,10 +231,12 @@ deve ser reaberta imediatamente.
    **Bloqueante** para os demais passos.
 2. **Documento de descope** — redigir a limitação formal ("hub opera em claro"), os
    controles compensatórios e o gatilho de reabertura; obter sign-off IDB/LNet.
-3. **Formalizar o modelo de ameaça do hub** — enumerar explicitamente quem são os
-   nós do hub (validador único + peers, incluindo hoje bancos comerciais) e que
-   dados eles observam, sustentando (ou refutando) a premissa de confiança do
-   descope.
+3. **Formalizar o modelo de ameaça do hub** — enumerar explicitamente quem observa o
+   hub: o nó (validador único) **e os clientes JSON-RPC**, que hoje incluem o backend
+   de toda entidade, mais quem alcançar a porta publicada no host. Registrar que dados
+   cada um observa, sustentando (ou refutando) a premissa de confiança do descope. A
+   distinção importa: o modelo de ameaça de um peer e o de um leitor por RPC coincidem
+   em leitura, e é a leitura que está em questão aqui.
 4. **Restringir quem lê o hub a autoridades** — *reformulado em 2026-08-22*. A parte
    de **membership de nós** já está satisfeita por construção: o hub provisionado pelo
    toolkit tem um único serviço (`hub-validator`), sem peers de bancos comerciais. O

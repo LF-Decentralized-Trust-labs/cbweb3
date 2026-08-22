@@ -15,7 +15,7 @@ abaixo continua sendo a fundamentação.
 
 | | |
 |---|---|
-| **O que se pede** | Aprovar a migração `Zeto_Anon` → `Zeto_AnonNullifierEnc` (encryption-to-authority) e a construção do caminho de disclosure, **ou** rejeitar em favor da Opção B (domínio Noto), **ou** rejeitar ambas e aceitar formalmente que valores privados não são auditáveis por meio criptográfico nesta fase. |
+| **O que se pede** | Aprovar a migração de `Zeto_Anon` para uma variante com **encryption-to-authority** — candidato `Zeto_AnonEncNullifierNonRepudiation`, a confirmar na PoC (§Recomendação; ver a nota sobre nomes de domínio, que descarta tanto a transposição `Zeto_AnonNullifierEnc`, inexistente upstream, quanto as variantes `_Enc` puras, que cifram para o receptor e não para uma autoridade) — e a construção do caminho de disclosure, **ou** rejeitar em favor da Opção B (domínio Noto), **ou** rejeitar ambas e aceitar formalmente que valores privados não são auditáveis por meio criptográfico nesta fase. |
 | **Quem assina** | IDB e LNet — a decisão define quem detém a chave de autoridade e sob que governança ela é usada. |
 | **Recomendação a aprovar** | Opção A (ver §Recomendação). |
 | **Se aprovado, desbloqueia** | `[R1-§7.3 / R2-A-ARCH-3]` (implementação do modelo de token) e a parte de auditoria de `[R1-9.2]`. |
