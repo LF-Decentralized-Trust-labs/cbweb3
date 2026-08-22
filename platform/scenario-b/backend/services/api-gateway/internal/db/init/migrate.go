@@ -6,6 +6,7 @@ package init
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	apidomain "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"gorm.io/gorm"
@@ -22,6 +23,9 @@ const (
 // RunAutoMigrate registers all Scenario B models and migrates the schema.
 // No .sql migration files — GORM AutoMigrate only (FR-055).
 func RunAutoMigrate(db *gorm.DB) error {
+	if err := guardDuplicateBridgeInCorrelations(db); err != nil {
+		return err
+	}
 	if err := autoMigrateModels(db); err != nil {
 		return err
 	}
@@ -80,6 +84,56 @@ func backfillBridgeDirection(db *gorm.DB) error {
 		log.Printf("[migrate] backfilled bridge direction: %d OUT, %d IN", out.RowsAffected, in.RowsAffected)
 	}
 	return nil
+}
+
+// guardDuplicateBridgeInCorrelations refuses to migrate a table that already contains the
+// duplicates the new unique index forbids (R2-CR-6 follow-up).
+//
+// It runs BEFORE AutoMigrate because AutoMigrate is what creates the index, and a unique index
+// over existing duplicates fails there with a driver-level message that names a constraint and
+// nothing else — no correlation id, no count, no indication that money moved twice.
+//
+// Failing the boot is the right outcome rather than an inconvenience. Each duplicate row is a
+// spoke-side burn of a bank's tCeBM and a Hub mint that happened twice for one notification, so
+// the rows are a reconciliation task, not a data-cleanup task: deleting one silently discards
+// the record of value that actually moved. An operator must decide which position is real and
+// what to do about the other.
+//
+// A fresh database has no table yet and a pre-direction database has no column; both skip.
+func guardDuplicateBridgeInCorrelations(db *gorm.DB) error {
+	m := db.Migrator()
+	pos := &apidomain.BridgedAssetPosition{}
+	if !m.HasTable(pos) || !m.HasColumn(pos, "direction") || !m.HasColumn(pos, "correlation_id") {
+		return nil
+	}
+	type dup struct {
+		CorrelationID string
+		N             int64
+	}
+	var dups []dup
+	err := db.Model(pos).
+		Select("correlation_id, COUNT(*) AS n").
+		Where("correlation_id <> '' AND direction = ?", apidomain.BridgeDirectionIn).
+		Group("correlation_id").
+		Having("COUNT(*) > 1").
+		Order("n DESC").
+		Limit(20).
+		Scan(&dups).Error
+	if err != nil {
+		return fmt.Errorf("check duplicate bridge-in correlations: %w", err)
+	}
+	if len(dups) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(dups))
+	for _, d := range dups {
+		ids = append(ids, fmt.Sprintf("%s (%d positions)", d.CorrelationID, d.N))
+	}
+	return fmt.Errorf(
+		"refusing to migrate: %d bridge-in correlation id(s) already have more than one position, "+
+			"which the new unique index forbids. Each duplicate is a tCeBM burn and a Hub mint that "+
+			"ran twice for one notification and needs reconciling, not deleting. Affected (up to 20): %s",
+		len(dups), strings.Join(ids, ", "))
 }
 
 // dropLegacySwapTxHashIndex removes the single-column unique index once AutoMigrate has

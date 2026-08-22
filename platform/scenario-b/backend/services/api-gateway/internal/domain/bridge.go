@@ -136,10 +136,24 @@ type BridgedAssetPosition struct {
 	// Recorded on broadcast, like the burn/mint hashes above, so a retry reconciles by hash
 	// instead of funding twice.
 	SpokeFundTxHash string `gorm:"column:spoke_fund_tx_hash;default:''"`
-	// CorrelationID links the position to the cross-currency swap operation (009) for
-	// tracing. Not unique: a rollback position legitimately shares the correlation of
-	// the bridge-in it reverses — replay protection is keyed on SwapTxHash.
-	CorrelationID string    `gorm:"column:correlation_id;default:'';index:idx_bridge_correlation_id"`
+	// CorrelationID links the position to the cross-currency swap operation (009), and on a
+	// bridge-in it is also the replay key.
+	//
+	// Bridge-out keys replay on (swap_tx_hash, leg), which bridge-in cannot use: it runs
+	// BEFORE the swap, so no swap hash exists yet. The correlation id is what the relay
+	// notification carries, so a retried notification carries the same one — which is exactly
+	// what makes it usable as the idempotency key, and exactly what made its absence a
+	// double-charge (R2-CR-6 follow-up).
+	//
+	// Uniqueness is scoped to inbound positions, not global, because two other kinds of row
+	// legitimately share one correlation id:
+	//   - the RESIDUE leg, which returns the unspent slippage buffer (direction OUT);
+	//   - the settlement bridge-out of the same swap (direction OUT).
+	// A rollback does not add a row at all — it transitions this position to BURNING.
+	// Scoping on direction is therefore what lets replay protection coexist with the legs a
+	// swap is supposed to produce. Rows with an empty correlation id (plain lock-mint, dev
+	// paths) stay outside the index: they have no notification to replay.
+	CorrelationID string    `gorm:"column:correlation_id;default:'';index:idx_bridge_correlation_id;index:idx_bridge_in_correlation,unique,where:direction = 'IN' AND correlation_id <> ''"`
 	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }
