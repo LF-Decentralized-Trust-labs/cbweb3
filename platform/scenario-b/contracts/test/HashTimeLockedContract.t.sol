@@ -42,11 +42,19 @@ contract HashTimeLockedContractTest is Test {
         identityRegistry = new IdentityRegistry(admin);
         vm.startPrank(admin);
         identityRegistry.registerParticipant(
-            sender, "Commercial Bank A", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+            sender,
+            "Commercial Bank A",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            bytes32("inst-sender")
         );
         identityRegistry.verifyParticipant(sender);
         identityRegistry.registerParticipant(
-            receiver, "Commercial Bank B", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+            receiver,
+            "Commercial Bank B",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            bytes32("inst-receiver")
         );
         identityRegistry.verifyParticipant(receiver);
         vm.stopPrank();

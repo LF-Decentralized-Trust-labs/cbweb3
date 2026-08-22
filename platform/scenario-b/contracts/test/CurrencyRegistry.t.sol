@@ -32,11 +32,11 @@ contract CurrencyRegistryTest is Test {
         identityRegistry = new IdentityRegistry(admin);
         vm.startPrank(admin);
         identityRegistry.registerParticipant(
-            cbA, "Central Bank A", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            cbA, "Central Bank A", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0), bytes32("inst-cbA")
         );
         identityRegistry.verifyParticipant(cbA);
         identityRegistry.registerParticipant(
-            cbB, "Central Bank B", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            cbB, "Central Bank B", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0), bytes32("inst-cbB")
         );
         identityRegistry.verifyParticipant(cbB);
         vm.stopPrank();

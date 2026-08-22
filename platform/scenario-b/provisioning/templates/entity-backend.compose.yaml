@@ -32,6 +32,12 @@ services:
       CB_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
       POSTGRES_DSN: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:?}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
       BANK_CODE: "${ENTITY}"
+      # Institution identity for on-chain participant registration: institutionId =
+      # keccak256(INSTITUTION_CODE). Deliberately NOT BANK_CODE — that is the entity ROLE, so
+      # every central bank carries "central-bank" and hashing it would make all of them ONE
+      # institution. The AMM resume quorum needs two DISTINCT institutions, so a paused AMM
+      # would then never be resumable. The toolkit renders this per entity.
+      INSTITUTION_CODE: "${INSTITUTION_CODE:-}"
       # CA (scenario-a standard): the CB seeds central-bank.crt/.key into cb_tls;
       # compliance signs participant CSRs with it. Empty on a bank → dev mode
       # (certificate issuance disabled), which the swap/approve-kyc path does not need.
@@ -123,6 +129,12 @@ services:
       REQUEST_TIMEOUT_SEC: "30"
       ENTITY: "${ENTITY}"
       BANK_CODE: "${ENTITY}"
+      # Institution identity for on-chain participant registration: institutionId =
+      # keccak256(INSTITUTION_CODE). Deliberately NOT BANK_CODE — that is the entity ROLE, so
+      # every central bank carries "central-bank" and hashing it would make all of them ONE
+      # institution. The AMM resume quorum needs two DISTINCT institutions, so a paused AMM
+      # would then never be resumable. The toolkit renders this per entity.
+      INSTITUTION_CODE: "${INSTITUTION_CODE:-}"
       # Service-to-service authentication id (X-Relay-Key-Id): the receiver pins one public key per
       # id, so it must be unique across the deployment. BANK_CODE cannot serve: it is the entity
       # ROLE, so every central bank carries "central-bank" and only one of them could authenticate —

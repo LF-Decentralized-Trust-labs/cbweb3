@@ -258,7 +258,11 @@ func (s *complianceService) RegisterParticipantOnChain(ctx context.Context, req 
 	// Two-step onboarding (R1-10.6 / R2-10.6): register (Pending) then verify (Verified) so the
 	// wallet can transact. EnsureVerifiedParticipant is idempotent and never demotes an already
 	// transactable wallet.
-	txHash, err := registry.EnsureVerifiedParticipant(ctx, s.blockchain, wallet, req.InstitutionName, role, [32]byte{})
+	// institutionId is derived from the participant's bank code (the value shared by every wallet
+	// of that institution), so two wallets of one bank cannot present themselves to the AMM resume
+	// quorum as two institutions. See registry.InstitutionIDForParticipant.
+	institutionID := registry.InstitutionIDForParticipant(req.BankCode, req.InstitutionName)
+	txHash, err := registry.EnsureVerifiedParticipant(ctx, s.blockchain, wallet, req.InstitutionName, role, [32]byte{}, institutionID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "on-chain register+verify participant: %v", err)
 	}
@@ -467,7 +471,12 @@ func (s *complianceService) SignParticipantCSR(ctx context.Context, req *complia
 		// (Verified). EnsureVerifiedParticipant is idempotent and never demotes — this path is
 		// re-run on repeated CSR signings ("may already be approved"), so a live, transactable
 		// wallet is left untouched rather than reset to Pending mid-flight.
-		if _, err := registry.EnsureVerifiedParticipant(ctx, s.blockchain, existing.WalletAddress, institutionName, req.Role, [32]byte{}); err != nil {
+		// Same institution derivation as every other path: the stored bank code, not the display
+		// name, decides which institution this wallet belongs to for quorum purposes.
+		if _, err := registry.EnsureVerifiedParticipant(
+			ctx, s.blockchain, existing.WalletAddress, institutionName, req.Role, [32]byte{},
+			registry.InstitutionIDForParticipant(existing.BankCode, institutionName),
+		); err != nil {
 			log.Printf("WARN: SignParticipantCSR: on-chain register+verify failed (non-fatal): %v", err)
 		}
 	}

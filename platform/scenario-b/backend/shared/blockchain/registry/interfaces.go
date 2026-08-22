@@ -39,6 +39,7 @@ const (
 // OnChainParticipant is the Go representation of the Solidity Participant struct.
 type OnChainParticipant struct {
 	LegalName       string
+	InstitutionID   [32]byte
 	Role            uint8
 	Status          uint8
 	ZkPointer       [32]byte
@@ -52,7 +53,9 @@ type RegistryWriter interface {
 	// wallet address, legal name, role, and zero-knowledge proof pointer. The
 	// participant is created in the Pending state (step 1 of the two-step
 	// onboarding); VerifyParticipant is required before it can transact.
-	RegisterParticipant(ctx context.Context, wallet, name, role string, zkPointer [32]byte) (txHash string, err error)
+	// The institutionID is the institution-level identifier shared by every wallet of the
+	// same institution (see InstitutionIDForParticipant — the contract rejects a zero id).
+	RegisterParticipant(ctx context.Context, wallet, name, role string, zkPointer, institutionID [32]byte) (txHash string, err error)
 
 	// VerifyParticipant promotes a previously registered participant from Pending
 	// to Verified (step 2 of the two-step onboarding). The configured signer must
@@ -81,6 +84,10 @@ type RegistryReader interface {
 	// GetCertFingerprint returns the SHA-256 fingerprint stored on-chain
 	// for the given address. Returns [32]byte{} if not set.
 	GetCertFingerprint(ctx context.Context, address string) ([32]byte, error)
+
+	// GetInstitutionID returns the institution-level identifier for a registered wallet,
+	// or [32]byte{} if the wallet is not registered.
+	GetInstitutionID(ctx context.Context, address string) ([32]byte, error)
 }
 
 // EnsureVerifiedParticipant runs the full two-step onboarding (register -> verify)
@@ -99,14 +106,14 @@ type RegistryReader interface {
 // SHOULD be separated (see docs/runbooks/identity-registry-role-separation.md); a
 // dedicated verifier signer is the residual required to make that split real
 // end-to-end from the Go services.
-func EnsureVerifiedParticipant(ctx context.Context, w RegistryWriter, wallet, name, role string, zkPointer [32]byte) (txHash string, err error) {
+func EnsureVerifiedParticipant(ctx context.Context, w RegistryWriter, wallet, name, role string, zkPointer, institutionID [32]byte) (txHash string, err error) {
 	// No-demotion idempotency guard: skip entirely if already transactable.
 	if reader, ok := w.(RegistryReader); ok {
 		if can, cerr := reader.CanTransact(ctx, wallet); cerr == nil && can {
 			return "", nil
 		}
 	}
-	if _, err = w.RegisterParticipant(ctx, wallet, name, role, zkPointer); err != nil {
+	if _, err = w.RegisterParticipant(ctx, wallet, name, role, zkPointer, institutionID); err != nil {
 		return "", err
 	}
 	txHash, err = w.VerifyParticipant(ctx, wallet)

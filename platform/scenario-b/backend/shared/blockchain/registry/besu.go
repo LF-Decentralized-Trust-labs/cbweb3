@@ -123,7 +123,7 @@ func (b *BesuClient) transactOpts(ctx context.Context) (*bind.TransactOpts, erro
 
 // RegisterParticipant registers a new participant on the IdentityRegistry contract.
 // Blocks until the transaction is mined or the context is cancelled.
-func (b *BesuClient) RegisterParticipant(ctx context.Context, wallet, name, role string, zkPointer [32]byte) (string, error) {
+func (b *BesuClient) RegisterParticipant(ctx context.Context, wallet, name, role string, zkPointer, institutionID [32]byte) (string, error) {
 	opts, err := b.transactOpts(ctx)
 	if err != nil {
 		return "", err
@@ -137,7 +137,7 @@ func (b *BesuClient) RegisterParticipant(ctx context.Context, wallet, name, role
 	// ~40k), and gas is free on the local genesis, so over-provisioning is safe.
 	opts.GasLimit = 500000
 
-	tx, err := b.contract.RegisterParticipant(opts, account, name, solidityRole, zkPointer)
+	tx, err := b.contract.RegisterParticipant(opts, account, name, solidityRole, zkPointer, institutionID)
 	if err != nil {
 		return "", fmt.Errorf("registry: registerParticipant tx: %w", err)
 	}
@@ -726,6 +726,7 @@ func (b *BesuClient) GetParticipant(ctx context.Context, address string) (OnChai
 	}
 	return OnChainParticipant{
 		LegalName:       p.LegalName,
+		InstitutionID:   p.InstitutionId,
 		Role:            p.Role,
 		Status:          p.Status,
 		ZkPointer:       p.ZkPointer,
@@ -742,4 +743,16 @@ func (b *BesuClient) GetCertFingerprint(ctx context.Context, address string) ([3
 		return [32]byte{}, fmt.Errorf("registry: getCertFingerprint: %w", err)
 	}
 	return fp, nil
+}
+
+// GetInstitutionID returns the institution-level identifier stored on-chain for a wallet.
+// A zero value means the wallet is not registered: the contract refuses to store a zero id,
+// so no registered participant can report one.
+func (b *BesuClient) GetInstitutionID(ctx context.Context, address string) ([32]byte, error) {
+	account := common.HexToAddress(address)
+	id, err := b.contract.GetInstitutionId(&bind.CallOpts{Context: ctx}, account)
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("registry: getInstitutionId: %w", err)
+	}
+	return id, nil
 }

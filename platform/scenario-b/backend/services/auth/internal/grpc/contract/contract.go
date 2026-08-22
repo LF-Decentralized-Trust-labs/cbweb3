@@ -190,7 +190,7 @@ type IssueLoginNonceResponse struct {
 
 // VerifyPKILoginRequest carries the signed nonce and the institution's X.509 cert.
 type VerifyPKILoginRequest struct {
-	UserID       string `json:"user_id"`
+	UserID string `json:"user_id"`
 	// NonceSignatureHex is the DER-encoded ECDSA signature of SHA-256(nonce bytes), hex-encoded.
 	NonceSignatureHex string `json:"nonce_signature_hex"`
 	// CertPEM is the institution's X.509 certificate issued by the Central Bank CA.
@@ -254,9 +254,9 @@ type GetUserResponse struct {
 
 // ChangeClientSecretRequest allows an authenticated user to rotate their clientSecret.
 type ChangeClientSecretRequest struct {
-	UserID               string `json:"user_id"`
-	CurrentClientSecret  string `json:"current_client_secret"`
-	NewClientSecret      string `json:"new_client_secret"`
+	UserID              string `json:"user_id"`
+	CurrentClientSecret string `json:"current_client_secret"`
+	NewClientSecret     string `json:"new_client_secret"`
 }
 
 // ChangeClientSecretResponse is returned on successful secret rotation.

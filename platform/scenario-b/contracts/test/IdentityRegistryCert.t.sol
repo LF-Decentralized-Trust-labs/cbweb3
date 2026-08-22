@@ -29,7 +29,7 @@ contract IdentityRegistryCertTest is Test {
 
         vm.startPrank(admin);
         registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER, bytes32("inst-bankA")
         );
         registry.setCertFingerprint(bankA, fingerprint);
         vm.stopPrank();
@@ -42,7 +42,7 @@ contract IdentityRegistryCertTest is Test {
 
         vm.startPrank(admin);
         registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER, bytes32("inst-bankA")
         );
 
         vm.expectEmit(true, false, false, true);
@@ -56,7 +56,7 @@ contract IdentityRegistryCertTest is Test {
 
         vm.prank(admin);
         registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER, bytes32("inst-bankA")
         );
 
         vm.prank(maliciousUser);
@@ -67,7 +67,7 @@ contract IdentityRegistryCertTest is Test {
     function test_getCertFingerprint_default() public {
         vm.prank(admin);
         registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER, bytes32("inst-bankA")
         );
 
         assertEq(registry.getCertFingerprint(bankA), bytes32(0));
@@ -79,7 +79,7 @@ contract IdentityRegistryCertTest is Test {
 
         vm.startPrank(admin);
         registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER, bytes32("inst-bankA")
         );
         registry.setCertFingerprint(bankA, first);
         assertEq(registry.getCertFingerprint(bankA), first);

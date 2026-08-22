@@ -36,11 +36,19 @@ contract AutomatedMarketMakerFeesTest is Test {
         identityRegistry = new IdentityRegistry(admin);
         vm.startPrank(admin);
         identityRegistry.registerParticipant(
-            governance, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            governance,
+            "Central Bank",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-governance")
         );
         identityRegistry.verifyParticipant(governance);
         identityRegistry.registerParticipant(
-            nonGovernance, "Commercial Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+            nonGovernance,
+            "Commercial Bank",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            bytes32("inst-nonGovernance")
         );
         identityRegistry.verifyParticipant(nonGovernance);
         vm.stopPrank();

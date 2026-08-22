@@ -48,7 +48,16 @@ type SpokeConfig struct {
 	// "central-bank". The receiver pins one public key per id, so a shared id both breaks the
 	// mechanism (one entry per id in the registry) and destroys the attribution the mechanism
 	// exists for. Set from the manifest name by apply; falls back to the spoke id.
-	RelayKeyID          string
+	RelayKeyID string
+	// InstitutionCode identifies this central bank as an INSTITUTION on-chain: the services hash
+	// it into the institutionId stored on every participant they register, and the AMM
+	// circuit-breaker resume quorum counts distinct institutions rather than distinct keys.
+	//
+	// It must be unique per entity for the same reason RelayKeyID must be, and it cannot be
+	// BANK_CODE: that is the entity ROLE, so every central bank carries "central-bank" and all of
+	// them would hash to one institution — leaving a 2-of-N resume unreachable and a paused AMM
+	// stuck. Falls back to the spoke id, which is unique per CB.
+	InstitutionCode     string
 	RPCPort             int         // host port -> besu 8545; other service ports derive by offset
 	WSPort              int         // host port -> besu 8546
 	P2PPort             int         // host port -> besu 30303
@@ -218,6 +227,15 @@ func (c SpokeConfig) cbHubAddress() string {
 func (c SpokeConfig) relayKeyID() string {
 	if id := strings.TrimSpace(c.RelayKeyID); id != "" {
 		return id
+	}
+	return c.SpokeID
+}
+
+// institutionCode resolves this CB's institution identity, falling back to the spoke id — still
+// unique per central bank, unlike the entity role.
+func (c SpokeConfig) institutionCode() string {
+	if code := strings.TrimSpace(c.InstitutionCode); code != "" {
+		return code
 	}
 	return c.SpokeID
 }
@@ -713,6 +731,9 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// Service-to-service authentication id (X-Relay-Key-Id). Distinct from BANK_CODE, which is
 		// the entity ROLE and identical on every CB; see SpokeConfig.RelayKeyID.
 		"RELAY_KEY_ID": c.relayKeyID(),
+		// Institution identity for on-chain participant registration (institutionId =
+		// keccak256(INSTITUTION_CODE)). Also distinct from BANK_CODE, and for the same reason.
+		"INSTITUTION_CODE": c.institutionCode(),
 		// Hub signing key: a CB IS a verified Hub participant, so its gateway signs Hub acts
 		// directly — including the AMM swaps it executes on behalf of its member banks
 		// (POST /internal/amm/cross-currency-hub-swap). Per-CB and distinct from the spoke
@@ -872,12 +893,21 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				}
 				// The hub registers THIS CB's own hub identity, not the founder's.
 				cbAddr := c.cbHubAddress()
+				// bank_code is what the hub's compliance service hashes into the on-chain
+				// institutionId, so it must be the SAME code this CB uses on its own spoke
+				// registry (INSTITUTION_CODE). Sending the spoke id here instead gave one central
+				// bank two institution ids — one per registry. Both were unique, so no quorum was
+				// ever satisfiable by a single institution, but "one institution, one id" is the
+				// invariant this control rests on, and two ids make it unverifiable by inspection.
+				// institutionCode() falls back to SpokeID, so an unconfigured caller keeps the
+				// previous value; already-registered CBs keep theirs (registration is idempotent
+				// and never rewrites the id), so this aligns fresh provisioning.
 				payload, err := json.Marshal(map[string]string{
 					"spoke_id":         c.SpokeID,
 					"cb_address":       cbAddr,
 					"institution_name": c.SpokeID,
 					"role":             "ROLE_CENTRAL_BANK",
-					"bank_code":        c.SpokeID,
+					"bank_code":        c.institutionCode(),
 				})
 				if err != nil {
 					return err

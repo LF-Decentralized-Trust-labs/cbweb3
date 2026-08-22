@@ -5,6 +5,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -426,4 +427,94 @@ func TestJoinComposeEnvNeverInheritsEnforcement(t *testing.T) {
 		}
 	}
 	t.Fatal("RELAY_REQUIRE_SIGNATURE is not set at all on a bank — it would inherit the operator's export")
+}
+
+// ── Institution identity (R2-H-4) ────────────────────────────────────────────
+
+// The institution code is what the services hash into the on-chain institutionId, and the AMM
+// circuit-breaker resume quorum counts distinct institutions. If two central banks resolve the
+// same code they become one institution to the contract, the 2-of-N can never be met, and a
+// paused AMM stays paused. This is the same trap RELAY_KEY_ID exists to avoid, one layer down.
+func TestInstitutionCodeDiffersBetweenCentralBanks(t *testing.T) {
+	br := SpokeConfig{SpokeID: "spoke-brl", RPCPort: 33645, InstitutionCode: "central-bank-brazil"}
+	ar := SpokeConfig{SpokeID: "spoke-ars", RPCPort: 33745, InstitutionCode: "central-bank-argentina"}
+	if br.institutionCode() == ar.institutionCode() {
+		t.Fatalf("both central banks resolved the institution code %q", br.institutionCode())
+	}
+}
+
+func TestInstitutionCodeFallsBackToTheSpokeID(t *testing.T) {
+	c := SpokeConfig{SpokeID: "spoke-brl", RPCPort: 33645}
+	if got := c.institutionCode(); got != "spoke-brl" {
+		t.Fatalf("fallback institution code = %q, want spoke-brl", got)
+	}
+}
+
+// INSTITUTION_CODE must reach the compose env, and must never equal ENTITY — that is the
+// topology role, identical on every central bank.
+func TestComposeEnvCarriesAnInstitutionCodeDistinctFromTheRole(t *testing.T) {
+	c := SpokeConfig{
+		SpokeID: "spoke-brl", RPCPort: 33645, Entity: "central-bank",
+		InstitutionCode: "central-bank-brazil",
+	}
+	env := envMap(c.ComposeEnv())
+	if env["INSTITUTION_CODE"] != "central-bank-brazil" {
+		t.Fatalf("INSTITUTION_CODE = %q, want central-bank-brazil", env["INSTITUTION_CODE"])
+	}
+	if env["INSTITUTION_CODE"] == env["ENTITY"] {
+		t.Fatalf("the institution code must differ from ENTITY (%q), which is the role", env["ENTITY"])
+	}
+	if env["INSTITUTION_CODE"] == env["BANK_CODE"] {
+		t.Fatal("the institution code must differ from BANK_CODE, which the template sets to the role")
+	}
+}
+
+// One institution, one id. The hub's compliance service hashes the bank_code from this payload
+// into the on-chain institutionId, and the AMM resume quorum — which counts distinct
+// institutions — reads the hub registry. If this code diverges from the INSTITUTION_CODE the
+// same CB uses on its own spoke registry, one central bank ends up with two institution ids and
+// the invariant stops being checkable by inspection. Both values were unique before this was
+// aligned, so nothing was exploitable; the point is that it must stay one value.
+func TestRegisterCBSendsTheSameInstitutionCodeAsTheSpokeEnv(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"already_registered":false}`))
+	}))
+	defer srv.Close()
+
+	cfg := testSpokeCfg(t, &exec.FakeRunner{})
+	cfg.CBAddress = ""
+	cfg.InstitutionCode = "central-bank-brazil" // what applyFoundSpoke sets: the manifest prefix
+	hp, err := bundle.EmitHub(bundle.HubBundle{
+		ChainID: 1337, HubRPC: "http://hub:8545", HubWS: "ws://hub:8546", HubGateway: srv.URL,
+		Contracts: map[string]string{
+			"identityRegistry": "0xh1", "fxAgreement": "0xh4",
+			"pairRegistry": "0xh5", "currencyRegistry": "0xh6", "manualOracle": "0xh7",
+		},
+	}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.HubBundlePath = hp
+
+	if err := findStep(FoundSpokeSteps(cfg), "register-cb").Run(context.Background()); err != nil {
+		t.Fatalf("register-cb: %v", err)
+	}
+
+	var payload map[string]string
+	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
+		t.Fatalf("register-cb payload is not JSON: %v (%s)", err, gotBody)
+	}
+	want := envMap(cfg.ComposeEnv())["INSTITUTION_CODE"]
+	if payload["bank_code"] != want {
+		t.Fatalf("register-cb bank_code = %q, but the spoke env carries INSTITUTION_CODE=%q — "+
+			"one central bank would hold two institution ids, one per registry",
+			payload["bank_code"], want)
+	}
+	if payload["bank_code"] == cfg.SpokeID && cfg.InstitutionCode != cfg.SpokeID {
+		t.Fatal("bank_code fell back to the spoke id even though an institution code was configured")
+	}
 }

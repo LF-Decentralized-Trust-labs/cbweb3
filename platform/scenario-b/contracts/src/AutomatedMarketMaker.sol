@@ -48,6 +48,12 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ERC20, ReentrancyGuard {
     /// @notice Current paused state of the AMM (asymmetric circuit breaker).
     bool private _paused;
 
+    /// @notice Monotonic counter incremented on every pause. A resume proposal is stamped with the
+    ///         epoch it was raised under, so signatures gathered during one incident can never be
+    ///         combined with a signature from another (R2-H-2 epoch binding — closes the
+    ///         abandoned-proposal single-governor resume path).
+    uint256 public pauseEpoch;
+
     /// @notice Swap fee in basis points. Default 0 (no fee). Governance-controlled (FR-005).
     uint256 public feeBps;
 
@@ -58,8 +64,13 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ERC20, ReentrancyGuard {
     struct ResumeProposal {
         address proposer;
         uint256 createdAt;
+        uint256 epoch;
         uint256 signatures;
         mapping(address => bool) signed;
+        /// @dev Institution-keyed mirror of {signed}. The quorum is a multi-institution control, so the
+        ///      address key alone is not enough: one central bank operating two governance wallets would
+        ///      otherwise satisfy 2-of-N on its own, which is the outcome the quorum exists to prevent.
+        mapping(bytes32 => bool) institutionSigned;
         bool executed;
     }
 
@@ -146,31 +157,52 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ERC20, ReentrancyGuard {
     /// @notice Emergency pause (1-of-N fail-safe). Any Central Bank with governance rights may pause.
     function pause(string calldata reason) external onlyGovernance whenNotPaused {
         _paused = true;
+        // Each pause opens a fresh epoch; resume signatures are only ever valid within the epoch of
+        // the pause they were gathered under.
+        pauseEpoch += 1;
         emit LogCircuitBreakerPaused(msg.sender, block.timestamp, reason);
     }
 
     /// @notice Create a resume proposal. The proposer's signature counts as the first signature.
+    /// @dev A single proposer is never enough to resume: quorum is {RESUME_QUORUM} (2-of-N) counted
+    ///      over distinct institutions. The proposal is stamped with the current {pauseEpoch};
+    ///      signatures gathered here cannot outlive this pause.
     function proposeResume() external onlyGovernance whenPaused returns (bytes32 proposalId) {
         proposalId = keccak256(abi.encode(msg.sender, block.number, block.timestamp));
         ResumeProposal storage proposal = _resumeProposals[proposalId];
         proposal.proposer = msg.sender;
         proposal.createdAt = block.timestamp;
+        proposal.epoch = pauseEpoch;
         proposal.signatures = 1;
         proposal.signed[msg.sender] = true;
+        bytes32 institutionId = _institutionOf(msg.sender);
+        proposal.institutionSigned[institutionId] = true;
         emit LogResumeProposed(proposalId, msg.sender, block.timestamp);
         emit LogResumeSigned(proposalId, msg.sender, 1);
     }
 
     /// @notice Sign a resume proposal. When signatures reach RESUME_QUORUM (2), the AMM auto-resumes.
+    /// @dev A given signer may only sign once, and a given institution may only sign once (no
+    ///      self-quorum at either level). Reverts if the proposal is unknown or was raised against a
+    ///      superseded pause epoch (R2-H-2) — enforcing a genuine 2-of-N per pause event, across two
+    ///      distinct institutions.
     function signResume(bytes32 proposalId) external onlyGovernance whenPaused {
         ResumeProposal storage proposal = _resumeProposals[proposalId];
         if (proposal.createdAt == 0) {
             revert AMM__ProposalNotFound(proposalId);
         }
+        if (proposal.epoch != pauseEpoch) {
+            revert AMM__ProposalExpired(proposalId, proposal.epoch, pauseEpoch);
+        }
         if (proposal.signed[msg.sender]) {
             revert AMM__AlreadySigned(proposalId, msg.sender);
         }
+        bytes32 institutionId = _institutionOf(msg.sender);
+        if (proposal.institutionSigned[institutionId]) {
+            revert AMM__InstitutionAlreadySigned(proposalId, institutionId);
+        }
         proposal.signed[msg.sender] = true;
+        proposal.institutionSigned[institutionId] = true;
         proposal.signatures += 1;
         emit LogResumeSigned(proposalId, msg.sender, proposal.signatures);
 
@@ -179,6 +211,18 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ERC20, ReentrancyGuard {
             _paused = false;
             emit LogCircuitBreakerResumed(proposalId, block.timestamp);
         }
+    }
+
+    /// @dev Resolves the signer's institution, reverting when the registry holds none. Reverting rather
+    ///      than counting an unattributed signature is deliberate: bytes32(0) is the value every
+    ///      unregistered address returns, so admitting it would let any two such signers form quorum as
+    ///      one "institution" — or worse, let one of them pair with a second wallet of the same kind.
+    function _institutionOf(address account) private view returns (bytes32) {
+        bytes32 institutionId = IDENTITY_REGISTRY.getInstitutionId(account);
+        if (institutionId == bytes32(0)) {
+            revert AMM__InvalidInstitutionId(account);
+        }
+        return institutionId;
     }
 
     /// @inheritdoc IAutomatedMarketMaker
