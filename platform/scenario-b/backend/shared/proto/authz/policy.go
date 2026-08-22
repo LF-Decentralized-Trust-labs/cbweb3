@@ -108,11 +108,17 @@ func (m MethodPolicy) WithRestriction(subjects []string, methods ...string) Meth
 	for _, s := range subjects {
 		allowed[s] = true
 	}
-	if m.ByMethod == nil {
-		m.ByMethod = map[string]Policy{}
+	// Copy, do not alias: the value receiver copies the struct but not the map behind
+	// it, so writing through m.ByMethod would edit the policy the caller derived this
+	// one from. Chained calls in a serverPolicy builder read as pure, and one built
+	// from another service's base must not be able to widen it.
+	byMethod := make(map[string]Policy, len(m.ByMethod)+len(methods))
+	for k, v := range m.ByMethod {
+		byMethod[k] = v
 	}
 	for _, method := range methods {
-		m.ByMethod[method] = AllowList{Subjects: allowed}
+		byMethod[method] = AllowList{Subjects: allowed}
 	}
+	m.ByMethod = byMethod
 	return m
 }

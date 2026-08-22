@@ -463,3 +463,28 @@ func TestAuthenticate_AuditModeCarriesNoIdentityWhenUnauthenticated(t *testing.T
 		t.Fatalf("no identity should be established, got %q", got)
 	}
 }
+
+// WithRestriction must not write through to the policy it was derived from: the value
+// receiver copies the struct, but a shared map would let a derived policy edit its base.
+func TestWithRestrictionDoesNotMutateItsBase(t *testing.T) {
+	base := RestrictMethods(AllowAuthenticated{}, []string{"api-gateway"}, "/svc/Mint")
+	derived := base.WithRestriction([]string{"auth"}, "/svc/Freeze")
+
+	if _, leaked := base.ByMethod["/svc/Freeze"]; leaked {
+		t.Fatal("WithRestriction wrote /svc/Freeze into the base policy's map")
+	}
+	if len(base.ByMethod) != 1 {
+		t.Fatalf("base policy gained entries: %v", base.ByMethod)
+	}
+	if _, ok := derived.ByMethod["/svc/Mint"]; !ok {
+		t.Fatal("the derived policy must inherit the base restrictions")
+	}
+
+	gateway := &Identity{Subject: "api-gateway", Method: "mtls"}
+	if err := base.Authorize(context.Background(), gateway, "/svc/Freeze"); err != nil {
+		t.Fatalf("the base must still fall through to its Default on /svc/Freeze: %v", err)
+	}
+	if err := derived.Authorize(context.Background(), gateway, "/svc/Freeze"); err == nil {
+		t.Fatal("the derived policy must refuse the gateway on /svc/Freeze")
+	}
+}

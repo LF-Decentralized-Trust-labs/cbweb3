@@ -28,7 +28,14 @@ const (
 // omitted here loses a working path the moment enforcement is switched on, so the
 // lists are deliberately derived from what the code actually does today.
 //
-// Reads keep the baseline policy, which still honours GRPC_AUTHZ_ALLOWED_CALLERS.
+// Reads keep the baseline policy, which still honours GRPC_AUTHZ_ALLOWED_CALLERS.//
+// One trap, named because it already caught this file once: a caller list derived by
+// grepping for the gRPC method name is WRONG when the gateway reaches an RPC through
+// an adapter method with a different name. UpsertParticipant is exactly that —
+// POST /governance/participants → GovernanceHandler.RegisterParticipant →
+// GRPCAdapter.RegisterParticipant → compliance.UpsertParticipant. Verify a caller set
+// by searching for the *gRPC* call (`.UpsertParticipant(ctx`) across every service,
+// not for the RPC's name as a Go method.
 func serverPolicy() authz.Policy {
 	return authz.
 		// Governance actions reach compliance only through the gateway.
@@ -45,10 +52,13 @@ func serverPolicy() authz.Policy {
 			compliancv1.ComplianceService_ManageParticipantStatus_FullMethodName,
 			compliancv1.ComplianceService_SignParticipantCSR_FullMethodName,
 		).
-		// Certificate issuance and the participant record are auth-service steps;
-		// the gateway never calls either.
+		// Certificate issuance is an auth-service step; the gateway never calls it.
 		WithRestriction([]string{callerAuth},
 			compliancv1.ComplianceService_IssueParticipantCertificate_FullMethodName,
+		).
+		// The participant record is written by auth during onboarding AND by the
+		// gateway's governance route — see the adapter-rename note above.
+		WithRestriction([]string{callerGateway, callerAuth},
 			compliancv1.ComplianceService_UpsertParticipant_FullMethodName,
 		).
 		// Audit writes: restricted to the services that actually record events, so a

@@ -404,12 +404,36 @@ transport stays plaintext — existing deployments are unaffected. Setting
 `GRPC_AUTHZ_ENFORCE=true` without `GRPC_MTLS_ENABLE=1` is refused at service start
 (enforcing over a plaintext, header-settable identity is a fail-open).
 
-Verify it with `./mtls-smoke.sh`, which is that check made repeatable: it reads each
-gateway's own environment to establish whether the mesh is actually on (so a pass
-cannot be vacuous), dials every internal gRPC port in plaintext from inside the
-entity's docker network and requires the handshake to be refused, then confirms the
-gateway still serves. Run `sample-tryout.sh` after it for the full login →
-governance-list round-trip over the mesh.
+Verify it with `./mtls-smoke.sh`, which is that check made repeatable. It reads each
+gateway's own environment to establish whether the mesh is on **per entity** (so a pass
+cannot be vacuous, and an entity still running plaintext by design is not judged by its
+neighbour's posture), then runs two checks that are deliberately kept separate:
+
+1. **Cleartext HTTP/2 is not answered.** The HTTP/2 preface goes out over raw TCP from
+   inside the entity's docker network, and the reply bytes are read as hex. An HTTP/2
+   SETTINGS frame back means the port is serving h2c and the check fails.
+2. **A TLS handshake with no client certificate is refused.** This is the mutual half:
+   server-only TLS passes check 1 and still accepts any client.
+
+Finally it confirms the gateway still serves. Run `sample-tryout.sh` after it for the
+full login → governance-list round-trip over the mesh.
+
+Two properties of the script are load-bearing, and both were verified against purpose-built
+listeners (a client-cert-requiring TLS server, a server-only TLS server, an h2c responder,
+and a dead port) rather than assumed:
+
+- **A port that cannot be dialled is reported as *not verified*, never as a pass.**
+  Reachability is probed explicitly, because busybox `nc` signals a refused connection
+  with an exit status and nothing else — "no answer" and "nobody listening" are otherwise
+  the same observation.
+- **The no-client-certificate probe writes application bytes and waits.** Under TLS 1.3
+  the server lets the handshake reach `Cipher is ...` and only then sends
+  `alert certificate required`; a probe that closes at EOF races that alert and reports a
+  healthy mesh as broken.
+
+An earlier revision of this script used `openssl s_client` for check 1. That cannot test
+what check 1 claims: `s_client` opens with a TLS ClientHello, so nothing it sends ever
+reaches the wire in the clear. It measured check 2 twice.
 
 ```bash
 export GRPC_MTLS_ENABLE=1 GRPC_AUTHZ_ENFORCE=true
@@ -423,12 +447,17 @@ With enforcement on, each service also restricts its **value-moving** methods to
 callers that legitimately make them, rather than to any authenticated peer: minting,
 burning, settlement, deposit/escrow/redeem approval and the FX lifecycle accept only
 the `api-gateway` identity; participant freeze and CSR signing accept the gateway and
-`auth`; certificate issuance and the participant record accept `auth` only. Reads keep
+`auth`; the participant record accepts the gateway (its governance route) and `auth`
+(onboarding); certificate issuance accepts `auth` only. Reads keep
 the baseline policy and still honour `GRPC_AUTHZ_ALLOWED_CALLERS`. The lists are
 compiled in (`internal/grpc/server/authz_policy.go` per service) because the caller
 identities are the mesh certificate CNs the toolkit issues — known without operator
-configuration — and a test fails the build if a new mutating RPC is added without
-one.
+configuration — and two tests fail the build: one if a new mutating RPC is added without
+a restriction, and one if a restriction excludes the gateway without being listed as
+deliberately internal. The second exists because a caller set is easy to get wrong in
+the dangerous direction: the gateway reaches `UpsertParticipant` through an adapter
+method named `RegisterParticipant`, so auditing by RPC name alone concludes that no
+route touches it and takes a live route down when enforcement is switched on.
 
 > Cross-entity gRPC is not part of this mesh (there is none today — cross-VM
 > traffic is Besu JSON-RPC + HTTP). A federated/shared service CA would be needed

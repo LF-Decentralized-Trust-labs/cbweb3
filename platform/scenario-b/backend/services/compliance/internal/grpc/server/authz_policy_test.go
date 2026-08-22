@@ -70,3 +70,43 @@ func TestServerPolicy_LeavesReadsOnTheBaseline(t *testing.T) {
 		t.Fatalf("an authenticated caller must still be able to read: %v", err)
 	}
 }
+
+// The gateway sits in front of every operator-facing route, so a restriction that
+// excludes it takes a live HTTP route down the moment GRPC_AUTHZ_ENFORCE flips on.
+// This test inverts the burden of proof: every restricted method must admit the
+// gateway unless it is listed below as deliberately internal. That default is what
+// makes the dangerous direction the one you have to write down.
+//
+// It exists because the first cut of this policy restricted UpsertParticipant to the
+// auth service, while POST /governance/participants reaches it through an adapter
+// method named RegisterParticipant — a caller set inferred from the RPC name instead
+// of traced through the adapter. Auditing by name will hit that trap again.
+func TestServerPolicy_AdmitsTheGatewayUnlessDeliberatelyInternal(t *testing.T) {
+	notReachableFromGateway := map[string]string{
+		"IssueParticipantCertificate": "auth issues certs during onboarding; no operator route",
+		"CreateAuditLog":              "auth writes the trail; the gateway must not inject entries",
+	}
+
+	policy, ok := serverPolicy().(authz.MethodPolicy)
+	if !ok {
+		t.Fatalf("serverPolicy must be a MethodPolicy, got %T", serverPolicy())
+	}
+	gateway := &authz.Identity{Subject: callerGateway, Method: "mtls"}
+
+	for full := range policy.ByMethod {
+		name := full[strings.LastIndex(full, "/")+1:]
+		reason, internal := notReachableFromGateway[name]
+		err := policy.Authorize(context.Background(), gateway, full)
+		switch {
+		case internal && err == nil:
+			t.Errorf("%s is listed as internal (%s) but still admits the gateway — "+
+				"drop it from notReachableFromGateway or tighten the policy", name, reason)
+		case !internal && err != nil:
+			t.Errorf("%s refuses the gateway: %v\n"+
+				"If a live HTTP route reaches this RPC (check the gateway's compliance "+
+				"adapter by gRPC call, not by Go method name), add callerGateway to its "+
+				"restriction. If nothing routes to it, list it in notReachableFromGateway "+
+				"with the reason.", name, err)
+		}
+	}
+}

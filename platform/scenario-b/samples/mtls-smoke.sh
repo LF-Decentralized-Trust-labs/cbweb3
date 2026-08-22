@@ -4,9 +4,14 @@
 # mtls-smoke.sh — the R2-H-8 acceptance check, made repeatable.
 #
 # The card that closes R2-H-8 asks for one verification: with mutual TLS and
-# enforcement enabled, a plaintext gRPC dial to any internal service port must fail
-# the TLS handshake, while a portal round-trip still succeeds over the mesh. That is
-# a two-line instruction and a half-hour of fiddling, so it lives here instead.
+# enforcement enabled, a plaintext gRPC dial to any internal service port must fail,
+# while a portal round-trip still succeeds over the mesh. That is a two-line
+# instruction and a half-hour of fiddling, so it lives here instead.
+#
+# "Plaintext is refused" and "a TLS handshake without a client certificate is refused"
+# are two different properties, and an `openssl s_client` probe only ever tests the
+# second — it opens with a TLS ClientHello, so nothing it sends reaches the wire in the
+# clear. They are checked separately below, and named for what each one actually does.
 #
 # Scenario-agnostic on purpose: it discovers containers by name suffix (-api-gateway,
 # -auth, -compliance, -payment-orchestrator), so it verifies whichever scenario's stack
@@ -73,48 +78,128 @@ mapfile -t GATEWAYS < <(docker ps --format '{{.Names}}' | grep -- '-api-gateway$
 ok "found ${#GATEWAYS[@]} api-gateway container(s)"
 
 # ── is the mesh actually on? ──────────────────────────────────────────────────
-# A pass has to mean something: if the stack was provisioned without the mesh, the
-# plaintext dial below SUCCEEDS and that is correct behaviour, not a failure. Read
-# the posture from the container's own environment rather than assuming it.
+# A pass has to mean something: if an entity was provisioned without the mesh, a
+# plaintext dial to ITS services succeeds and that is correct behaviour, not a failure.
+# Posture is therefore recorded per entity, not globally — a stack where one entity has
+# the mesh and another does not is a normal intermediate state during rollout, and
+# judging the second entity by the first would report a false failure.
 step "Mesh posture"
-MESH_ON=0
+declare -A MESH_BY_ENTITY=()
+MESH_ANY=0
 for gw in "${GATEWAYS[@]}"; do
   [[ -n $ENTITY_FILTER && $gw != *"$ENTITY_FILTER"* ]] && continue
-  cert=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$gw" | grep '^GRPC_MTLS_CERT_FILE=' | cut -d= -f2-)
-  enforce=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$gw" | grep '^GRPC_AUTHZ_ENFORCE=' | cut -d= -f2-)
+  entity=${gw%-api-gateway}
+  env_dump=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$gw")
+  cert=$(grep '^GRPC_MTLS_CERT_FILE=' <<<"$env_dump" | cut -d= -f2-)
+  enforce=$(grep '^GRPC_AUTHZ_ENFORCE=' <<<"$env_dump" | cut -d= -f2-)
   if [[ -n $cert ]]; then
-    MESH_ON=1
-    ok "$gw: mTLS material configured (enforce=${enforce:-unset})"
+    MESH_BY_ENTITY[$entity]=1; MESH_ANY=1
+    ok "$entity: mTLS material configured (enforce=${enforce:-unset})"
+    [[ ${enforce,,} == true ]] || warn "$entity: GRPC_AUTHZ_ENFORCE is not true — authz runs in audit mode"
   else
-    warn "$gw: GRPC_MTLS_CERT_FILE empty — this entity runs plaintext by design"
+    MESH_BY_ENTITY[$entity]=0
+    warn "$entity: GRPC_MTLS_CERT_FILE empty — this entity runs plaintext by design"
   fi
 done
-if [[ $MESH_ON -eq 0 ]]; then
+if [[ $MESH_ANY -eq 0 ]]; then
   printf '\n%sNo entity has the mesh enabled, so there is nothing to verify.%s\n' "$YELLOW" "$RST"
   printf 'Re-provision with GRPC_MTLS_ENABLE=1 and GRPC_AUTHZ_ENFORCE=true (see --help).\n'
   exit 2
 fi
 
-# ── 1. a plaintext dial must fail the handshake ───────────────────────────────
-step "Plaintext gRPC dial must be refused"
+# The HTTP/2 connection preface plus an empty SETTINGS frame — what any gRPC client
+# sends first. Over h2c a server answers with its own SETTINGS frame; a TLS listener
+# cannot read it as a record and answers with an alert or drops the connection.
+H2_PREFACE='PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n\x00\x00\x00\x04\x00\x00\x00\x00\x00'
+
+# ── 1. a cleartext HTTP/2 dial must not be answered ───────────────────────────
+step "Cleartext gRPC dial must not be answered"
 for svc in auth compliance payment-orchestrator; do
   for c in $(docker ps --format '{{.Names}}' | grep -- "-${svc}$" | sort); do
     [[ -n $ENTITY_FILTER && $c != *"$ENTITY_FILTER"* ]] && continue
+    entity=${c%-$svc}
+    if [[ ${MESH_BY_ENTITY[$entity]:-unset} == unset ]]; then
+      info "$c: no api-gateway found for $entity, posture unknown — skipped"; continue
+    fi
     net=$(docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{break}}{{end}}' "$c")
     port=$(docker inspect --format '{{range $p,$_ := .Config.ExposedPorts}}{{$p}}{{break}}{{end}}' "$c" | cut -d/ -f1)
     [[ -z $port ]] && { warn "$c: no exposed port found, skipped"; continue; }
 
-    # openssl with -no_tls1_3 … we simply send a plaintext TCP payload and expect the
-    # server to drop it: a TLS server answers a non-TLS ClientHello with a fatal alert
-    # or a close, never with a gRPC response.
-    out=$(docker run --rm --network "$net" "$GRPC_PROBE_IMAGE" \
-            sh -c "printf 'PRI * HTTP/2.0\r\n\r\n' | timeout 5 openssl s_client -connect ${c}:${port} -quiet 2>&1 | head -3" 2>&1)
-    if grep -qiE 'handshake failure|wrong version|unknown protocol|alert|no peer certificate|sslv3|tls' <<<"$out"; then
-      ok "$c:$port refused a plaintext dial"
-    elif [[ -z $out ]]; then
-      ok "$c:$port closed the plaintext dial without a response"
+    # Raw TCP, no TLS layer: the preface goes out in the clear. Reply bytes are captured
+    # as hex so the verdict rests on the wire response, not on a tool's log lines.
+    #
+    # Reachability is probed separately, and that separation is load-bearing: busybox nc
+    # reports a refused connection with exit status 1 and NOTHING on stderr, so "no
+    # answer" and "nobody listening" are the same observation from nc alone. Reading the
+    # first as a pass is how a probe comes to certify a port that was never dialled.
+    # Reachability first, then the dial: the gate has to be established before the
+    # observation it qualifies, or a dead port produces a "no answer" that reads as a pass.
+    probe=$(docker run --rm --network "$net" --entrypoint sh "$GRPC_PROBE_IMAGE" -c \
+      "timeout 6 openssl s_client -connect ${c}:${port} </dev/null >/tmp/t 2>&1; \
+       grep -qiE 'BIO_connect|Connection refused|connect:errno|Name or service not known' /tmp/t \
+         && echo REACH=no || echo REACH=yes; \
+       printf '$H2_PREFACE' | timeout 5 nc -w 5 ${c} ${port} >/tmp/o 2>/tmp/e; echo \"RC=\$?\"; \
+       echo \"HEX=\$(od -An -tx1 </tmp/o | tr -d ' \n')\"" 2>&1)
+    rc=$(sed -n 's/^RC=//p'    <<<"$probe")
+    hex=$(sed -n 's/^HEX=//p'   <<<"$probe")
+    reach=$(sed -n 's/^REACH=//p' <<<"$probe")
+
+    if [[ $reach != yes ]]; then
+      # Nothing was verified. Never let an unreachable port read as a pass.
+      warn "$c:$port is not accepting TCP — not verified"
+    elif [[ $hex =~ ^[0-9a-f]{6}(04|07)[0-9a-f]{2}00000000 ]]; then
+      bad "$c:$port answered the cleartext preface with an HTTP/2 frame — it is serving h2c"
+    elif [[ $hex == 485454502f* ]]; then
+      bad "$c:$port answered the cleartext preface with an HTTP/1 response"
+    elif [[ $hex == 1503* ]]; then
+      ok "$c:$port rejected the cleartext preface with a TLS alert (TLS listener confirmed)"
+    elif [[ -z $hex ]]; then
+      if [[ ${MESH_BY_ENTITY[$entity]} == 1 ]]; then
+        ok "$c:$port accepted TCP but did not answer the cleartext preface (rc=${rc:-?})"
+      else
+        info "$c:$port silent, and $entity runs plaintext by design — inconclusive, skipped"
+      fi
     else
-      bad "$c:$port answered a plaintext dial: $(head -c 120 <<<"$out")"
+      bad "$c:$port answered the cleartext preface: ${hex:0:40}"
+    fi
+  done
+done
+
+# ── 1b. a TLS handshake with no client certificate must be refused ────────────
+# This is the mutual half of mutual TLS: server-only TLS would pass check 1 above and
+# still accept any client. Entities that run plaintext by design are skipped, since
+# there is no TLS listener to interrogate.
+step "TLS handshake without a client certificate must be refused"
+for svc in auth compliance payment-orchestrator; do
+  for c in $(docker ps --format '{{.Names}}' | grep -- "-${svc}$" | sort); do
+    [[ -n $ENTITY_FILTER && $c != *"$ENTITY_FILTER"* ]] && continue
+    entity=${c%-$svc}
+    [[ ${MESH_BY_ENTITY[$entity]:-0} == 1 ]] || continue
+    net=$(docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{break}}{{end}}' "$c")
+    port=$(docker inspect --format '{{range $p,$_ := .Config.ExposedPorts}}{{$p}}{{break}}{{end}}' "$c" | cut -d/ -f1)
+    [[ -z $port ]] && continue
+
+    # Write application bytes and then wait, rather than closing stdin immediately.
+    # Under TLS 1.3 a server that demands a client certificate lets the handshake reach
+    # "Cipher is ..." and only then sends `alert certificate required`. A probe that
+    # exits at EOF races that alert — measured over repeated runs it saw it roughly one
+    # time in three, so the check reported a healthy mesh as broken two times in three.
+    # Holding the connection open for the round trip makes the alert deterministic.
+    out=$(docker run --rm --network "$net" --entrypoint sh "$GRPC_PROBE_IMAGE" -c \
+            "{ printf 'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'; sleep 3; } \
+             | timeout 12 openssl s_client -connect ${c}:${port} -verify_quiet 2>&1" 2>&1)
+    # The alert is the pass. A handshake that completes and stays quiet is the failure:
+    # the server accepted a client that presented no certificate at all.
+    if grep -qiE 'alert certificate required|alert handshake failure|alert bad certificate|peer did not return a certificate' <<<"$out"; then
+      ok "$c:$port refused a TLS handshake with no client certificate"
+    elif grep -qE 'Cipher is [^ (]' <<<"$out"; then
+      bad "$c:$port completed a TLS handshake without a client certificate"
+    elif grep -qiE 'BIO_connect|Connection refused|connect:errno' <<<"$out"; then
+      warn "$c:$port is not accepting TCP — not verified"
+    elif grep -qiE 'wrong version number|unknown protocol' <<<"$out"; then
+      bad "$c:$port is not speaking TLS on this port, but $entity is configured for the mesh"
+    else
+      warn "$c:$port gave no clear verdict: $(head -c 120 <<<"$out" | tr -d '\n')"
     fi
   done
 done

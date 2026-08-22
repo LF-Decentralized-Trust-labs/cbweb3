@@ -23,7 +23,14 @@ const (
 // today — read from the call sites, because a caller omitted here loses a working
 // path the moment enforcement is switched on.
 //
-// Reads keep the baseline policy, which still honours GRPC_AUTHZ_ALLOWED_CALLERS.
+// Reads keep the baseline policy, which still honours GRPC_AUTHZ_ALLOWED_CALLERS.//
+// One trap, named because it already caught this file once: a caller list derived by
+// grepping for the gRPC method name is WRONG when the gateway reaches an RPC through
+// an adapter method with a different name. UpsertParticipant is exactly that —
+// POST /governance/participants → GovernanceHandler.RegisterParticipant →
+// GRPCAdapter.RegisterParticipant → compliance.UpsertParticipant. Verify a caller set
+// by searching for the *gRPC* call (`.UpsertParticipant(ctx`) across every service,
+// not for the RPC's name as a Go method.
 func serverPolicy() authz.Policy {
 	return authz.
 		RestrictMethods(authz.DefaultPolicyFromEnv(), []string{callerGateway},
@@ -40,13 +47,16 @@ func serverPolicy() authz.Policy {
 			compliancv1.ComplianceService_ManageParticipantStatus_FullMethodName,
 			compliancv1.ComplianceService_SignParticipantCSR_FullMethodName,
 		).
-		// Certificate issuance, the participant record and audit writes are all
-		// auth-service steps here, so a mesh peer cannot inject entries into the
-		// compliance trail. The actor on an entry is still derived from the
-		// authenticated identity, never from the payload.
+		// Certificate issuance and audit writes are auth-service steps here, so a mesh
+		// peer cannot inject entries into the compliance trail. The actor on an entry is
+		// still derived from the authenticated identity, never from the payload.
 		WithRestriction([]string{callerAuth},
 			compliancv1.ComplianceService_IssueParticipantCertificate_FullMethodName,
-			compliancv1.ComplianceService_UpsertParticipant_FullMethodName,
 			compliancv1.ComplianceService_CreateAuditLog_FullMethodName,
+		).
+		// The participant record is written by auth during onboarding AND by the
+		// gateway's governance route — see the adapter-rename note above.
+		WithRestriction([]string{callerGateway, callerAuth},
+			compliancv1.ComplianceService_UpsertParticipant_FullMethodName,
 		)
 }
