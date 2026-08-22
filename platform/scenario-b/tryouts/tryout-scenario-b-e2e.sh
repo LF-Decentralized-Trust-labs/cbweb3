@@ -48,6 +48,18 @@ HUB_IDENTITY_REGISTRY_ADDRESS="${HUB_IDENTITY_REGISTRY_ADDRESS:-$(grep -s '^HUB_
 CURRENCY_REGISTRY_CONTRACT_ADDRESS="${CURRENCY_REGISTRY_CONTRACT_ADDRESS:-$(grep -s '^CURRENCY_REGISTRY_CONTRACT_ADDRESS=' backend/config/.env.infra.central-bank-a 2>/dev/null | cut -d= -f2 || echo '')}"
 
 # Keycloak client credentials (read from the generated .env files)
+# ── Sovereign corridor under test ────────────────────────────────────────────
+# The hub wraps each sovereign currency with a "W-" prefix and names a pool by BOTH
+# wrapped sides — "W-BRL-W-ARS", not "${POOL_PAIR}". This script hardcoded "${POOL_PAIR}" in 28
+# places: a pair from an earlier corridor that no toolkit stack has, so every pool
+# read, quote, swap, commit and breaker call addressed something that does not exist.
+#
+# Defaults follow samples/deploy-all.sh (BRL<->ARS). tests/integration/toolkit-env.sh
+# exports these three, so sourcing it points the tryout at whatever corridor is live.
+SOURCE_CURRENCY="${SOURCE_CURRENCY:-BRL}"
+TARGET_CURRENCY="${TARGET_CURRENCY:-ARS}"
+POOL_PAIR="${POOL_PAIR:-W-${SOURCE_CURRENCY}-W-${TARGET_CURRENCY}}"
+
 KC_BANK_A_REALM="${KC_BANK_A_REALM:-bank-a}"
 KC_BANK_A_CLIENT="${KC_BANK_A_CLIENT:-bank-a-client}"
 KC_BANK_A_SECRET="${KC_BANK_A_SECRET:-$(grep -s '^KC_CLIENT_SECRET=' backend/config/.env.infra.bank-a 2>/dev/null | cut -d= -f2 || echo '')}"
@@ -243,7 +255,7 @@ step3_participants() {
 step4_pool() {
   step "4. Verify AMM pool status (seed initial liquidity if empty)"
   local resp reserve_a reserve_b pool_status
-  resp="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/BRL-USD/status" "$BANK_A_TOKEN" || true)"
+  resp="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/${POOL_PAIR}/status" "$BANK_A_TOKEN" || true)"
   log "Pool status: $(echo "$resp" | jq -c '.' 2>/dev/null || echo "$resp")"
   if echo "$resp" | jq -e '.reserve_a' >/dev/null 2>&1; then
     reserve_a="$(echo "$resp" | jq -r '.reserve_a // "0"')"
@@ -367,7 +379,7 @@ step4b_seed_liquidity() {
   # FR-001: commit-reveal is only required for initial pool formation (state EMPTY).
   # If pool already has bilateral reserves (e.g. re-run of tryout), skip to avoid
   # COMMIT_ALREADY_EXISTS errors. LP_ID_BCB will remain empty → step6 uses LEGACY fallback.
-  pool_resp="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/BRL-USD/status" "$BANK_A_TOKEN" || true)"
+  pool_resp="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/${POOL_PAIR}/status" "$BANK_A_TOKEN" || true)"
   reserve_a="$(echo "$pool_resp" | jq -r '.reserve_a // "0"')"
   reserve_b="$(echo "$pool_resp" | jq -r '.reserve_b // "0"')"
   if [ "$reserve_a" != "0" ] && [ "$reserve_b" != "0" ]; then
@@ -381,7 +393,7 @@ step4b_seed_liquidity() {
   # (before routing was fixed) but it is isolated and will not affect this flow.
   local stale_commits stale_count stale_id stale_provider
   stale_commits="$(curl -sf -X GET \
-    "$API_GW_CENTRAL_BANK_A_URL/api/v2/amm/liquidity/commits?pool_pair=BRL-USD&status=PENDING" \
+    "$API_GW_CENTRAL_BANK_A_URL/api/v2/amm/liquidity/commits?pool_pair=${POOL_PAIR}&status=PENDING" \
     -b "access_token=$CENTRAL_BANK_A_TOKEN" 2>/dev/null || echo '{}')"
   stale_count="$(echo "$stale_commits" | jq -r '.count // 0')"
   if [ "$stale_count" -gt 0 ] 2>/dev/null; then
@@ -396,7 +408,7 @@ step4b_seed_liquidity() {
   fi
 
   # --- Commit side A (TOKEN_A / BRL) from central-bank-a ---
-  commit_a_body='{"pool_pair":"BRL-USD","provider_id":"central_bank_a","side":"A","amount":"100000"}'
+  commit_a_body='{"pool_pair":"'"$POOL_PAIR"'","provider_id":"central_bank_a","side":"A","amount":"100000"}'
   commit_a_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/liquidity/commit" "$commit_a_body" "$CENTRAL_BANK_A_TOKEN" || true)"
   log "Commit A response: $(echo "$commit_a_resp" | jq -c '.' || echo "$commit_a_resp")"
   commit_a_id="$(echo "$commit_a_resp" | jq -r '.commit_id // empty')"
@@ -406,7 +418,7 @@ step4b_seed_liquidity() {
   # --- C2: Verify pool is PENDING_COUNTERPART after commit A, before commit B ---
   # I3 fix: query CB-A gateway (port 38080) where commit A is stored — pending_commits[] is DB-local.
   # Bank A gateway (cbweb3_bank_a DB) has no commits, so it always returns EMPTY for this check.
-  pool_resp="$(api_get "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/pool/BRL-USD/status" "$CENTRAL_BANK_A_TOKEN" || true)"
+  pool_resp="$(api_get "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/pool/${POOL_PAIR}/status" "$CENTRAL_BANK_A_TOKEN" || true)"
   pool_status="$(echo "$pool_resp" | jq -r '.pool_status // "UNKNOWN"')"
   reserve_a="$(echo "$pool_resp" | jq -r '.reserve_a // "0"')"
   reserve_b="$(echo "$pool_resp" | jq -r '.reserve_b // "0"')"
@@ -422,7 +434,7 @@ step4b_seed_liquidity() {
   # --- C1: Verify swap is blocked with POOL_NOT_ACTIVE while pool is PENDING_COUNTERPART ---
   # Uses same field names as step5_us1 (pair, amount_out, payer_id, beneficiary_id)
   swap_reject_resp="$(api_post "$API_GW_BANK_A_URL" "/api/v2/amm/swap/exact-output" \
-    '{"pair":"BRL-USD","amount_out":"100","max_amount_in":"110","payer_id":"bank_a","beneficiary_id":"bank_c"}' \
+    '{"pair":"'"$POOL_PAIR"'","amount_out":"100","max_amount_in":"110","payer_id":"bank_a","beneficiary_id":"bank_c"}' \
     "$BANK_A_TOKEN" || true)"
   swap_reject_err="$(echo "$swap_reject_resp" | jq -r '.error // .error_code // empty')"
   if [ "$swap_reject_err" = "POOL_NOT_ACTIVE" ]; then
@@ -435,7 +447,7 @@ step4b_seed_liquidity() {
   # central-bank-a already has commit A (side A) → trying commit B with same provider must be rejected.
   local same_prov_resp same_prov_err
   same_prov_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/liquidity/commit" \
-    '{"pool_pair":"BRL-USD","provider_id":"central_bank_a","side":"B","amount":"100000"}' \
+    '{"pool_pair":"'"$POOL_PAIR"'","provider_id":"central_bank_a","side":"B","amount":"100000"}' \
     "$CENTRAL_BANK_A_TOKEN" || true)"
   same_prov_err="$(echo "$same_prov_resp" | jq -r '.error_code // .error // empty')"
   if [ "$same_prov_err" = "SAME_PROVIDER_BOTH_SIDES" ]; then
@@ -448,17 +460,17 @@ step4b_seed_liquidity() {
   # NOTE (spec-007): G5-cross pattern was DEPRECATED. CB-A's signer no longer holds
   # TOKEN_B after step 4a (mint blocked by anti-G5-cross guard). In environments
   # com spec-007 deployado, o executeMatchedCommits will fail due to lack of balance TOKEN_B.
-  # BRL-USD pool (HUB_TOKEN_A/B) is deprecated for new deposits via G5-cross
+  # ${POOL_PAIR} pool (HUB_TOKEN_A/B) is deprecated for new deposits via G5-cross
   # (spec-007 FR-002). Para pools soberanos: ./tryouts/tryout-sovereign-cb-liquidity.sh
   # provider_id=central_bank_b is metadata only; execution uses CB-A signer (legacy).
-  commit_b_body='{"pool_pair":"BRL-USD","provider_id":"central_bank_b","side":"B","amount":"100000"}'
+  commit_b_body='{"pool_pair":"'"$POOL_PAIR"'","provider_id":"central_bank_b","side":"B","amount":"100000"}'
   commit_b_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/liquidity/commit" "$commit_b_body" "$CENTRAL_BANK_A_TOKEN" || true)"
   log "Commit B response: $(echo "$commit_b_resp" | jq -c '.' || echo "$commit_b_resp")"
   commit_b_id="$(echo "$commit_b_resp" | jq -r '.commit_id // empty')"
   if [ -z "$commit_b_id" ]; then
     # Graceful degradation expected with spec-007 deployed:
     # CB-A has no TOKEN_B (blocked by anti-G5-cross guard in step 4a),
-    # so addSingleSidedLiquidity(TOKEN_B) reverts on-chain. BRL-USD pool
+    # so addSingleSidedLiquidity(TOKEN_B) reverts on-chain. ${POOL_PAIR} pool
     # via G5-cross is deprecated (spec-007 FR-002 / Out of Scope).
     # Step 6 will use legacy path de addLiquidity dual-sided como fallback.
     log "WARN: step4b: commit B bloqueado pelo anti-G5-cross guard (spec-007 FR-002) — degradando graciosamente"
@@ -474,7 +486,7 @@ step4b_seed_liquidity() {
   [ -n "$LP_ID_FED" ] && log "LP_ID_FED (central-bank-b): $LP_ID_FED" || log "WARN: lp_ids[1] not in commit B response"
 
   # --- Verify pool status is now ACTIVE ---
-  pool_resp="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/BRL-USD/status" "$BANK_A_TOKEN" || true)"
+  pool_resp="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/${POOL_PAIR}/status" "$BANK_A_TOKEN" || true)"
   reserve_a="$(echo "$pool_resp" | jq -r '.reserve_a // "0"')"
   reserve_b="$(echo "$pool_resp" | jq -r '.reserve_b // "0"')"
   pool_status="$(echo "$pool_resp" | jq -r '.pool_status // "UNKNOWN"')"
@@ -484,7 +496,7 @@ step4b_seed_liquidity() {
     log "WARN: step4b: pool still empty after commit-reveal (reserve_a=${reserve_a}, reserve_b=${reserve_b})"
     log "      Likely cause: G5-cross blocked by spec-007 FR-004 — CB-A has no TOKEN_B balance."
     log "      This is EXPECTED in environments with spec-007 deployed."
-    log "      Para US1/US2: certifique-se de que o pool BRL-USD foi pre-semeado antes de rodar este tryout."
+    log "      Para US1/US2: certifique-se de que o pool ${POOL_PAIR} foi pre-semeado antes de rodar este tryout."
     log "      Para o novo fluxo soberano: use ./tryouts/tryout-sovereign-cb-liquidity.sh"
     return 0
   fi
@@ -496,7 +508,7 @@ step4b_seed_liquidity() {
   # --- C4: Verify total_lp_count = 2 from CB-A gateway (I4 / FR-009) ---
   # total_lp_count is DB-local: LP positions live in cbweb3_central_bank_a (CB-A's DB).
   # Querying from Bank A gateway (cbweb3_bank_a) always returns 0 for cooperative positions.
-  pool_lp_resp="$(api_get "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/pool/BRL-USD/status" "$CENTRAL_BANK_A_TOKEN" || true)"
+  pool_lp_resp="$(api_get "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/pool/${POOL_PAIR}/status" "$CENTRAL_BANK_A_TOKEN" || true)"
   total_lp_count="$(echo "$pool_lp_resp" | jq -r '.total_lp_count // 0')"
   if [ "$(echo "$total_lp_count >= 2" | bc 2>/dev/null || echo 0)" = "1" ] || [ "$total_lp_count" -ge 2 ] 2>/dev/null; then
     log "PASS: total_lp_count=$total_lp_count (expected ≥2 after cooperative commit-reveal, FR-009 / I4)"
@@ -514,7 +526,7 @@ step5_us1() {
 
   # --- C6: Assert pool is ACTIVE and fee_rate_bps = 30 before swap (SC-001 / T018) ---
   local pool_pre pool_status_pre fee_rate_pre reserve_a_pre reserve_b_pre
-  pool_pre="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/BRL-USD/status" "$BANK_A_TOKEN")"
+  pool_pre="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/${POOL_PAIR}/status" "$BANK_A_TOKEN")"
   pool_status_pre="$(echo "$pool_pre" | jq -r '.pool_status // "UNKNOWN"')"
   fee_rate_pre="$(echo "$pool_pre" | jq -r '.fee_rate_bps // "?"')"
   reserve_a_pre="$(echo "$pool_pre" | jq -r '.reserve_a // "0"')"
@@ -522,7 +534,7 @@ step5_us1() {
   if [ "$pool_status_pre" = "ACTIVE" ]; then
     log "PASS: pool_status=ACTIVE (SC-001 / T018)"
   elif [ "$reserve_a_pre" = "0" ] || [ "$reserve_b_pre" = "0" ]; then
-    # Graceful degradation expected in spec-007: BRL-USD pool cannot be seeded
+    # Graceful degradation expected in spec-007: ${POOL_PAIR} pool cannot be seeded
     # bilaterally with G5-cross pattern blocked. Use tryout-sovereign-cb-liquidity.sh
     # to validate US1 with the sovereign pair (W-tCeBM).
     log "WARN: step5: pool without bilateral liquidity (reserve_a=${reserve_a_pre}, reserve_b=${reserve_b_pre}) — swap skipped (spec-007: use tryout-sovereign-cb-liquidity.sh for US1)"
@@ -537,13 +549,13 @@ step5_us1() {
   fi
 
   local quote
-  quote="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/quote/exact-output?pair=BRL-USD&amount_out=1000" "$BANK_A_TOKEN")"
+  quote="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/quote/exact-output?pair=${POOL_PAIR}&amount_out=1000" "$BANK_A_TOKEN")"
   log "Quote: $(echo "$quote" | jq -c '.')"
 
   local max_in
   max_in="$(echo "$quote" | jq -r '.required_input // "0"')"
   local swap_body
-  swap_body="$(jq -cn --arg pair "BRL-USD" --arg amount_out "1000" --arg max_in "$max_in" \
+  swap_body="$(jq -cn --arg pair "${POOL_PAIR}" --arg amount_out "1000" --arg max_in "$max_in" \
     --arg payer "bank-a" --arg beneficiary "bank-c" \
     '{pair:$pair, amount_out:$amount_out, max_amount_in:$max_in, payer_id:$payer, beneficiary_id:$beneficiary}')"
   local swap
@@ -551,11 +563,11 @@ step5_us1() {
   log "Swap: $(echo "$swap" | jq -c '.')"
   local swap_state
   swap_state="$(echo "$swap" | jq -r '.state // empty')"
-  [ "$swap_state" = "COMPLETED" ] && log "PASS: Swap BRL-USD executed — state=COMPLETED (FR-028)" || \
+  [ "$swap_state" = "COMPLETED" ] && log "PASS: Swap ${POOL_PAIR} executed — state=COMPLETED (FR-028)" || \
     log "WARN: Swap state=${swap_state:-no state} — expected COMPLETED"
 
   local pool pool_cba
-  pool="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/BRL-USD/status" "$BANK_A_TOKEN")"
+  pool="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/${POOL_PAIR}/status" "$BANK_A_TOKEN")"
   log "Pool after swap (bank-a view): $(echo "$pool" | jq -c '.')"
   # I4 / Session 2026-05-20: total_lp_count is gateway-scoped (local DB only).
   # bank-a gateway has no LP positions in its DB -> total_lp_count=0 is EXPECTED, not a bug.
@@ -563,7 +575,7 @@ step5_us1() {
   bank_a_lp_count="$(echo "$pool" | jq -r '.total_lp_count // 0')"
   log "INFO: bank-a total_lp_count=$bank_a_lp_count (expected 0 — LP positions live in CB-A/CB-B gateways, not bank-a gateway)"
   # I4: also log total_lp_count from CB-A gateway (authoritative for cooperative LPs)
-  pool_cba="$(api_get "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/pool/BRL-USD/status" "$CENTRAL_BANK_A_TOKEN" || true)"
+  pool_cba="$(api_get "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/pool/${POOL_PAIR}/status" "$CENTRAL_BANK_A_TOKEN" || true)"
   log "Pool after swap (central-bank-a view, total_lp_count): $(echo "$pool_cba" | jq -r '.total_lp_count // 0')"
 }
 
@@ -584,7 +596,7 @@ step6_us2() {
     log "Using cooperative LP position (LP_ID_BCB): $LP_ID"
   else
     local add_body add_resp
-    add_body='{"pool_pair":"BRL-USD","token_a_amount":"10000","token_b_amount":"10000","provider_bank_id":"central_bank_a"}'
+    add_body='{"pool_pair":"'"$POOL_PAIR"'","token_a_amount":"10000","token_b_amount":"10000","provider_bank_id":"central_bank_a"}'
     add_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/liquidity/add" "$add_body" "$CENTRAL_BANK_A_TOKEN" || true)"
     log "Add liquidity (fallback dual-sided): $(echo "$add_resp" | jq -c '.' || echo "$add_resp")"
     LP_ID="$(echo "$add_resp" | jq -r '.lp_id // empty')"
@@ -623,10 +635,10 @@ step6_us2() {
 
   # Remove liquidity — use lp_id — expect PROPORTIONAL withdrawal_mode for cooperative positions
   if [ -z "$LP_ID" ]; then
-    log "SKIP: step6: remove liquidity — no LP_ID available (pool BRL-USD without bilateral liquidity in spec-007)"
+    log "SKIP: step6: remove liquidity — no LP_ID available (pool ${POOL_PAIR} without bilateral liquidity in spec-007)"
   else
   local remove_body remove_resp withdrawal_mode fee_claim_paid returned_a returned_b
-  remove_body="$(jq -cn --arg id "$LP_ID" --arg bank "central_bank_a" '{lp_id:$id, pool_pair:"BRL-USD", provider_bank_id:$bank}')"
+  remove_body="$(jq -cn --arg id "$LP_ID" --arg bank "central_bank_a" --arg pair "$POOL_PAIR" '{lp_id:$id, pool_pair:$pair, provider_bank_id:$bank}')"
   remove_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/liquidity/remove" "$remove_body" "$CENTRAL_BANK_A_TOKEN" || true)"
   log "Remove liquidity: $(echo "$remove_resp" | jq -c '.' || echo "$remove_resp")"
 
@@ -669,7 +681,7 @@ step7_us3() {
   log "CB status (pre): $(echo "$status" | jq -c '.')"
 
   local pause_body pause_resp pause_state
-  pause_body='{"pair":"BRL-USD","bank_id":"central_bank_1","reason_code":"E2E_TRYOUT_INCIDENT","signature":"AA=="}'
+  pause_body='{"pair":"'"$POOL_PAIR"'","bank_id":"central_bank_1","reason_code":"E2E_TRYOUT_INCIDENT","signature":"AA=="}'
   pause_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/governance/circuit-breaker/pause" "$pause_body" "$CENTRAL_BANK_A_TOKEN" | jq -c '.' || true)"
   log "Pause CB: ${pause_resp}"
   pause_state="$(echo "$pause_resp" | jq -r '.state // empty')"
@@ -677,7 +689,7 @@ step7_us3() {
     log "WARN: expected HALTED after pause, got: ${pause_state:-no state}"
 
   local resume_req
-  resume_req='{"pair":"BRL-USD","bank_id":"central_bank_1","signature":"AA=="}'
+  resume_req='{"pair":"'"$POOL_PAIR"'","bank_id":"central_bank_1","signature":"AA=="}'
   local req_resp
   req_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/governance/circuit-breaker/resume-request" "$resume_req" "$CENTRAL_BANK_A_TOKEN")"
   log "Resume proposal: $(echo "$req_resp" | jq -c '.')"
@@ -686,7 +698,7 @@ step7_us3() {
 
   if [ -n "$request_id" ]; then
     local sign_body resume_sign_resp resume_state
-    sign_body="$(jq -cn --arg id "$request_id" --arg bank "central_bank_2" '{pair:"BRL-USD", request_id:$id, bank_id:$bank, signature:"AA=="}')"
+    sign_body="$(jq -cn --arg id "$request_id" --arg bank "central_bank_2" --arg pair "$POOL_PAIR" '{pair:$pair, request_id:$id, bank_id:$bank, signature:"AA=="}')"
     resume_sign_resp="$(api_post "$API_GW_CENTRAL_BANK_B_URL" "/api/v2/governance/circuit-breaker/resume-sign" "$sign_body" "$CENTRAL_BANK_B_TOKEN" | jq -c '.' || true)"
     log "Resume sign#2: ${resume_sign_resp}"
     resume_state="$(echo "$resume_sign_resp" | jq -r '.state // empty')"
@@ -738,8 +750,8 @@ step_mlp_us2() {
 
   # ── 2. POST /api/v2/amm/liquidity/add (dual-sided) ──
   local add_body add_resp lp_id deposit_side
-  add_body="$(jq -cn \
-    '{pool_pair:"BRL-USD",token_a_amount:"10000",token_b_amount:"10000",provider_bank_id:"mlp"}')"
+  add_body="$(jq -cn --arg pair "$POOL_PAIR" \
+    '{pool_pair:$pair,token_a_amount:"10000",token_b_amount:"10000",provider_bank_id:"mlp"}')"
   add_resp="$(api_post "$API_GW_MLP_URL" "/api/v2/amm/liquidity/add" \
     "$add_body" "$MLP_TOKEN" || true)"
   log "MLP addLiquidity response: $(echo "$add_resp" | jq -c '.')"
@@ -830,7 +842,7 @@ step8_pair_registry() {
   # ── 4. Rejection: NOT_CENTRAL_BANK_OF_TOKEN_A — commercial bank cannot propose ──
   local unauth_body unauth_resp unauth_code
   unauth_body="$(jq -cn \
-    --arg pair "BRL-USD" \
+    --arg pair "$POOL_PAIR" \
     --arg tA   "${HUB_TOKEN_A_ADDRESS:-}" \
     --arg tB   "${HUB_TOKEN_B_ADDRESS:-}" \
     --arg amm  "${AMM_CONTRACT_ADDRESS:-0x0000000000000000000000000000000000000001}" \
