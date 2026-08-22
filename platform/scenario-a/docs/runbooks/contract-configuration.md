@@ -194,7 +194,7 @@ SpokeBridge coordinates cross-spoke messages. Uses the IdentityRegistry to verif
 
 ### Realms and clients
 
-The toolkit's Keycloak provisioning step automatically creates one realm and one client per entity during `make deploy.up-infra`:
+The toolkit's Keycloak provisioning step automatically creates one realm and one client per entity when `cbweb3 apply` runs the `provision-keycloak` step:
 
 | Entity | Realm | Client ID |
 |--------|-------|-----------|
