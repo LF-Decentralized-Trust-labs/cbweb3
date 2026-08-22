@@ -21,7 +21,6 @@ export ENABLE_MLP
 export MLP_ADDRESS
 
 # ── RPC defaults (override via env) ──────────────────────────────────────────
-BESU_HUB_RPC ?= http://localhost:8845
 SPOKE_A_RPC  ?= http://localhost:8645
 SPOKE_B_RPC  ?= http://localhost:8745
 KEYCLOAK_URL    ?= http://localhost:8081
@@ -211,50 +210,55 @@ scenario-b.tryout-us3:
 	@$(SCENARIO_B_ENV) bash tryouts/tryout-scenario-b-e2e.sh us3
 
 # ── Integration test (full happy-path API test) ──────────────────────────────
-
-SKIP_UP   ?= 1
+# This target does NOT provision. Bring a stack up first:
+#   cd samples && ./deploy-all.sh
+#
+# Endpoints, Besu RPCs and operator logins are DERIVED from the toolkit manifests by
+# tests/integration/toolkit-env.sh — defaults follow samples/deploy-all.sh (Brazil =
+# spoke-a, Argentina = spoke-b, through the neutral hub). Anything passed on the
+# command line or exported wins over the derived value, e.g.
+#
+#   make scenario-b.test-integration API_GW_BANK_A_URL=http://localhost:41646
+#   CB_B_MANIFEST=/path/to/cb.yaml make scenario-b.test-integration
+#
+# SKIP_UP is gone: the suite can no longer create or destroy a stack.
 SKIP_DOWN ?= 1
 
-scenario-b.test-integration: ## Run full happy-path API integration test against a live stack
-	@echo "[scenario-b] running integration test (full happy path)..."
-ifeq ($(SKIP_UP),0)
-	@# SKIP_UP=0 used to call `scenario-b.up`, the legacy deploy/local bring-up. That
-	@# target no longer exists, so this branch failed with "No rule to make target"
-	@# instead of doing anything. There is no automatic bring-up any more: the toolkit
-	@# is the single provisioning path and it is driven from samples/, not from here.
-	@echo "[scenario-b] SKIP_UP=0 is no longer supported: this target does not provision."
-	@echo "[scenario-b] Bring a stack up first:  cd samples && ./deploy-all.sh"
-	@echo "[scenario-b] then re-run without SKIP_UP=0, passing the toolkit's gateway URLs."
-	@exit 1
-endif
-	@cd tests/integration && \
-	  SKIP_UP=1 \
-	  SKIP_DOWN=$(SKIP_DOWN) \
-	  KEYCLOAK_URL=$(KEYCLOAK_URL) \
-	  API_GW_BANK_A_URL=$(API_GW_BANK_A_URL) \
-	  API_GW_BANK_B_URL=$(API_GW_BANK_B_URL) \
-	  API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL) \
-	  API_GW_CENTRAL_BANK_B_URL=$(API_GW_CENTRAL_BANK_B_URL) \
+TOOLKIT_ENV := tests/integration/toolkit-env.sh
+
+scenario-b.test-integration: ## Run the happy-path test against an ALREADY-RUNNING toolkit stack
+	@echo "[scenario-b] deriving endpoints from the toolkit manifests..."
+	@# The script runs under BASH and its `export …` output is eval'd, rather than
+	@# sourced: recipes run under /bin/sh (dash here), which rejects the script's
+	@# `set -o pipefail`. Values are printf %q-quoted, so the eval is safe.
+	@eval "$$(bash ./$(TOOLKIT_ENV))"; \
+	  if ! curl -sf -o /dev/null --max-time 5 "$$API_GW_BANK_A_URL/healthz"; then \
+	    echo "[scenario-b] no stack answering at $$API_GW_BANK_A_URL."; \
+	    echo "[scenario-b] Bring one up with the toolkit first:  cd samples && ./deploy-all.sh"; \
+	    exit 1; \
+	  fi; \
+	  echo "[scenario-b] stack detected — running the full happy path..."; \
+	  cd tests/integration && \
+	  SKIP_UP=1 SKIP_DOWN=$(SKIP_DOWN) \
 	  $(if $(EVIDENCE_DIR),EVIDENCE_DIR=$(EVIDENCE_DIR),) \
-	  BESU_HUB_RPC=$(BESU_HUB_RPC) \
-	  BESU_SPOKE_B_RPC=$(BESU_SPOKE_B_RPC) \
 	  go test -v -count=1 -tags integration -timeout 30m -run TestFullHappyPath ./...
+
+scenario-b.test-integration-env: ## Print the endpoints/credentials the happy-path test would use
+	@bash $(TOOLKIT_ENV)
 
 # ── On-chain evidence capture (D12 P0-D12-1) ─────────────────────────────────
 # Run the instrumented happy path against a live stack so the harness records each
 # step's tx_hash + block_number + gas_used from the Besu RPC, then regenerate the
 # machine-readable evidence bundle with those populated on-chain fields.
-BESU_HUB_RPC     ?= http://localhost:8845
-BESU_SPOKE_B_RPC ?= http://localhost:8745
 EVIDENCE_DIR     ?= $(CURDIR)/../evidence-bundles/_harness
 
 evidence.e2e-b: ## Capture live on-chain evidence (tx_hash/block/gas) and regenerate the Scenario B bundle
 	@echo "[scenario-b] capturing on-chain evidence to $(EVIDENCE_DIR)..."
 	@mkdir -p "$(EVIDENCE_DIR)"
-	@$(MAKE) scenario-b.test-integration \
-	  EVIDENCE_DIR="$(EVIDENCE_DIR)" \
-	  BESU_HUB_RPC=$(BESU_HUB_RPC) \
-	  BESU_SPOKE_B_RPC=$(BESU_SPOKE_B_RPC)
+	@# The Besu RPCs are no longer forwarded here: toolkit-env.sh derives them from the
+	@# same manifests as the gateways, so a hand-passed value could disagree with the
+	@# topology under test. A command-line override still reaches the sub-make.
+	@$(MAKE) scenario-b.test-integration EVIDENCE_DIR="$(EVIDENCE_DIR)"
 	@echo "[scenario-b] folding capture into the Scenario B evidence bundle..."
 	@python3 ../tools/gen_evidence_bundles.py e2e-scenario-b
 
@@ -350,7 +354,7 @@ scenario-b.check-postman:
 	scenario-b.up scenario-b.up-perf scenario-b.down scenario-b.restart scenario-b.nuke \
 	scenario-b.test-contracts scenario-b.test-backend scenario-b.test \
 	scenario-b.tryout scenario-b.tryout-us1 scenario-b.tryout-us2 scenario-b.tryout-us3 \
-	scenario-b.test-integration evidence.e2e-b \
+	scenario-b.test-integration scenario-b.test-integration-env evidence.e2e-b \
 	scenario-b.perf-baseline scenario-b.validate-openapi \
 	scenario-b.gen-postman scenario-b.check-postman \
 	scenario-b.perf-amm-throughput scenario-b.perf-transfer \

@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -60,7 +59,6 @@ const (
 	// expected cost — comfortable headroom against price impact/fees, yet a meaningful
 	// slippage guard (the prior 800 BRL was sized for the obsolete 1:1 pool).
 	swapMaxIn = "5000000000000000000" // 5e18 → max BRL in
-	poolPair  = "W-BRL-ARS"
 
 	// withdrawFractionBps withdraws part of CB-A's position (40%) so Phase 6 exercises a
 	// partial LP exit — CB-A keeps a reduced, still-active position afterward.
@@ -81,15 +79,14 @@ func TestMain(m *testing.M) {
 		"spoke-b": cfg.BesuSpokeBURL,
 	})
 
+	// The suite no longer provisions. SKIP_UP=0 used to run `make scenario-b.up`, the
+	// legacy deploy/local bring-up; that target is gone, so the branch could only fail
+	// with "No rule to make target". The toolkit is the single provisioning path and it
+	// is driven from samples/, never from a test.
 	if !cfg.SkipUp {
-		root := scenarioBRoot()
-		cmd := exec.Command("make", "-C", root, "scenario-b.up")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "scenario-b.up failed: %v\n", err)
-			os.Exit(1)
-		}
+		fmt.Fprintln(os.Stderr, "[scenario-b] SKIP_UP=0 is no longer supported: this suite does not provision.")
+		fmt.Fprintln(os.Stderr, "[scenario-b] Bring a stack up first:  cd samples && ./deploy-all.sh")
+		os.Exit(1)
 	}
 
 	code := m.Run()
@@ -103,12 +100,9 @@ func TestMain(m *testing.M) {
 		fmt.Printf("[scenario-b] wrote on-chain evidence: %s\n", path)
 	}
 
+	// Teardown is the operator's call, for the same reason.
 	if !cfg.SkipDown {
-		root := scenarioBRoot()
-		cmd := exec.Command("make", "-C", root, "scenario-b.down")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		_ = cmd.Run()
+		fmt.Fprintln(os.Stderr, "[scenario-b] SKIP_DOWN=0 is no longer supported: this suite does not tear stacks down.")
 	}
 
 	os.Exit(code)
@@ -117,6 +111,8 @@ func TestMain(m *testing.M) {
 // TestFullHappyPath runs the complete Scenario B happy path end-to-end.
 // Each phase is a subtest so individual phases can be targeted with -run.
 func TestFullHappyPath(t *testing.T) {
+	cfg.requireComplete(t)
+
 	// Phase 0: wait for all gateways to be healthy.
 	t.Run("phase_0_readiness", func(t *testing.T) {
 		start := time.Now()
@@ -152,12 +148,22 @@ func TestFullHappyPath(t *testing.T) {
 			ReserveA   string `json:"reserve_a"`
 			ReserveB   string `json:"reserve_b"`
 		}
-		if err := cbA.get(t, "/api/v2/amm/pool/"+poolPair+"/status", &poolStatus); err == nil &&
+		if err := cbA.get(t, "/api/v2/amm/pool/"+cfg.PoolPair+"/status", &poolStatus); err == nil &&
 			poolStatus.PoolStatus == "ACTIVE" {
 			t.Logf("Pool already ACTIVE (reserve_a=%s reserve_b=%s) — skipping provision",
 				poolStatus.ReserveA, poolStatus.ReserveB)
 			return
 		}
+
+		// Open the sovereign corridor first. Provisioning deliberately does NOT open
+		// it — a corridor is two sovereign acts, each signed by its own central bank —
+		// so on a freshly provisioned stack the pair does not exist and every call
+		// below fails with `resolve pair "…": not found among active pairs`.
+		//
+		// The suite predates that model: it assumed a default AMM created by the
+		// bring-up. Opening the pair here is what the CB governance portal does, and
+		// what samples/sample-tryout.sh does, via the same two v2 endpoints.
+		openCorridor(t, cbA, cbB)
 
 		t.Log("Step 1: CB-A bridge lock-mint (lock tCeBM on Spoke-A, mint W-token on Hub)...")
 		var lockMintA struct {
@@ -185,74 +191,59 @@ func TestFullHappyPath(t *testing.T) {
 		t.Log("Step 4: Polling CB-B bridge position until ACTIVE...")
 		pollBridgeActive(t, cbB, lockMintB.PositionID, "CB-B")
 
-		t.Log("Step 5: CB-A mint-and-approve hub W-tokens for AMM...")
-		var mintResp map[string]interface{}
-		cbA.mustPost(t, "/api/v2/amm/token/mint-and-approve",
-			map[string]string{"amount": mintAmountA}, &mintResp)
-		assert.Equal(t, "ok", mintResp["status"], "CB-A mint-and-approve status")
-
-		t.Log("Step 6: CB-B mint-and-approve hub W-tokens for AMM...")
-		cbB.mustPost(t, "/api/v2/amm/token/mint-and-approve",
-			map[string]string{"amount": mintAmountB}, &mintResp)
-		assert.Equal(t, "ok", mintResp["status"], "CB-B mint-and-approve status")
-
-		t.Log("Step 7: CB-A submits liquidity commit (side A)...")
-		var commitAResp struct {
-			CommitID string `json:"commit_id"`
-			Status   string `json:"status"`
+		// Sovereign escrow-and-finalize seeding. Each central bank deposits ONLY its
+		// own side, then one finalize funds both reserves atomically.
+		//
+		// This replaces the commit/match flow the suite used to drive
+		// (/liquidity/commit ×2, then poll until EXECUTED). That route still answers,
+		// but the LiquidityCommitRegistry behind it was removed with the legacy
+		// sovereign tail, so nothing ever fires CommitMatched and the commits sat
+		// PENDING until the 2-minute poll gave up — the failure this replaces.
+		//
+		// deposit-side mints and approves the caller's own W-token internally and
+		// resolves the side on-chain from pool_pair, so the two mint-and-approve calls
+		// that preceded it are gone too: one sovereign act, one call, own side only.
+		t.Log("Step 5: CB-A deposits its own side...")
+		var depositA struct {
+			Side string `json:"side"`
 		}
-		cbA.mustPost(t, "/api/v2/amm/liquidity/commit", map[string]string{
-			"pool_pair":   poolPair,
-			"provider_id": "central_bank_a",
-			"side":        "A",
-			"amount":      commitAmountA,
-		}, &commitAResp)
-		require.NotEmpty(t, commitAResp.CommitID, "CB-A commit_id must not be empty")
-		t.Logf("CB-A commit_id=%s status=%s", commitAResp.CommitID, commitAResp.Status)
+		cbA.mustPost(t, "/api/v2/amm/liquidity/deposit-side", map[string]string{
+			"pool_pair": cfg.PoolPair,
+			"amount":    commitAmountA,
+		}, &depositA)
+		t.Logf("  CB-A deposited side %s (%s)", depositA.Side, commitAmountA)
 
-		t.Log("Step 8: CB-B submits liquidity commit (side B)...")
-		var commitBResp struct {
-			CommitID string `json:"commit_id"`
-			Status   string `json:"status"`
+		t.Log("Step 6: CB-B deposits its own side...")
+		var depositB struct {
+			Side string `json:"side"`
 		}
-		cbB.mustPost(t, "/api/v2/amm/liquidity/commit", map[string]string{
-			"pool_pair":   poolPair,
-			"provider_id": "central_bank_b",
-			"side":        "B",
-			"amount":      commitAmountB,
-		}, &commitBResp)
-		require.NotEmpty(t, commitBResp.CommitID, "CB-B commit_id must not be empty")
-		t.Logf("CB-B commit_id=%s status=%s", commitBResp.CommitID, commitBResp.Status)
+		cbB.mustPost(t, "/api/v2/amm/liquidity/deposit-side", map[string]string{
+			"pool_pair": cfg.PoolPair,
+			"amount":    commitAmountB,
+		}, &depositB)
+		t.Logf("  CB-B deposited side %s (%s)", depositB.Side, commitAmountB)
+		require.NotEqual(t, depositA.Side, depositB.Side,
+			"each central bank must hold a DIFFERENT side — same side means the pool is one-sided")
 
-		t.Log("Step 9: Polling CB-A commit until EXECUTED (Cacti relay fires CommitMatched)...")
-		pollUntil(t, 5*time.Second, 2*time.Minute, func() (bool, error) {
-			var s struct {
-				Status string `json:"status"`
-			}
-			if err := cbA.get(t, "/api/v2/amm/liquidity/commits/"+commitAResp.CommitID, &s); err != nil {
-				return false, nil // transient, keep polling
-			}
-			t.Logf("  commit A status: %s", s.Status)
-			if s.Status == "FAILED" || s.Status == "CANCELLED" {
-				return false, fmt.Errorf("commit A reached terminal failure status: %s", s.Status)
-			}
-			// Require EXECUTED only (R1-12.4 gap 3): MATCHED merely confirms the on-chain
-			// CommitMatched event fired; EXECUTED additionally proves the Cacti watcher detected
-			// it, forwarded to the gateway, and the single-sided liquidity was added. Accepting
-			// MATCHED here would let the test pass without exercising the watcher's forward path.
-			return s.Status == "EXECUTED", nil
-		})
+		t.Log("Step 7: Finalize the pool (funds both reserves atomically)...")
+		var finalizeResp struct {
+			SharesA string `json:"shares_a"`
+			SharesB string `json:"shares_b"`
+		}
+		cbA.mustPost(t, "/api/v2/amm/liquidity/finalize",
+			map[string]string{"pool_pair": cfg.PoolPair}, &finalizeResp)
+		t.Logf("  finalized (shares_a=%s shares_b=%s)", finalizeResp.SharesA, finalizeResp.SharesB)
 
-		t.Log("Step 10: Polling pool status until ACTIVE (both commits executed)...")
-		pollUntil(t, 5*time.Second, 2*time.Minute, func() (bool, error) {
-			if err := cbA.get(t, "/api/v2/amm/pool/"+poolPair+"/status", &poolStatus); err != nil {
+		t.Log("Step 8: Polling pool status until ACTIVE...")
+		pollUntil(t, 3*time.Second, 1*time.Minute, func() (bool, error) {
+			if err := cbA.get(t, "/api/v2/amm/pool/"+cfg.PoolPair+"/status", &poolStatus); err != nil {
 				return false, nil
 			}
 			t.Logf("  pool_status: %s", poolStatus.PoolStatus)
 			return poolStatus.PoolStatus == "ACTIVE", nil
 		})
 
-		require.Equal(t, "ACTIVE", poolStatus.PoolStatus, "pool must be ACTIVE after commit-reveal")
+		require.Equal(t, "ACTIVE", poolStatus.PoolStatus, "pool must be ACTIVE after finalize")
 		assert.NotEmpty(t, poolStatus.ReserveA, "reserve_a must be set")
 		assert.NotEmpty(t, poolStatus.ReserveB, "reserve_b must be set")
 		t.Logf("Pool ACTIVE: reserve_a=%s reserve_b=%s", poolStatus.ReserveA, poolStatus.ReserveB)
@@ -273,14 +264,14 @@ func TestFullHappyPath(t *testing.T) {
 		}()
 		t.Log("Onboarding Bank A through CB-A...")
 		var bankAKycTx string
-		bankAUserID, bankAKycTx = onboardBank(t, bankA, cbA, "bank-a", "Test Bank A", "BR")
+		bankAUserID, bankAKycTx = onboardBank(t, bankA, cbA, cfg.BankACode, "Test Bank A", "BR")
 		require.NotEmpty(t, bankAUserID, "bank-a user_id must not be empty after onboarding")
 		if bankAKycTx != "" {
 			kycRefs = append(kycRefs, txRef{network: "spoke-a", label: "kyc_register_bank-a", hash: bankAKycTx})
 		}
 
 		t.Log("Onboarding Bank B through CB-B (required for beneficiary resolution in swap)...")
-		_, bankBKycTx := onboardBank(t, bankB, cbB, "bank-b", "Test Bank B", "AR")
+		_, bankBKycTx := onboardBank(t, bankB, cbB, cfg.BankBCode, "Test Bank B", "AR")
 		if bankBKycTx != "" {
 			kycRefs = append(kycRefs, txRef{network: "spoke-b", label: "kyc_register_bank-b", hash: bankBKycTx})
 		}
@@ -494,12 +485,12 @@ func TestFullHappyPath(t *testing.T) {
 		}
 		require.NoError(t,
 			bankA.withCorr(corr).post(t, "/api/v2/amm/swap/cross-currency", map[string]interface{}{
-				"source_currency":     "BRL",
-				"target_currency":     "ARS",
-				"pool_pair":           poolPair,
+				"source_currency":     cfg.SourceCurrency,
+				"target_currency":     cfg.TargetCurrency,
+				"pool_pair":           cfg.PoolPair,
 				"amount_out":          swapAmountOut,
 				"max_amount_in":       swapMaxIn,
-				"beneficiary_bank_id": "bank-b",
+				"beneficiary_bank_id": cfg.BankBCode,
 				"quote_id":            quote.QuoteID,
 			}, &swapResp),
 			"swap initiation must succeed",
@@ -602,7 +593,7 @@ func TestFullHappyPath(t *testing.T) {
 					return false, nil
 				}
 				for _, p := range resp.Positions {
-					if p.PositionID == swapStatus.BridgeOutPositionID || p.OwnerBankID == "bank-b" {
+					if p.PositionID == swapStatus.BridgeOutPositionID || p.OwnerBankID == cfg.BankBCode {
 						t.Logf("  CB-B bridge position %s state=%s owner=%s",
 							p.PositionID, p.BridgeState, p.OwnerBankID)
 						if p.BridgeState == "BURNED" || p.BridgeState == "RELEASED" {
@@ -673,7 +664,7 @@ func TestFullHappyPath(t *testing.T) {
 				DepositSide    string `json:"deposit_side"`
 			} `json:"positions"`
 		}
-		cbA.mustGet(t, "/api/v2/amm/liquidity/positions?pool_pair="+poolPair, &positions)
+		cbA.mustGet(t, "/api/v2/amm/liquidity/positions?pool_pair="+cfg.PoolPair, &positions)
 		var lpID, providerID string
 		for _, p := range positions.Positions {
 			if p.Status == "ACTIVE" {
@@ -681,7 +672,24 @@ func TestFullHappyPath(t *testing.T) {
 				break
 			}
 		}
-		require.NotEmpty(t, lpID, "CB-A must have an ACTIVE liquidity position")
+		// Known product gap, deliberately left failing rather than skipped.
+		//
+		// The on-chain shares exist — Step 1 above read CB-A holding 50% of the LP
+		// supply — but /liquidity/positions is empty, because that projection is
+		// written by the commit/LCR flow and the sovereign deposit-side/finalize path
+		// that replaced it never creates a position row. /liquidity/remove requires an
+		// lp_id, so there is currently NO API handle to a sovereignly-seeded position:
+		// a central bank can fund a pool and then cannot withdraw through the API.
+		//
+		// Skipping here would hide that behind a green run, and asserting on the
+		// on-chain shares instead would test around the defect. The failure stays, and
+		// says what it means.
+		require.NotEmpty(t, lpID,
+			"no ACTIVE liquidity position for %s, though Step 1 read CB-A holding on-chain LP shares. "+
+				"Sovereign deposit-side/finalize does not write a /liquidity/positions row, and "+
+				"/liquidity/remove requires the lp_id that only that row carries — so a "+
+				"sovereignly-seeded position cannot be withdrawn through the API. Product gap, not a "+
+				"test defect.", cfg.PoolPair)
 		t.Logf("Withdrawing position lp_id=%s provider=%s", lpID, providerID)
 
 		t.Logf("Step 3: CB-A withdraws %d bps (partial) -> home currency zap-out...", withdrawFractionBps)
@@ -692,7 +700,7 @@ func TestFullHappyPath(t *testing.T) {
 			WithdrawalMode string `json:"withdrawal_mode"`
 		}
 		cbA.mustPost(t, "/api/v2/amm/liquidity/remove", map[string]interface{}{
-			"pool_pair":        poolPair,
+			"pool_pair":        cfg.PoolPair,
 			"provider_bank_id": providerID,
 			"lp_id":            lpID,
 			"fraction_bps":     withdrawFractionBps,
@@ -730,7 +738,7 @@ func TestFullHappyPath(t *testing.T) {
 				Status string `json:"status"`
 			} `json:"positions"`
 		}
-		cbA.mustGet(t, "/api/v2/amm/liquidity/positions?pool_pair="+poolPair, &positionsAfter)
+		cbA.mustGet(t, "/api/v2/amm/liquidity/positions?pool_pair="+cfg.PoolPair, &positionsAfter)
 		var stillActive bool
 		for _, p := range positionsAfter.Positions {
 			if p.LPID == lpID && p.Status == "ACTIVE" {
@@ -740,4 +748,73 @@ func TestFullHappyPath(t *testing.T) {
 		}
 		require.True(t, stillActive, "CB-A's position must remain ACTIVE after a partial withdrawal")
 	})
+}
+
+// openCorridor opens the sovereign FX corridor the suite trades over, and is a no-op
+// when it is already ACTIVE so a re-run against a seeded stack still works.
+//
+// Two acts, one per central bank: the proposer names the pair and its two wrapped
+// tokens (omitting amm_address, so the CB deploys the pair's own AMM in the same
+// signed call), and the counterparty confirms. No run holds both keys.
+func openCorridor(t *testing.T, cbA, cbB *httpClient) {
+	t.Helper()
+
+	var pairs struct {
+		Pairs []struct {
+			PairID string `json:"pair_id"`
+			Status string `json:"status"`
+		} `json:"pairs"`
+	}
+	if err := cbA.get(t, "/api/v2/amm/pairs", &pairs); err == nil {
+		for _, p := range pairs.Pairs {
+			if p.PairID == cfg.PoolPair && p.Status == "ACTIVE" {
+				t.Logf("Corridor %s already ACTIVE — skipping open", cfg.PoolPair)
+				return
+			}
+		}
+	}
+
+	tokenA := hubTokenAddress(t, cbA, cfg.SourceCurrency)
+	tokenB := hubTokenAddress(t, cbA, cfg.TargetCurrency)
+	t.Logf("Opening corridor %s (tokenA=%s tokenB=%s)", cfg.PoolPair, tokenA, tokenB)
+
+	var proposeResp struct {
+		AMMAddress string `json:"amm_address"`
+	}
+	cbA.mustPost(t, "/api/v2/amm/pairs/propose", map[string]string{
+		"pair_id":         cfg.PoolPair,
+		"token_a_address": tokenA,
+		"token_b_address": tokenB,
+		"proposer_cb":     cfg.SourceCurrency,
+	}, &proposeResp)
+	t.Logf("  CB-A proposed %s (amm=%s)", cfg.PoolPair, proposeResp.AMMAddress)
+
+	var confirmResp map[string]interface{}
+	cbB.mustPost(t, "/api/v2/amm/pairs/confirm", map[string]string{
+		"pair_id":      cfg.PoolPair,
+		"confirmer_cb": cfg.TargetCurrency,
+	}, &confirmResp)
+	t.Logf("  CB-B confirmed %s — corridor ACTIVE", cfg.PoolPair)
+}
+
+// hubTokenAddress resolves the hub address of a sovereign currency's WRAPPED token.
+// The hub lists it under the symbol "W-tCeBM_<CUR>"; the pair is keyed by these two
+// addresses, so a wrong lookup here surfaces much later as an unresolvable pair.
+func hubTokenAddress(t *testing.T, c *httpClient, currency string) string {
+	t.Helper()
+	var resp struct {
+		Currencies []struct {
+			Symbol       string `json:"symbol"`
+			TokenAddress string `json:"token_address"`
+		} `json:"currencies"`
+	}
+	c.mustGet(t, "/api/v2/hub/currencies", &resp)
+	want := "W-tCeBM_" + currency
+	for _, cur := range resp.Currencies {
+		if cur.Symbol == want {
+			return cur.TokenAddress
+		}
+	}
+	t.Fatalf("hub has no wrapped token %q — is the spoke for %s registered?", want, currency)
+	return ""
 }
