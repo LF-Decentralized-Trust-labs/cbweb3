@@ -91,6 +91,29 @@ func (s *BridgeLockMintService) LockAndEnqueue(ctx context.Context, ownerBankID,
 	if correlationID != "" {
 		logPrefix = fmt.Sprintf("[correlation_id=%s] ", sanitizeLogField(correlationID))
 	}
+
+	// Replay guard (R2-CR-6 follow-up). A bridge-in burns the payer bank's tCeBM on the spoke
+	// and mints W-<source> on the Hub, so a replayed relay notification charges the bank
+	// twice and inflates wrapped supply. The path is synchronous — it blocks until the
+	// position reaches ACTIVE — which makes a retry after a slow first attempt an ordinary
+	// event rather than an attack. Checked before the insert so the common replay costs one
+	// indexed read; the unique index below is what closes the concurrent case.
+	if correlationID != "" {
+		existing, findErr := s.FindInByCorrelationID(ctx, correlationID)
+		if findErr != nil {
+			return nil, fmt.Errorf("bridge-in replay check failed: %w", findErr)
+		}
+		if existing != nil {
+			if qerr := s.ensureLockQueueItem(ctx, existing.PositionID); qerr != nil {
+				return nil, fmt.Errorf("duplicate bridge-in position %s has no relayer queue item and it could not be created: %w",
+					existing.PositionID, qerr)
+			}
+			fmt.Printf("%sbridge-in duplicate correlation_id — returning existing position %s\n",
+				logPrefix, existing.PositionID)
+			return existing, nil
+		}
+	}
+
 	fmt.Printf("%sbridge lock-mint initiated: position_id=%s owner=%s spoke=%s asset=%s amount=%s mint_to=%s burn_from_spoke=%s\n",
 		logPrefix, positionID, ownerBankID, spokeNetwork, nativeAsset, amount, mintTo, burnFromSpoke)
 
@@ -105,28 +128,77 @@ func (s *BridgeLockMintService) LockAndEnqueue(ctx context.Context, ownerBankID,
 		Direction:            domain.BridgeDirectionIn,
 		MintToHubAddress:     mintTo,
 		BurnFromSpokeAddress: burnFromSpoke,
-		FirstAttemptAt:       &now,
-		LastAttemptAt:        &now,
+		// Persisted, not merely logged: it is the replay key, and a key that lives only in a
+		// log line cannot be enforced by an index.
+		CorrelationID:  correlationID,
+		FirstAttemptAt: &now,
+		LastAttemptAt:  &now,
 	}
 	if err := s.db.WithContext(ctx).Create(pos).Error; err != nil {
+		// Unique-index race: a concurrent replay of the same notification won. Return the
+		// winner so the response stays idempotent. Only a unique violation means "duplicate
+		// bridge-in"; anything else (connection drop, deadlock) must propagate so the caller
+		// can retry rather than be told a position exists when none does.
+		if correlationID != "" && isUniqueViolation(err) {
+			if existing, findErr := s.FindInByCorrelationID(ctx, correlationID); findErr == nil && existing != nil {
+				if qerr := s.ensureLockQueueItem(ctx, existing.PositionID); qerr != nil {
+					return nil, fmt.Errorf("duplicate bridge-in position %s has no relayer queue item and it could not be created: %w",
+						existing.PositionID, qerr)
+				}
+				fmt.Printf("%sbridge-in duplicate correlation_id (index race) — returning existing position %s\n",
+					logPrefix, existing.PositionID)
+				return existing, nil
+			}
+		}
 		return nil, fmt.Errorf("persist bridged position failed: %w", err)
 	}
 
-	idempotencyKey := fmt.Sprintf("lock:%s", positionID)
-	item := &domain.RelayerQueueItem{
-		ItemID:         uuid.NewString(),
-		IdempotencyKey: idempotencyKey,
-		EventType:      "LOCK_MINT",
-		PositionID:     positionID,
-		State:          domain.RelayerStatePending,
-		NextAttemptAt:  now,
-	}
-	if err := s.db.WithContext(ctx).Create(item).Error; err != nil {
+	// Same helper as the duplicate path: the position and its queue item are two statements,
+	// and a failure between them leaves a position nothing will ever drive. Creating the item
+	// idempotently on its own key means a later retry repairs that instead of reporting
+	// success for a stalled position.
+	if err := s.ensureLockQueueItem(ctx, positionID); err != nil {
 		return nil, fmt.Errorf("persist relayer queue item failed: %w", err)
 	}
 
 	fmt.Printf("%sbridge lock-mint enqueued: position_id=%s\n", logPrefix, positionID)
 	return toPositionResult(pos), nil
+}
+
+// FindInByCorrelationID returns the inbound position carrying this correlation id, or nil when
+// none exists. Scoped to direction IN on purpose: the same correlation legitimately appears on
+// the outbound legs of the same swap (settlement bridge-out, residue return), and matching those
+// would report a replay for a leg that is supposed to exist.
+func (s *BridgeLockMintService) FindInByCorrelationID(ctx context.Context, correlationID string) (*BridgePositionResult, error) {
+	if correlationID == "" {
+		return nil, nil
+	}
+	var pos domain.BridgedAssetPosition
+	err := s.db.WithContext(ctx).
+		Where("correlation_id = ? AND direction = ?", correlationID, domain.BridgeDirectionIn).
+		First(&pos).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return toPositionResult(&pos), nil
+}
+
+// ensureLockQueueItem creates the LOCK_MINT queue item for a position if it is not already
+// there, keyed on its own idempotency key so a replay is a no-op and an interrupted create is
+// repaired. Mirrors ensureBurnQueueItem on the burn side.
+func (s *BridgeLockMintService) ensureLockQueueItem(ctx context.Context, positionID string) error {
+	item := &domain.RelayerQueueItem{
+		ItemID:         uuid.NewString(),
+		IdempotencyKey: fmt.Sprintf("lock:%s", positionID),
+		EventType:      "LOCK_MINT",
+		PositionID:     positionID,
+		State:          domain.RelayerStatePending,
+		NextAttemptAt:  time.Now(),
+	}
+	return s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(item).Error
 }
 
 // BridgeBurnUnlockService handles Burn on Hub → Unlock on Spoke (FR-029 / FR-032 / SC-015).
