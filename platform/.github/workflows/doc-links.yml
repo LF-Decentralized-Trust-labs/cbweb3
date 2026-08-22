@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Doc Links
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  doc-links:
+    name: Relative links under docs/
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Runs first: proves the checker still fails on a broken fixture. docs/architecture/
+      # viewpoints.md is an index whose whole value is that its links are true, so the
+      # gate that protects it must be shown to be capable of failing.
+      - name: Self-test the link checker (fail path must fail)
+        run: bash tools/check-doc-links.test.sh
+
+      # bash, never zsh: zsh does not fork the last stage of a pipeline, which masks the
+      # counter-in-a-subshell bug that once let the licence gate pass vacuously.
+      - name: Verify every relative link under docs/ resolves
+        run: bash tools/check-doc-links.sh
