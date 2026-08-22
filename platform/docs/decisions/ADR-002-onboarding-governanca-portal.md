@@ -7,6 +7,22 @@
 
 ---
 
+## Pedido de decisão
+
+Este bloco existe para que a decisão possa ser tomada sem ler o ADR inteiro. O corpo
+abaixo continua sendo a fundamentação.
+
+| | |
+|---|---|
+| **O que se pede** | Aprovar o modelo-alvo em que o **portal de governança é o orquestrador de política** (a autoridade origina e aprova) e o **toolkit permanece o único executor do registro on-chain**, com a reativação da UI de emissão de credencial hoje comentada — **ou** decidir o modelo alternativo (self-service pelo banco, com a autoridade apenas aprovando, que é o que está implementado hoje). |
+| **Quem assina** | IDB, LNet e **CEMLA** — é a CEMLA que opera o portal de governança no modelo acordado, e a escolha altera quem origina um onboarding. |
+| **Recomendação a aprovar** | Portal como orquestrador de política + toolkit como executor (ver §Recomendação). |
+| **Se aprovado, desbloqueia** | `[R1-§7.2 / R2-A-ARCH-2]` — reativar a UI de registro/credencial/CSR e documentar a matriz de autorização por passo. |
+| **Se não for aprovado** | O modelo self-service atual passa a ser a decisão, não o estado de fato, e a divergência com o modelo acordado (CEMLA origina) deixa de ser um finding aberto e passa a ser um desvio aceito e registrado. |
+| **Evidência reverificada** | `develop` @ `bfa89aa1`, 2026-08-22. Todas as citações deste ADR continuam exatas: handler `onIssue` comentado, card "Issue Credential" comentado em `scenario-b/.../RegistryPage.tsx:132-176` e `scenario-a/.../RegistryPage.tsx:129-173`, card "Compliance Registry" comentado apenas no Scenario A (`:95-127`), e "Pending KYC Approvals" ativo nos dois. |
+
+---
+
 ## Contexto
 
 O onboarding de participantes evoluiu de forma desalinhada entre duas superfícies:
