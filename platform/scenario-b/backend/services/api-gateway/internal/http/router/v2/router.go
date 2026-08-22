@@ -126,6 +126,9 @@ type Dependencies struct {
 	HubSignerAddress string
 	// LPPositionRepo enables GET /api/v2/amm/liquidity/positions (008-fix-cb-liquidity).
 	LPPositionRepo handlers.LPPositionReaderIface
+	// LPPositionWriter records the depositing CB's own position during sovereign
+	// escrow-and-finalize seeding, so the pool it seeds can be withdrawn from.
+	LPPositionWriter handlers.LPPositionWriter
 	// LPBalanceReader enables GET /api/v2/amm/lp-balance — the CB's live on-chain CBW3-LP position (013).
 	LPBalanceReader handlers.LPBalanceReaderIface
 	// PairSideResolver derives the CB's side ("A"/"B") for a pool_pair from the on-chain
@@ -361,6 +364,9 @@ func registerUS2Routes(app *fiber.App, deps Dependencies) {
 		// dual-sided /liquidity/add, which let one CB supply both sides (sovereignty breach).
 		if deps.SovereignSeed != nil && deps.TokenPreparer != nil {
 			ssh := handlers.NewSovereignSeedHandler(deps.TokenPreparer, deps.SovereignSeed)
+			if deps.LPPositionWriter != nil {
+				ssh = ssh.WithLPPositions(deps.LPPositionWriter, deps.BankCode)
+			}
 			amm.Post("/liquidity/deposit-side",
 				middleware.RequireCookieAuth(deps.AuthProvider),
 				middleware.RequireLiquidityProviderRole(),
