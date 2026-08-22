@@ -13,6 +13,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/domain"
 	compliancepki "github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/pki"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/repository"
+	authz "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	compliancv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/compliance/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -265,8 +266,13 @@ func TestManageParticipantStatus_Errors(t *testing.T) {
 // --- Circuit breaker / system params ---
 
 func TestCircuitBreakerLifecycle(t *testing.T) {
+	t.Setenv(authz.EnvAllowHeader, "true") // opt in to the transitional identity header
 	client, ctx := newTestClient(t, repository.NewMemoryRepository(), nil)
-	md := metadata.New(map[string]string{"x-actor-subject": "noc-1"})
+	// x-caller-identity is the channel the authz interceptor reads. The legacy
+	// x-actor-subject header this test used to set is no longer read at all: any peer
+	// able to reach the port could set it, so it let an unauthenticated caller choose
+	// the name recorded in the audit trail (R2-H-8 follow-up).
+	md := metadata.New(map[string]string{authz.HeaderMetadataKey: "noc-1"})
 	ctx = metadata.NewOutgoingContext(ctx, md)
 
 	// default unpaused
@@ -423,9 +429,10 @@ func TestMetadataHelpers(t *testing.T) {
 	md := metadata.New(map[string]string{
 		"x-correlation-id": "corr-1",
 		"x-forwarded-for":  "1.2.3.4",
-		"x-actor-subject":  "actor-1",
 	})
 	ctx := metadata.NewIncomingContext(context.Background(), md)
+	// The actor comes from the authenticated identity, never from metadata.
+	ctx = authz.NewContext(ctx, &authz.Identity{Subject: "actor-1", Method: "mtls"})
 	if correlationIDFromCtx(ctx) != "corr-1" {
 		t.Error("correlation id")
 	}

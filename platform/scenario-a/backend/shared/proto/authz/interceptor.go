@@ -59,22 +59,42 @@ func (o Options) authenticate(ctx context.Context, fullMethod string) (context.C
 	if o.Anonymous {
 		return ctx, nil
 	}
-	id, err := o.authenticator().Authenticate(ctx)
-	if err == nil {
-		err = o.policy().Authorize(ctx, id, fullMethod)
-	}
-	if err != nil {
+	id, authnErr := o.authenticator().Authenticate(ctx)
+	if authnErr != nil {
+		// Could not establish WHO is calling. There is no identity to carry, so in
+		// audit mode the call proceeds with none and audit actors fall back to the
+		// gateway-validated payload.
 		if o.Enforce {
 			if o.Logger != nil {
-				o.Logger.Warn("grpc authz: rejected call", "method", fullMethod, "error", err)
+				o.Logger.Warn("grpc authz: rejected call", "method", fullMethod, "error", authnErr)
 			}
-			return ctx, err
+			return ctx, authnErr
 		}
 		if o.Logger != nil {
 			o.Logger.Warn("grpc authz: proceeding in audit mode despite failure",
-				"method", fullMethod, "error", err)
+				"method", fullMethod, "error", authnErr)
 		}
 		return ctx, nil
+	}
+
+	if authzErr := o.policy().Authorize(ctx, id, fullMethod); authzErr != nil {
+		if o.Enforce {
+			if o.Logger != nil {
+				o.Logger.Warn("grpc authz: rejected call", "method", fullMethod, "error", authzErr)
+			}
+			return ctx, authzErr
+		}
+		// Audit mode, authorization failed — but authentication did NOT: we know
+		// exactly who this is. Carry the identity anyway so the audit trail keeps
+		// attributing the call to the real caller, and record what would have been
+		// refused under enforcement. Dropping it here would make a per-method policy
+		// degrade attribution during the very transition it is meant to prepare:
+		// every call the policy does not list would fall back to the payload actor.
+		if o.Logger != nil {
+			o.Logger.Warn("grpc authz: proceeding in audit mode despite failure",
+				"method", fullMethod, "subject", id.Subject, "error", authzErr)
+		}
+		return NewContext(ctx, id), nil
 	}
 	if o.Logger != nil {
 		// Record how the caller was authenticated so a header-asserted actor is

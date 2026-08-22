@@ -53,7 +53,7 @@ func New(repo repository.Repository, ca *compliancepki.CA, bc registry.RegistryW
 	}
 	svc := &complianceService{repo: repo, ca: ca, blockchain: bc}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	serverOpts, err := authz.ServerOptionsFromEnv(logger, nil)
+	serverOpts, err := authz.ServerOptionsFromEnv(logger, serverPolicy())
 	if err != nil {
 		return nil, fmt.Errorf("configure gRPC security: %w", err)
 	}
@@ -725,20 +725,19 @@ func ipAddressFromCtx(ctx context.Context) string {
 	return ""
 }
 
-// actorFromCtx returns the caller identity for audit attribution. It prefers the
-// identity authenticated by the gRPC authz interceptor (mTLS peer certificate, or
-// the trusted metadata header in transitional mode); only when no authenticated
-// identity is present does it fall back to the legacy x-actor-subject header.
+// actorFromCtx returns the caller identity for audit attribution: the identity the
+// gRPC authz interceptor authenticated (mTLS peer certificate, or the trusted
+// metadata header when that transitional mode is explicitly opted into).
+//
+// The legacy x-actor-subject header was removed here (R2-H-8 follow-up item 3). It
+// was a fallback no gateway set, and any peer that could reach the port could set
+// it — so the one thing it could still do was let an unauthenticated caller choose
+// the name written to the compliance audit trail. Removing it costs nothing real and
+// closes an attacker-writable channel; when no identity is authenticated the caller
+// now gets no actor from the transport at all, and the audit falls back to the
+// gateway-validated payload (see actorForAudit).
 func actorFromCtx(ctx context.Context) string {
-	if a := authz.Actor(ctx); a != "" {
-		return a
-	}
-	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		if vals := md.Get("x-actor-subject"); len(vals) > 0 {
-			return vals[0]
-		}
-	}
-	return ""
+	return authz.Actor(ctx)
 }
 
 // actorForAudit derives the audit actor, preferring the authenticated caller
