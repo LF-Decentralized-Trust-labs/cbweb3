@@ -84,6 +84,9 @@ services:
       SPOKE_SIGNER_KEY: "${SIGNER_PRIVATE_KEY:-0dbbe8e4ae425a6d2687f1a7e3ba17bc98c673636790f1b8ad91193c05875ef1}"
       # Local dev: bypass spoke lock/release — Hub-only burn.
       BRIDGE_SKIP_SPOKE_LOCK: "${BRIDGE_SKIP_SPOKE_LOCK:-true}"
+      # Profile for the flag above: it permits a Hub mint with no spoke-side reserve, so the
+      # orchestrator refuses it unless the environment is explicitly local.
+      ENVIRONMENT: "${ENVIRONMENT:-local}"
     ports:
       - "29094:9094"
     extra_hosts:
