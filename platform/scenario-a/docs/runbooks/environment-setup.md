@@ -28,7 +28,7 @@ This guide covers local environment preparation before running the deployment. F
 |------|----------------|---------|
 | **Docker** | 24.x | Container orchestration for all services |
 | **Docker Compose** | v2 (plugin) | Multi-container stack management |
-| **GNU Make** | 3.81 | Build automation (`make spoke-all`) |
+| **GNU Make** | 3.81 | Build automation (contracts, tests, PKI targets) |
 | **Go** | 1.26 | Backend services, the `cbweb3` toolkit, and Paladin scripts |
 | **Node.js** | 22 LTS | Frontend applications (React/Vite) and the Cacti relay |
 | **npm** | 10 | JavaScript package management |
@@ -224,13 +224,13 @@ scenario-a/frontend/.env.example  → frontend/.env
 scenario-a/frontend/apps/bank/.env.example → apps/bank/.env
 ```
 
-> The actual `.env` files are generated automatically by Keycloak during `make deploy.up-infra` and placed in `backend/config/`. Only `contracts/.env` needs to be filled in manually before the first deployment.
+> The actual `.env` files are generated automatically by Keycloak when the toolkit provisions it, and placed in `backend/config/`. Only `contracts/.env` needs to be filled in manually before the first deployment.
 
 ---
 
 ## Docker network
 
-All containers share the `cbweb3_network` network, created automatically on the first `make deploy.up-infra`. To create it manually:
+All containers share the `cbweb3_network` network, created automatically by the first toolkit run. To create it manually:
 
 ```bash
 docker network create cbweb3_network

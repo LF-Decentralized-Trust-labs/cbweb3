@@ -3,6 +3,10 @@
 #
 # Zero-config rule: if a stack is already serving at API_GW_URL we reuse it; only when
 # nothing is reachable do we run `make scenario-b.up` (idempotent). The driver passes
+#
+# BROKEN since the legacy path was retired: `scenario-b.up` and the PERF_UP_TARGET default
+# `scenario-b.up-perf` no longer exist. Stand the stack up with `cd samples && ./deploy-all.sh`
+# before running the benchmarks. Tracked as DEF-022.
 # SKIP_STACK=1 in dry-run / static-check mode so this never touches infra.
 #
 # Functions:

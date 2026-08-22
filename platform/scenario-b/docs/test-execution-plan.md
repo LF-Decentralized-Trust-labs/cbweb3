@@ -57,7 +57,7 @@ The following components and layers are explicitly **in scope**:
 - **Cacti Relay**: CommitMatched event subscription, health validation, cross-spoke relay
 - **Compliance Layer**: KYC/AML screening, participant onboarding, status management for hub entities
 - **Performance Testing**: AMM quote latency, swap latency, pool status monitoring
-- **Test Environments**: Devnet (local Docker Compose via `make scenario-b.up-infra`) and Testnet (staging)
+- **Test Environments**: Devnet (local Docker Compose via `cd samples && ./deploy-all.sh`) and Testnet (staging)
 
 The following are explicitly **out of scope**:
 
@@ -140,7 +140,7 @@ The following are explicitly **out of scope**:
 
 **LNET:** deploy hub test environment · **Banks:** confirm UAT participants and schedule
 
-- [ ] Hub devnet deployed (`make scenario-b.up-infra` + `make scenario-b.deploy-contracts`)
+- [ ] Hub devnet deployed (`cd samples && ./deploy-all.sh` + `make scenario-b.deploy-contracts`)
 - [ ] Hub Besu RPC reports blocks advancing (`:8645`)
 - [ ] Spoke-B Besu RPC reports blocks advancing (`:8745`)
 - [ ] All 6+ API gateways healthy (`/healthz` 200 OK)
@@ -291,7 +291,7 @@ Validates coordination between components with live local hub infrastructure.
 
 ### End-to-End (E2E) Testing
 
-Validates complete user journeys via the REST API against a full running hub stack (`make scenario-b.up`).
+Validates complete user journeys via the REST API against a full running hub stack (`cd samples && ./deploy-all.sh`).
 
 All E2E tests follow the **API-First** approach: no UI interaction; assertions are made against both the API response and direct on-chain state via `eth_getLogs` and contract read functions.
 
@@ -431,9 +431,9 @@ The Hyperledger Cacti relay subscribes to hub events (CommitMatched) and spoke e
 
 - **Purpose**: unit/integration tests, rapid iteration, E2E flow development
 - **Persistence**: Ephemeral — spun up fresh per test run
-- **Start**: `make scenario-b.up-infra` then `make scenario-b.deploy-contracts`
+- **Start**: `cd samples && ./deploy-all.sh` (the toolkit provisions and deploys), then `make scenario-b.deploy-contracts` only if redeploying contracts against a running stack
 - **Seeding**: initialization scripts register test participants, seed AMM pool with BRL-USD liquidity, activate ManualOracle rate
-- **Teardown**: `make scenario-b.down-infra` destroys all state
+- **Teardown**: `cd samples && ./deploy-all.sh --clean` destroys all state
 - **Readiness criteria**: see readiness checklist below
 
 ### Testnet (Staging)
@@ -585,7 +585,7 @@ To be triggered every night against the persistent hub Testnet (staging) environ
 
 ```bash
 # Full hub stack
-cd scenario-b && make scenario-b.up
+cd scenario-b/samples && ./deploy-all.sh
 
 # E2E flows
 bash tryouts/tryout-scenario-b-e2e.sh all

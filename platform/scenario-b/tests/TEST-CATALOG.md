@@ -290,7 +290,7 @@ forge test --match-path "test/AutomatedMarketMaker.t.sol" -vv
 ## Section 3 — Integration Tests
 
 **Framework**: Go `testing` with live local hub Devnet infrastructure
-**Prerequisites**: `make scenario-b.up-infra` + `make scenario-b.deploy-contracts` completed; all readiness criteria met (see execution plan)
+**Prerequisites**: the sample stack up (`cd samples && ./deploy-all.sh`) and `make scenario-b.deploy-contracts` completed; all readiness criteria met (see execution plan)
 
 | Test ID | Title | Preconditions | Steps | Expected Result | Status |
 |---------|-------|---------------|-------|-----------------|--------|
@@ -310,7 +310,7 @@ forge test --match-path "test/AutomatedMarketMaker.t.sol" -vv
 ## Section 4 — E2E Tests
 
 **Framework**: Bash scripts (`scenario-b/tryouts/`)
-**Prerequisites**: `make scenario-b.up` completed; all readiness criteria met; all 6+ API gateways return 200 on `/healthz`
+**Prerequisites**: the sample stack completed (`cd samples && ./deploy-all.sh`); all readiness criteria met; all 6+ API gateways return 200 on `/healthz`
 **On-chain verification**: `eth_getTransactionReceipt` polling + contract read functions
 
 ---

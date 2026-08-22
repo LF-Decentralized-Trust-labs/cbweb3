@@ -8,7 +8,7 @@ Operational documentation for deployment and configuration of the CBWeb3 platfor
 
 | Document | Description |
 |----------|-------------|
-| [deployment-runbook.md](deployment-runbook.md) | Complete deployment guide: `make spoke-all`, detailed phases, health checks, HTLC demo, teardown |
+| [deployment-runbook.md](deployment-runbook.md) | Complete deployment guide: `cd samples && ./deploy-all.sh`, detailed phases, health checks, HTLC demo, teardown |
 | [environment-setup.md](environment-setup.md) | Prerequisites, tool installation, complete port reference per entity |
 
 **Quick start:**
@@ -16,7 +16,7 @@ Operational documentation for deployment and configuration of the CBWeb3 platfor
 ```bash
 # 1. Prepare environment (see environment-setup.md)
 # 2. Deploy backend
-cd scenario-a && make spoke-all
+cd scenario-a/samples && ./deploy-all.sh
 # 3. Deploy frontends
 make frontend-spoke-all
 # 4. Verify endpoints

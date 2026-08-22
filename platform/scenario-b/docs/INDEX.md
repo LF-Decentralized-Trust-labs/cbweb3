@@ -48,7 +48,7 @@
 
 # 2. Deploy hub and spokes
 make hub-all
-make spoke-all
+cd samples && ./deploy-all.sh
 
 # 3. Verify
 curl http://localhost:18080/healthz   # bank-a (Spoke-A)

@@ -49,7 +49,7 @@ apis/
 The spec is also **served at runtime** by the api-gateway and auto-synced from the source:
 
 ```bash
-# Spec em runtime (após make spoke-all)
+# Spec em runtime (após cd samples && ./deploy-all.sh)
 curl http://localhost:18080/openapi.yaml        # bank-a
 curl http://localhost:38080/openapi.yaml        # central-bank-a
 

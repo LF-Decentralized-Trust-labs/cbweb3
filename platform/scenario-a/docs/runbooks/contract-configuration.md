@@ -194,7 +194,7 @@ SpokeBridge coordinates cross-spoke messages. Uses the IdentityRegistry to verif
 
 ### Realms and clients
 
-The `deploy/local/keycloak/init.sh` script automatically creates one realm and one client per entity during `make deploy.up-infra`:
+The toolkit's Keycloak provisioning step automatically creates one realm and one client per entity when `cbweb3 apply` runs the `provision-keycloak` step:
 
 | Entity | Realm | Client ID |
 |--------|-------|-----------|
@@ -312,7 +312,7 @@ The `auth` service uses `CA_CERT_FILE` and `CA_KEY_FILE` (defined in `.env.infra
 
 ## Post-deployment configuration checklist
 
-Run after `make spoke-all` to validate everything is correctly configured:
+Run after `cd samples && ./deploy-all.sh` to validate everything is correctly configured:
 
 ### Contracts
 
