@@ -20,24 +20,29 @@
 export ENABLE_MLP
 export MLP_ADDRESS
 
-# ── RPC defaults (override via env) ──────────────────────────────────────────
-SPOKE_A_RPC  ?= http://localhost:8645
-SPOKE_B_RPC  ?= http://localhost:8745
-KEYCLOAK_URL    ?= http://localhost:8081
-API_GW_URL      ?= http://localhost:18080
-API_GW_BANK_A_URL         ?= http://localhost:18080
-API_GW_BANK_B_URL         ?= http://localhost:28080
-API_GW_CENTRAL_BANK_A_URL ?= http://localhost:38080
-API_GW_CENTRAL_BANK_B_URL ?= http://localhost:60080
-CACTI_RELAYER_URL ?= http://localhost:4000
-
+# ── Endpoints for the tryouts ────────────────────────────────────────────────
+# The defaults that used to live here were the legacy deploy/local ports
+# (18080/28080/38080/60080, spokes 8645/8745, Keycloak 8081, relay 4000). That
+# bring-up was removed, so they injected addresses nothing answers on — and because
+# they were injected, they OVERRODE whatever the tryout derived for itself.
+#
+# The tryout now sources tests/integration/toolkit-env.sh, which reads the same
+# manifests the toolkit was applied with. Anything set on the command line still wins,
+# so only the values that actually differ have to be named:
+#
+#   make scenario-b.tryout-us1 API_GW_BANK_A_URL=http://localhost:41646
+#
+# SCENARIO_B_ENV forwards only what a caller explicitly set; unset variables are left
+# alone so the deriver can fill them.
 SCENARIO_B_ENV := \
-	BESU_HUB_RPC=$(BESU_HUB_RPC) \
-	SPOKE_A_RPC=$(SPOKE_A_RPC) \
-	SPOKE_B_RPC=$(SPOKE_B_RPC) \
-	KEYCLOAK_URL=$(KEYCLOAK_URL) \
-	API_GW_URL=$(API_GW_URL) \
-	CACTI_RELAYER_URL=$(CACTI_RELAYER_URL)
+	$(if $(BESU_HUB_RPC),BESU_HUB_RPC=$(BESU_HUB_RPC),) \
+	$(if $(SPOKE_A_RPC),SPOKE_A_RPC=$(SPOKE_A_RPC),) \
+	$(if $(SPOKE_B_RPC),SPOKE_B_RPC=$(SPOKE_B_RPC),) \
+	$(if $(API_GW_BANK_A_URL),API_GW_BANK_A_URL=$(API_GW_BANK_A_URL),) \
+	$(if $(API_GW_CENTRAL_BANK_A_URL),API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL),) \
+	$(if $(API_GW_CENTRAL_BANK_B_URL),API_GW_CENTRAL_BANK_B_URL=$(API_GW_CENTRAL_BANK_B_URL),) \
+	$(if $(CACTI_RELAYER_URL),CACTI_RELAYER_URL=$(CACTI_RELAYER_URL),) \
+	$(if $(POOL_PAIR),POOL_PAIR=$(POOL_PAIR),)
 
 # ── Infrastructure (reuses Scenario A infra) ─────────────────────────────────
 
@@ -209,6 +214,15 @@ scenario-b.tryout-us2:
 scenario-b.tryout-us3:
 	@$(SCENARIO_B_ENV) bash tryouts/tryout-scenario-b-e2e.sh us3
 
+# us5 and us6 have always been dispatchable in the script — its own help names them —
+# but no target invoked them, so the PairRegistry and CurrencyRegistry stories were
+# unreachable through make and never ran.
+scenario-b.tryout-us5:
+	@$(SCENARIO_B_ENV) bash tryouts/tryout-scenario-b-e2e.sh us5
+
+scenario-b.tryout-us6:
+	@$(SCENARIO_B_ENV) bash tryouts/tryout-scenario-b-e2e.sh us6
+
 # ── Integration test (full happy-path API test) ──────────────────────────────
 # This target does NOT provision. Bring a stack up first:
 #   cd samples && ./deploy-all.sh
@@ -354,6 +368,7 @@ scenario-b.check-postman:
 	scenario-b.up scenario-b.up-perf scenario-b.down scenario-b.restart scenario-b.nuke \
 	scenario-b.test-contracts scenario-b.test-backend scenario-b.test \
 	scenario-b.tryout scenario-b.tryout-us1 scenario-b.tryout-us2 scenario-b.tryout-us3 \
+	scenario-b.tryout-us5 scenario-b.tryout-us6 \
 	scenario-b.test-integration scenario-b.test-integration-env evidence.e2e-b \
 	scenario-b.perf-baseline scenario-b.validate-openapi \
 	scenario-b.gen-postman scenario-b.check-postman \
