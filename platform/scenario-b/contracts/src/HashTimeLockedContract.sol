@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 import {IHashTimeLockedContract} from "./interfaces/IHashTimeLockedContract.sol";
 import {IIdentityRegistry} from "./interfaces/IIdentityRegistry.sol";

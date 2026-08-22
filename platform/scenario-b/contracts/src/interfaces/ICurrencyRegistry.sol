@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 /// @title ICurrencyRegistry
 /// @notice Interface for the on-chain Currency Registry of the international hub.

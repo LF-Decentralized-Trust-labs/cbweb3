@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 import {ICurrencyRegistry} from "./interfaces/ICurrencyRegistry.sol";
 import {IIdentityRegistry} from "./interfaces/IIdentityRegistry.sol";
@@ -32,6 +32,14 @@ contract CurrencyRegistry is ICurrencyRegistry {
 
     /// @dev Existence guard: distinguishes an active entry from a tombstoned/absent one.
     mapping(bytes32 => bool) private _symbolExists;
+
+    /// @dev Whether a symbol has ever been pushed into `_symbols`, independently of whether it is
+    ///      currently active. removeCurrency tombstones the entry and deliberately leaves
+    ///      `_symbols` untouched so paging offsets stay stable across a removal; without this
+    ///      flag, re-registering the same symbol pushed a second copy of the string, and every
+    ///      reader that walks `_symbols` filtering on `_symbolExists` then reported the single
+    ///      live entry once per copy.
+    mapping(bytes32 => bool) private _symbolListed;
 
     /// @dev Ordered list of symbols for getAllCurrencies() iteration.
     string[] private _symbols;
@@ -72,7 +80,12 @@ contract CurrencyRegistry is ICurrencyRegistry {
 
         _symbolExists[key] = true;
         _tokenToSymbolKey[tokenAddress] = key;
-        _symbols.push(symbol);
+        // Push only on first registration. A symbol that was registered, removed and registered
+        // again is already in `_symbols`; pushing it again would duplicate it in every listing.
+        if (!_symbolListed[key]) {
+            _symbolListed[key] = true;
+            _symbols.push(symbol);
+        }
         _bySymbolKey[key] = CurrencyEntry({
             symbol: symbol, countryName: countryName, tokenAddress: tokenAddress, proposerCB: proposerCB
         });
