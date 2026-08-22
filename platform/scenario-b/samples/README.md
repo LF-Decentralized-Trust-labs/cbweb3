@@ -448,7 +448,11 @@ callers that legitimately make them, rather than to any authenticated peer: mint
 burning, settlement, deposit/escrow/redeem approval and the FX lifecycle accept only
 the `api-gateway` identity; participant freeze and CSR signing accept the gateway and
 `auth`; the participant record accepts the gateway (its governance route) and `auth`
-(onboarding); certificate issuance accepts `auth` only. Reads keep
+(onboarding); certificate issuance accepts `auth` only. Audit writes are restricted the
+same way, which stops a mesh peer injecting entries — but note that `CreateAuditLog`
+still records the actor its caller states, because that actor is the human operator from
+the JWT rather than the calling service. Attesting it is tracked as the open half of
+R2-H-8 item 3. Reads keep
 the baseline policy and still honour `GRPC_AUTHZ_ALLOWED_CALLERS`. The lists are
 compiled in (`internal/grpc/server/authz_policy.go` per service) because the caller
 identities are the mesh certificate CNs the toolkit issues — known without operator

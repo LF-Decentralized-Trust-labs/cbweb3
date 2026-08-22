@@ -48,8 +48,16 @@ func serverPolicy() authz.Policy {
 			compliancv1.ComplianceService_SignParticipantCSR_FullMethodName,
 		).
 		// Certificate issuance and audit writes are auth-service steps here, so a mesh
-		// peer cannot inject entries into the compliance trail. The actor on an entry is
-		// still derived from the authenticated identity, never from the payload.
+		// peer cannot inject entries into the compliance trail.
+		//
+		// Note what this does NOT yet guarantee. CreateAuditLog still records
+		// req.Entry.ActorSubject verbatim, so an admitted caller states the actor and the
+		// server believes it. Retiring x-actor-subject fixed the RPCs that derive their
+		// actor from the context (via actorFromCtx); it did not fix this one, because the
+		// actor here is the human operator from the JWT, not the mesh peer — deriving it
+		// from the peer identity would stamp every entry with the calling service and
+		// destroy attribution. Attesting it needs a verifiable operator credential
+		// forwarded to this service, which is the open half of R2-H-8 item 3.
 		WithRestriction([]string{callerAuth},
 			compliancv1.ComplianceService_IssueParticipantCertificate_FullMethodName,
 			compliancv1.ComplianceService_CreateAuditLog_FullMethodName,
