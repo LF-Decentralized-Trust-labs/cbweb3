@@ -35,7 +35,7 @@ This runbook describes the complete procedure for bringing up the CBWeb3 environ
 - [Prerequisites](#prerequisites)
 - [Scenario A — Enhanced Correspondent Banking](#scenario-a--enhanced-correspondent-banking)
   - [Command overview](#command-overview)
-  - [Full deployment: make spoke-all](#full-deployment-make-spoke-all)
+  - [Full deployment: the toolkit](#full-deployment-the-toolkit)
   - [Detailed phases](#detailed-phases)
   - [Frontend: make frontend-spoke-all](#frontend-make-frontend-spoke-all)
   - [Health verification](#health-verification)
@@ -155,7 +155,7 @@ restoring it in the template.
 
 ```bash
 cd scenario-a
-make spoke-all          # Brings up the entire backend stack (both spokes + relay)
+cd samples && ./deploy-all.sh          # Brings up the entire backend stack (both spokes + relay)
 make frontend-spoke-all # Brings up all frontends
 ```
 
@@ -163,11 +163,11 @@ These two commands are sufficient to have the complete environment operational. 
 
 ---
 
-### Full deployment: `make spoke-all`
+### Full deployment: the toolkit
 
 ```bash
 cd scenario-a
-make spoke-all
+cd samples && ./deploy-all.sh
 ```
 
 The command runs **Spoke-A** followed by **Spoke-B** in sequence, then starts the Cacti relay. Estimated time: **10–20 minutes** on first run (depending on Docker image build speed).
@@ -301,7 +301,7 @@ cd scenario-a
 make frontend-spoke-all
 ```
 
-Builds and starts React containers for all entities. Requires `make spoke-all` to have completed first.
+Builds and starts React containers for all entities. Requires `cd samples && ./deploy-all.sh` to have completed first.
 
 **URLs after deployment:**
 
@@ -329,7 +329,7 @@ make frontend-spoke-all-logs   # Tail frontend logs
 
 ### Health verification
 
-After `make spoke-all`, verify the main endpoints:
+After `cd samples && ./deploy-all.sh`, verify the main endpoints:
 
 ```bash
 # Keycloak
@@ -404,7 +404,7 @@ Per-entity scripts:
 
 ```bash
 # Stop both spokes + relay (shared infrastructure kept running)
-make spoke-all-down
+cd samples && ./deploy-all.sh --clean
 
 # Stop frontends
 make frontend-spoke-all-down

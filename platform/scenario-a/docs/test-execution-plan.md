@@ -126,7 +126,7 @@ The following are explicitly **out of scope**:
 
 **LNET:** deploy test environment · **Banks:** confirm UAT participants and schedule
 
-- [ ] Devnet deployed (`make spoke-all`)
+- [ ] Devnet deployed (`cd samples && ./deploy-all.sh`)
 - [ ] All 6 API gateways healthy (`/healthz` 200 OK)
 - [ ] Test participant accounts provisioned and registered in IdentityRegistry with `Verified` status
 - [ ] tCeBM initial balances seeded per entity
@@ -251,7 +251,7 @@ Validates coordination between components with live local infrastructure.
 
 ### End-to-End (E2E) Testing
 
-Validates complete user journeys via the REST API against a full running stack (`make spoke-all`).
+Validates complete user journeys via the REST API against a full running stack (`cd samples && ./deploy-all.sh`, the toolkit path).
 
 All E2E tests follow the **API-First** approach: no UI interaction; assertions are made against both the API response and direct on-chain state via `eth_getLogs` and contract read functions.
 
@@ -357,9 +357,9 @@ The Hyperledger Cacti relay operates between Spoke-A and Spoke-B, subscribing to
 ### Devnet (Local Docker Compose)
 
 - **Purpose**: CI/CD pipeline execution, unit/integration tests, rapid iteration
-- **Persistence**: Ephemeral — spun up fresh per test run via `make spoke-all`
+- **Persistence**: Ephemeral — spun up fresh per test run via `cd samples && ./deploy-all.sh`
 - **Seeding**: initialization scripts register test participants, mint initial tCeBM balances
-- **Teardown**: `make spoke-all-down` destroys all state; `make deploy.down-infra` removes volumes
+- **Teardown**: `cd samples && ./deploy-all.sh --clean` destroys all state, host-wide (every container and volume on the machine, then the data dirs)
 - **Readiness criteria**: all 6 API gateways return 200 on `/healthz`; Besu RPC reports blocks advancing; Cacti relay health endpoint 200 OK
 
 ### Testnet (Staging)
@@ -529,7 +529,7 @@ To be triggered every night against the persistent Testnet (staging) environment
 
 ```bash
 # Full backend stack
-cd scenario-a && make spoke-all
+cd scenario-a/samples && ./deploy-all.sh
 
 # E2E flows
 ./tryouts/tryout-fx-agreement-e2e.sh
@@ -610,6 +610,6 @@ cd scenario-b/contracts && forge test -vv
 cd scenario-b/backend && go test ./...
 
 # Full E2E
-cd scenario-b && make scenario-b.up
+cd scenario-b/samples && ./deploy-all.sh
 bash tryouts/tryout-scenario-b-e2e.sh all
 ```

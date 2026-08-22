@@ -3,6 +3,12 @@
 #
 # "Up" = the bank-a API gateway answers on $PERF_GW_URL. If it does not, run
 # `make spoke-a` from scenario-a/ (the full Besu QBFT + Paladin + backend stack).
+#
+# BROKEN since the legacy deploy/local path was retired: `make spoke-a` and `make spoke-all`
+# no longer exist, so the auto bring-up below cannot work. Bring a stack up with
+# `cd samples && ./deploy-all.sh` first; the reachability probe then short-circuits and the
+# benchmarks run normally. Migrating this to the toolkit is DEF-022 (it is not a one-line
+# swap: the toolkit provisions per entity and wipes data dirs, which a perf run must opt into).
 # spoke-a is sufficient for every threshold benchmark (transfer, zeto, baseline,
 # TTF); the cross-spoke (spoke-b) and Cacti relay legs are only needed for the
 # optional cross-spoke TTF note, so the default does NOT bring up the whole world.

@@ -195,7 +195,7 @@ The accumulated fee per LP position is stored in `liquidity_positions.fee_claim_
 
 The MLP (e.g., IDB) can deposit both sides of a pair simultaneously when a CB lacks capacity. It requires a separate stack with its own Keycloak realm, compliance service, auth service, and API gateway.
 
-**Activation**: `ENABLE_MLP=true` in the tryout or via `make dev.up`.
+**Activation**: `ENABLE_MLP=true` in the tryout, or `make scenario-b.up-backend-mlp` for the MLP stack alone.
 
 **Infrastructure** (`backend/docker-compose-backend.mlp.yaml`):
 

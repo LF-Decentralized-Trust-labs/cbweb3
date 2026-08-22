@@ -194,8 +194,9 @@ Both are idempotent: re-running resumes from the first incomplete step per entit
 Pass `--clean` to wipe containers, volumes and data directories first. Each script
 prints every endpoint it brings up when it finishes.
 
-> The per-scenario `make` targets (`make spoke-all`, `make scenario-b.up`) predate
-> the toolkit and are **not** the maintained path — prefer `deploy-all.sh` above.
+> The per-scenario bring-up targets that predated the toolkit (`make spoke-all`,
+> `make scenario-b.up`, `make deploy.up-*`, `make dev.up-*`) were **removed** with the
+> legacy `deploy/local` path — `deploy-all.sh` above is the only way to stand a stack up.
 > For multi-host deployment, see [`deploy-lnet/`](deploy-lnet/).
 
 For a detailed walkthrough of Scenario A, including the cross-spoke HTLC demo, architecture and port reference, see [`scenario-a/README.md`](scenario-a/README.md) and [`scenario-a/samples/README.md`](scenario-a/samples/README.md). For Scenario B, see [`scenario-b/README.md`](scenario-b/README.md).

@@ -104,7 +104,7 @@ All commands below are run from the `scenario-b/` directory.
 Bring up the entire Scenario B stack — PKI, shared infrastructure, all three Besu networks, contracts, relay, backend services, the FX rate feeder, and the NOC:
 
 ```bash
-make scenario-b.up
+cd samples && ./deploy-all.sh
 ```
 
 This target runs, in order:
@@ -117,7 +117,7 @@ This target runs, in order:
 6. **FX feeder** — starts the mock BRL/ARS rate feeder that writes into the hub `ManualOracle`.
 7. **NOC** — configures Keycloak, starts the NOC portal/backend, and starts the monitoring agents.
 
-A perf-lean variant without the NOC portal is available as `make scenario-b.up-perf`.
+A perf-lean variant without the NOC portal is available as `cd samples && ./deploy-all.sh`.
 
 Once complete, the four entities (central-bank-a + bank-a on spoke-a, central-bank-b + bank-b on spoke-b) are running with their full service stacks.
 
@@ -125,7 +125,7 @@ Once complete, the four entities (central-bank-a + bank-a on spoke-a, central-ba
 
 ## Running the Scenario B Walkthrough
 
-After `make scenario-b.up` completes, run the end-to-end walkthrough. It covers five user stories; the script accepts `us1`, `us2`, `us3`, `us5`, `us6`, or `all` (the numbering skips `us4` — there is no such story):
+After the sample stack is up, run the end-to-end walkthrough. It covers five user stories; the script accepts `us1`, `us2`, `us3`, `us5`, `us6`, or `all` (the numbering skips `us4` — there is no such story):
 
 ```bash
 bash tryouts/tryout-scenario-b-e2e.sh all      # every story
@@ -242,7 +242,7 @@ scenario-b/
 
 ## Toolkit (Provisioning)
 
-Declarative provisioning toolkit for the Scenario B hub-and-spoke topology, used to stand up and join hub and spoke networks across self-managed hosts. The single-host `make scenario-b.up` stack above remains the local path. The Go toolkit lives in `toolkit/` (`cmd/cbweb3b` + `engine/*`); its compose templates and the `ParticipantDeployment` JSON-Schema live in `provisioning/`.
+Declarative provisioning toolkit for the Scenario B hub-and-spoke topology, used to stand up and join hub and spoke networks across self-managed hosts. The single-host `cd samples && ./deploy-all.sh` stack above remains the local path. The Go toolkit lives in `toolkit/` (`cmd/cbweb3b` + `engine/*`); its compose templates and the `ParticipantDeployment` JSON-Schema live in `provisioning/`.
 
 | Component | Status |
 |-----------|--------|
@@ -329,7 +329,7 @@ Each entity (bank-a, bank-b, central-bank-a, central-bank-b) runs its own isolat
 
 ## Infrastructure
 
-The local deployment uses Docker Compose for all infrastructure components. See [`deploy/local/README.md`](deploy/local/README.md) for the authoritative topology.
+The local deployment uses Docker Compose for all infrastructure components, rendered per entity by the toolkit. See [`provisioning/templates/`](provisioning/templates/) for the compose templates and [`samples/README.md`](samples/README.md) for the topology the samples stand up.
 
 ### Besu Networks
 
@@ -353,7 +353,7 @@ Each spoke runs Paladin nodes providing Zeto ZKP support for privacy-preserving 
 
 ### NOC Stack
 
-The NOC stack (`deploy/local/compose.noc.yml`) runs a dedicated Postgres, the NOC backend, the NOC portal, and one monitoring agent per network (hub, spoke-a, spoke-b).
+The NOC stack (`provisioning/templates/noc-stack.compose.yaml`, with `noc-agent.compose.yaml` per network) runs a dedicated Postgres, the NOC backend, the NOC portal, and one monitoring agent per network (hub, spoke-a, spoke-b).
 
 ---
 
@@ -428,11 +428,12 @@ make pki.clean                 # Remove generated certificates
 
 ### Infrastructure
 
+The infra-only targets (`make deploy.up-infra`, `deploy.up-hub-besu`, `deploy.up-besu`,
+`scenario-b.up-infra`) were removed with the legacy path. The toolkit provisions infra and
+Besu per entity as steps of `apply`, hub included:
+
 ```bash
-make deploy.up-infra           # Start Keycloak + PostgreSQL + Redis
-make deploy.up-hub-besu        # Start the hub Besu network only (chain 1337)
-make deploy.up-besu            # Start hub + both spoke Besu networks
-make scenario-b.up-infra       # Infrastructure + all Besu networks
+cd samples && ./deploy-all.sh
 ```
 
 ### Relay

@@ -24,7 +24,7 @@
 
 | Document | Description |
 |----------|-------------|
-| [runbooks/deployment-runbook.md](runbooks/deployment-runbook.md) | Complete deployment guide: `make spoke-all`, phase-by-phase walkthrough, health checks, HTLC smoke test, and teardown procedure |
+| [runbooks/deployment-runbook.md](runbooks/deployment-runbook.md) | Complete deployment guide: `cd samples && ./deploy-all.sh`, phase-by-phase walkthrough, health checks, HTLC smoke test, and teardown procedure |
 | [runbooks/environment-setup.md](runbooks/environment-setup.md) | Prerequisites, tool installation (Go, Foundry, Docker, k6), and full port reference for all 6 entities across both spokes |
 | [`docs/TOOLCHAIN.md`](../../docs/TOOLCHAIN.md) | **Authoritative** tool versions for the whole platform (Go 1.26, Node 22 LTS, …) and where each floor is enforced |
 
@@ -35,7 +35,7 @@
 # See: runbooks/environment-setup.md
 
 # 2. Deploy full stack
-cd scenario-a && make spoke-all
+cd scenario-a/samples && ./deploy-all.sh
 
 # 3. Verify
 curl http://localhost:18080/healthz   # bank-a

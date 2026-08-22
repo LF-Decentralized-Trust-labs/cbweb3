@@ -197,7 +197,7 @@ See `SpokeBridge.t.sol` for function-level test list. Tests cover cross-spoke me
 ## Scenario A — API Integration Tests
 
 **Framework**: Go `testing` with live local Devnet infrastructure
-**Prerequisites**: `make spoke-all` running; `make pki.check` passes
+**Prerequisites**: the sample stack running (`cd samples && ./deploy-all.sh`); `make pki.check` passes
 
 | Test ID | Title | Preconditions | Steps | Expected Result | Status |
 |---------|-------|---------------|-------|-----------------|--------|
@@ -225,7 +225,7 @@ See `SpokeBridge.t.sol` for function-level test list. Tests cover cross-spoke me
 ## Scenario A — E2E Tests
 
 **Framework**: Bash scripts (`scenario-a/tryouts/`)
-**Prerequisites**: `make spoke-all` completed; all 6 API gateways return 200 on `/healthz`
+**Prerequisites**: the sample stack completed (`cd samples && ./deploy-all.sh`); every API gateway returns 200 on `/healthz`
 **On-chain verification**: `eth_getTransactionReceipt` polling + contract read functions
 
 ---

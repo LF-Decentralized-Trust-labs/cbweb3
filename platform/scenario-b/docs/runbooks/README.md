@@ -12,7 +12,7 @@
 
 | Document | Description |
 |----------|-------------|
-| [deployment-runbook.md](deployment-runbook.md) | Complete deployment guide: `make scenario-b.up`, step-by-step phases (PKI → infra → contracts → seed → backend → relayer), health checks, AMM smoke test, teardown |
+| [deployment-runbook.md](deployment-runbook.md) | Complete deployment guide: `cd samples && ./deploy-all.sh`, step-by-step phases (PKI → infra → contracts → seed → backend → relayer), health checks, AMM smoke test, teardown |
 | [environment-setup.md](environment-setup.md) | Prerequisites, tool installation, complete port reference for all 7 entities, Besu RPC/WS ports, Paladin ports, shared infra ports, Cacti relay port |
 
 **Quick start:**
@@ -20,7 +20,7 @@
 ```bash
 # 1. Prepare environment (see environment-setup.md)
 # 2. Deploy full stack
-cd scenario-b && make scenario-b.up
+cd scenario-b/samples && ./deploy-all.sh
 # 3. Verify endpoints
 curl http://localhost:38080/healthz   # central-bank-a (hub authority)
 curl http://localhost:18080/healthz   # bank-a
@@ -79,7 +79,7 @@ curl http://localhost:8081/realms/master | jq .realm
 | **Spoke-B** (chain 1339) | Runnable | Documented | — |
 | **Hub contracts** (AMM, PairRegistry, LCR) | Deployed via `make scenario-b.deploy-contracts` | Documented | — |
 | **Spoke contracts** | Deployed via `make scenario-b.deploy-contracts` | Documented | — |
-| **Backend services** (6 entities) | Runnable via `make scenario-b.up-backend` | Documented | — |
+| **Backend services** (6 entities) | Provisioned and started by `cd samples && ./deploy-all.sh` | Documented | — |
 | **MLP stack** | Runnable via `make scenario-b.up-backend-mlp` | Documented | Requires `ENABLE_MLP=true` |
 | **Cacti relay** (LiquidityCommitWatcher) | Runnable via `make scenario-b.up-relayer` | Documented | — |
 | **US3 commercial bank swap** | Partial | Documented | Use governance account for full testing |

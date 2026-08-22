@@ -13,7 +13,7 @@
 | Git commit | _SHA under test_ |
 | Environment | _devnet host(s), CPU/RAM, network topology (spokes + hub)_ |
 | Besu version / consensus | 25.8.0 / QBFT |
-| Stack brought up via | `make scenario-b.up` (note any deviations) |
+| Stack brought up via | `cd samples && ./deploy-all.sh` (note any deviations) |
 | k6 version | _`k6 version` output_ |
 | AMM pair / liquidity seeded | _PAIR + seeded reserves_ |
 | Raw evidence | _paths to k6 `--summary-export` JSONs, soak metric snapshots_ |

@@ -16,7 +16,9 @@ make scenario-b.perf-all
 That's it. With **no arguments and no manual steps** the driver
 (`tests/performance/run-all.sh`, orchestrating the helpers in `tests/performance/lib/`):
 
-1. **Stack** — reuses a stack already serving at `API_GW_URL`, else runs `make scenario-b.up-perf`
+1. **Stack** — reuses a stack already serving at `API_GW_URL`. Its fallback (`make scenario-b.up-perf`
+   via `PERF_UP_TARGET`) no longer exists, so stand the stack up first with
+   `cd samples && ./deploy-all.sh` (DEF-022)
    (the full settlement stack **minus the NOC monitoring portal**, which is not on the perf path;
    override the target with `PERF_UP_TARGET`).
 2. **Auth** — mints a `commercial_bank` and a `central_bank` JWT via the gateway login
@@ -104,9 +106,9 @@ the one-command flow composes — use them to drive a single threshold in isolat
 From `scenario-b/`:
 
 ```bash
-make scenario-b.up                 # full stack (Besu QBFT networks + infra + backend + relayer)
+cd samples && ./deploy-all.sh                 # full stack (Besu QBFT networks + infra + backend + relayer)
 # ...or bring up layers individually:
-#   make deploy.up-besu / deploy.up-infra / deploy.up-backend
+#   (the per-phase deploy.up-* targets were removed with the legacy path)
 make scenario-b.seed-sovereign-pair   # ensure the AMM pair (PAIR) has liquidity
 ```
 

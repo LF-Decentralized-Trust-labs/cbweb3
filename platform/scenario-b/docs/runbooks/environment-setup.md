@@ -39,7 +39,7 @@ This guide covers local environment preparation before running the Scenario B de
 |------|----------------|---------|
 | **Docker** | 24.x | Container orchestration for all services |
 | **Docker Compose** | v2 (plugin) | Multi-container stack management |
-| **GNU Make** | 3.81 | Build automation (`make scenario-b.up`) |
+| **GNU Make** | 3.81 | Build automation (contracts, tests, PKI targets) |
 | **Go** | 1.26 | Backend services and the `cbweb3b` toolkit |
 | **Node.js** | 22 LTS | Frontend applications (React/Vite) and the Cacti relay (TypeScript) |
 | **npm** | 10 | JavaScript package management |
@@ -215,7 +215,7 @@ scenario-b/backend/config/
 └── .env.infra.mlp.example             → .env.infra.mlp
 ```
 
-> Fields in these files marked as `auto` are populated automatically by the Keycloak initialization script during `make scenario-b.up-infra`. Contract addresses are written by `make scenario-b.deploy-contracts`. Only `contracts/.env` needs to be filled in manually before the first deployment.
+> Fields in these files marked as `auto` are populated automatically by the Keycloak initialization script during `cd samples && ./deploy-all.sh`. Contract addresses are written by `make scenario-b.deploy-contracts`. Only `contracts/.env` needs to be filled in manually before the first deployment.
 
 ### Contracts
 
@@ -241,7 +241,7 @@ scenario-b/interop/hub-and-spoke/cacti/.env.example → .env
 
 ## Docker network
 
-All Scenario B containers share the `cbweb3_network` Docker network, created automatically on the first `make scenario-b.up-infra`.
+All Scenario B containers share the `cbweb3_network` Docker network, created automatically on the first `cd samples && ./deploy-all.sh`.
 
 To create it manually:
 

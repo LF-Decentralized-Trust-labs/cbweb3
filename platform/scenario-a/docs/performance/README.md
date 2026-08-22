@@ -18,7 +18,10 @@ make scenario-a.perf-all        # from scenario-a/
 
 That single command needs **no arguments and no manual setup**. It:
 
-1. **Stands up the stack** if it isn't already reachable (`make spoke-a` — `lib/stack.sh`).
+1. ~~**Stands up the stack** if it isn't already reachable~~ — **broken since the legacy path
+   was retired.** `lib/stack.sh` shells out to `make spoke-a` / `make spoke-all`, and neither
+   target exists. Stand the stack up first with `cd samples && ./deploy-all.sh`; the harness
+   then finds it reachable and proceeds. Tracked as DEF-022.
 2. **Mints `AUTH_TOKEN`** for bank-a and central-bank-a via `/api/v1/auth/login`, reading
    `KC_CLIENT_ID`/`KC_CLIENT_SECRET` from `backend/config/.env.infra.{bank-a,central-bank-a}`
    (`lib/auth.sh`).
@@ -78,7 +81,8 @@ The sections below document the methodology and the manual single-benchmark path
 ## 2. Prerequisites
 
 - [`k6`](https://k6.io) installed (`k6 version`).
-- A running Scenario A stack: `make spoke-all` from `scenario-a/`.
+- A running Scenario A stack, brought up **before** the harness: `cd samples && ./deploy-all.sh`
+  from `scenario-a/`. The harness's own auto-bring-up is broken (DEF-022).
 - An `AUTH_TOKEN`: a JWT from `/api/v1/auth/login` for a `commercial_bank` user on the entity
   being tested. Scenario A uses cookie-based auth; the scripts pass this value as the
   `access_token` cookie.
@@ -89,9 +93,9 @@ The sections below document the methodology and the manual single-benchmark path
 From `scenario-a/`:
 
 ```bash
-make spoke-all                 # full stack (Besu QBFT spokes A+B + Paladin + backend)
+cd samples && ./deploy-all.sh                 # full stack (Besu QBFT spokes A+B + Paladin + backend)
 # ...or bring up layers:
-#   make deploy.up-spoke-a deploy.up-spoke-b deploy.up-infra deploy.up-backend
+#   (the per-phase deploy.up-* targets were removed with the legacy path)
 ```
 
 ### Obtain an AUTH_TOKEN

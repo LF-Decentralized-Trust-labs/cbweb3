@@ -130,7 +130,7 @@ for the authoritative list and where each floor is enforced.
 Deploy both spokes with all infrastructure, smart contracts, Paladin privacy nodes, and backend services:
 
 ```bash
-make spoke-all
+cd samples && ./deploy-all.sh
 ```
 
 This single command executes the following for each spoke:
@@ -151,7 +151,7 @@ Once complete, all 6 entities are running with their full service stacks.
 
 ## Running the Cross-Spoke HTLC Demo
 
-After `make spoke-all` completes, run the end-to-end cross-spoke atomic swap:
+After the sample stack is up, run the end-to-end cross-spoke atomic swap:
 
 ```bash
 ./tryout-htlc-cross-spoke.sh
@@ -412,17 +412,16 @@ Per-entity onboarding and payment demos:
 ## Teardown
 
 ```bash
-make spoke-all-down            # Stop both spokes + relay (shared infra left running)
-make frontend-spoke-all-down   # Stop all frontends
-make deploy.down-infra         # Stop Keycloak, PostgreSQL, Redis
+# Teardown. --clean is host-wide: it removes every container and volume on the
+# machine, then the data dirs — there is no per-spoke stop any more.
+cd samples && ./deploy-all.sh --clean
+make frontend-spoke-all-down   # Stop all frontends (this target still exists)
 ```
 
-Stop a single spoke:
-
-```bash
-make spoke-a-down              # Stop spoke-a backend, Paladin, and Besu
-make spoke-b-down              # Stop spoke-b backend, Paladin, and Besu
-```
+There is no per-spoke or infra-only stop any more: `make deploy.down-infra`,
+`make spoke-a-down` and `make spoke-b-down` went with the legacy `deploy/local`
+path. To stop one entity, use `docker compose` against its own rendered project, or
+`--clean` and re-provision.
 
 ---
 
@@ -511,10 +510,12 @@ openssl verify -CAfile backend/config/pki/central-bank-a-ca.crt backend/config/p
 
 ### Infrastructure
 
+The infra-only targets (`make deploy.up-infra`, `deploy.up-besu`, `deploy.up`) were
+removed with the legacy path. The toolkit provisions Keycloak, Postgres, Redis and Besu
+per entity as steps of `apply`, so there is no separate infrastructure phase to run:
+
 ```bash
-make deploy.up-infra           # Start Keycloak + PostgreSQL + Redis
-make deploy.up-besu            # Start both Besu networks
-make deploy.up                 # Infrastructure + Besu
+cd samples && ./deploy-all.sh
 ```
 
 ### Paladin

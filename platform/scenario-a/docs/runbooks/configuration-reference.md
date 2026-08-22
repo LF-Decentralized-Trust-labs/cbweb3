@@ -81,7 +81,7 @@ Reference env: `backend/config/.env.infra.<entity>.example` (Infra section)
 File: `scenario-a/backend/config/.env.infra.<entity>`  
 Template: `scenario-a/backend/config/.env.infra.<entity>.example`
 
-> These files are generated automatically by the Keycloak initialization script during `make deploy.up-infra`. Fields marked `auto` are populated by the Keycloak init; the rest must be present in the `.example` before the first run.
+> These files are generated automatically by the Keycloak initialization script when the toolkit provisions the entity's Keycloak. Fields marked `auto` are populated by the Keycloak init; the rest must be present in the `.example` before the first run.
 
 ### Keycloak (per entity)
 

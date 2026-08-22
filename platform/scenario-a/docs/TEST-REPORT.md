@@ -56,7 +56,7 @@ infra): cross-ledger two-leg HTLC happy path + refund (atomicity), and the AML/C
 compliance gate. PR-gated.
 
 **Live-stack E2E (`integration`)** — `make scenario-a.test-integration` (`TestFullHappyPath`)
-drives the full correspondent-banking happy path end to end against `make spoke-all`:
+drives the full correspondent-banking happy path end to end against a running sample stack:
 bank-a (originator) → custodian bank-d → beneficiary bank-b.
 
 Live run captured 2026-06-19 — **PASS (56.1s total)**:
