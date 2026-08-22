@@ -56,6 +56,18 @@ type paymentOrchestratorService struct {
 	mu           sync.RWMutex
 	htlcs        map[string]*domain.HTLCRecord
 	fxAgreements map[string]*domain.FXAgreementRecord // temporary fallback cache while repository migration is incremental
+
+	// settling holds the contract ids with a SettleHTLC call in flight RIGHT NOW.
+	// It is guarded by mu and is deliberately NOT persisted: it answers a question
+	// the durable state cannot.
+	//
+	// HTLCStateSettling means "an attempt started and has not completed", which is
+	// true both for a sequential retry after a failure — which must be allowed to
+	// re-run the Zeto transfer — and for a second caller arriving while the first
+	// is still inside it, which must not. Keying off the state alone conflated the
+	// two: the second concurrent caller was classified as a retry and transferred
+	// the locked note a second time.
+	settling map[string]struct{}
 }
 
 // Config holds the dependencies for the gRPC server.
@@ -126,6 +138,7 @@ func New(cfg Config) (*grpc.Server, func(context.Context), error) {
 		logger:             cfg.Logger,
 		htlcs:              make(map[string]*domain.HTLCRecord),
 		fxAgreements:       make(map[string]*domain.FXAgreementRecord),
+		settling:           make(map[string]struct{}),
 	}
 	if err := svc.loadHTLCsFromDB(context.Background()); err != nil {
 		return nil, nil, err
@@ -567,6 +580,32 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 		return nil, status.Error(codes.InvalidArgument, "secret does not match hashLock")
 	}
 
+	// Exclude a CONCURRENT second caller. Everything below this point — the on-chain
+	// settle and the Zeto transfer — runs with mu released, because both are slow
+	// network I/O and holding the service-wide lock across them would serialise every
+	// other RPC. So the record's state cannot be the exclusion mechanism: by the time
+	// the second caller reads it, the first has already moved it to SETTLING and let
+	// the lock go.
+	//
+	// The marker below is that mechanism, and it is cleared by the deferred delete
+	// when this call returns — including on the error paths, so a genuine retry after
+	// a failure still gets through. Aborted (not FailedPrecondition) is the gRPC code
+	// for a concurrency conflict the caller may retry: once the winner finishes, a
+	// retry finds the record SETTLED and returns the idempotent success above.
+	if _, inFlight := s.settling[record.ContractID]; inFlight {
+		s.mu.Unlock()
+		s.logger.Info("SettleHTLC rejected: another settle is already in flight for this HTLC",
+			"contract_id", record.ContractID)
+		return nil, status.Errorf(codes.Aborted,
+			"a settle is already in progress for HTLC %q", record.ContractID)
+	}
+	s.settling[record.ContractID] = struct{}{}
+	defer func() {
+		s.mu.Lock()
+		delete(s.settling, record.ContractID)
+		s.mu.Unlock()
+	}()
+
 	// Determine whether this is a fresh attempt (LOCKED) or a retry (SETTLING).
 	isRetry := record.State == domain.HTLCStateSettling
 
@@ -598,7 +637,11 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 			return nil, status.Error(codes.FailedPrecondition,
 				"counterparty spoke has not yet locked its leg — wait for relay confirmation before settling")
 		}
-		// Transition to SETTLING under the lock to prevent concurrent settle attempts.
+		// Mark the attempt as started. This is the DURABLE half: it survives a
+		// restart and tells a later call that an attempt was begun and may need
+		// retrying. It does not exclude a concurrent caller — the in-flight marker
+		// above does that. The comment here used to claim this transition prevented
+		// concurrent settle attempts, which was false and cost real debugging time.
 		record.State = domain.HTLCStateSettling
 		record.Secret = req.Secret
 		record.UpdatedAt = time.Now().UTC()
