@@ -66,6 +66,89 @@ type BesuRelayerConfig struct {
 
 	// SkipSpokeLock skips SpokeBridge.lock when true (local dev — Hub-only mint to commercial wallet).
 	SkipSpokeLock bool
+
+	// Environment is the deployment profile, from the manifest's spec.environment
+	// ("local" | "staging" | "prod") via the ENVIRONMENT variable.
+	//
+	// It gates the paths that mint on the Hub with nothing locked or burned on the spoke. Only
+	// an explicit "local" enables them; every other value, including an empty one, refuses —
+	// the same fail-safe default the Keycloak realm gate uses for sslRequired (R1-10.7), and
+	// for the same reason: a forgotten profile must harden rather than open.
+	Environment string
+}
+
+// EnvironmentLocal is the only profile in which the Hub may mint without a spoke-side leg.
+const EnvironmentLocal = "local"
+
+// isLocalEnvironment reports whether the profile is the explicit local lab. Trimmed but
+// case-sensitive: "local" is a declared value, not a guess at one.
+func isLocalEnvironment(environment string) bool {
+	return strings.TrimSpace(environment) == EnvironmentLocal
+}
+
+// ValidateBridgeProfile refuses BRIDGE_SKIP_SPOKE_LOCK outside a local environment.
+//
+// The flag skips SpokeBridge.lock entirely, so the Hub mint that follows it is backed by
+// nothing. That is a useful local shortcut and has no legitimate use anywhere else, which is
+// why it fails at startup rather than at the first mint: an operator who set it should learn
+// from the boot log, not from a reconciliation gap.
+//
+// The absence of a spoke chain is NOT fatal here. A deployment can legitimately run this
+// service without one and never enqueue a lock-mint; refusing to boot would take out a service
+// that was never going to mint. That case is refused per position instead, in planLockMint.
+func ValidateBridgeProfile(environment string, skipSpokeLock bool) error {
+	if skipSpokeLock && !isLocalEnvironment(environment) {
+		return fmt.Errorf(
+			"BRIDGE_SKIP_SPOKE_LOCK=true requires ENVIRONMENT=%s (got %q): skipping the spoke lock mints wrapped tokens on the Hub with nothing locked on the spoke",
+			EnvironmentLocal, environment)
+	}
+	return nil
+}
+
+// lockMintAction is the spoke-side leg chosen before a Hub mint.
+type lockMintAction int
+
+const (
+	// lockMintBurnFromBank burns the payer bank's pre-tokenised tCeBM (commercial bridge-in).
+	lockMintBurnFromBank lockMintAction = iota
+	// lockMintNoSpokeForBurn is a commercial bridge-in with no spoke chain to burn on: refused,
+	// as it always was.
+	lockMintNoSpokeForBurn
+	// lockMintSovereignLock funds this position and locks via SpokeBridge (CB self-service).
+	lockMintSovereignLock
+	// lockMintUnbackedAllowed mints on the Hub with no spoke-side leg — permitted only in the
+	// explicit local lab.
+	lockMintUnbackedAllowed
+	// lockMintUnbackedRefused is the same shape outside local: refused rather than minted.
+	lockMintUnbackedRefused
+)
+
+// planLockMint decides what happens on the spoke before the Hub mint.
+//
+// Three of the inputs lead to the same place — SkipSpokeLock set, no spoke chain configured, or
+// a position with no native asset to lock — and that place is a Hub mint with nothing behind
+// it. Each is deliberate in a local lab: a CB mints itself liquidity to exercise the hub with
+// no spoke wired. Outside local the same path breaks the 1:1 backing the wrapped token claims,
+// so it is refused.
+//
+// Written as a pure function so the rule is testable without a chain, mirroring
+// planSpokeDelivery on the burn side.
+func planLockMint(environment string, spokeConfigured, skipSpokeLock bool, bankWallet, nativeAsset string) lockMintAction {
+	if strings.TrimSpace(bankWallet) != "" {
+		// Commercial bridge-in: the bank's own tCeBM is burned, so this is backed by
+		// construction and never gated by SkipSpokeLock.
+		if !spokeConfigured {
+			return lockMintNoSpokeForBurn
+		}
+		return lockMintBurnFromBank
+	}
+	if spokeConfigured && strings.TrimSpace(nativeAsset) != "" && !skipSpokeLock {
+		return lockMintSovereignLock
+	}
+	if isLocalEnvironment(environment) {
+		return lockMintUnbackedAllowed
+	}
+	return lockMintUnbackedRefused
 }
 
 // BesuRelayerExecutor implements RelayerEventExecutor with real Besu on-chain calls.
@@ -107,6 +190,11 @@ type BesuRelayerExecutor struct {
 func NewBesuRelayerExecutor(ctx context.Context, db *gorm.DB, cfg BesuRelayerConfig) (*BesuRelayerExecutor, error) {
 	if cfg.HubRPCURL == "" || cfg.HubSignerKey == "" {
 		return nil, fmt.Errorf("BesuRelayerConfig: HubRPCURL and HubSignerKey are required")
+	}
+	// Before dialling anything: an explicit dev shortcut in a non-local profile is a
+	// configuration error, and the operator should read it in the boot log.
+	if err := ValidateBridgeProfile(cfg.Environment, cfg.SkipSpokeLock); err != nil {
+		return nil, err
 	}
 
 	hubEC, err := evm.Dial(ctx, cfg.HubRPCURL, 10*time.Second)
@@ -203,20 +291,23 @@ func (e *BesuRelayerExecutor) SubmitLockEvent(ctx context.Context, _ /*idempoten
 		return fmt.Errorf("invalid mirrored_amount %q for position %s", pos.MirroredAmount, positionID)
 	}
 
-	if bankWallet := strings.TrimSpace(pos.BurnFromSpokeAddress); bankWallet != "" {
+	bankWallet := strings.TrimSpace(pos.BurnFromSpokeAddress)
+	switch planLockMint(e.cfg.Environment, e.spokeReady, e.cfg.SkipSpokeLock, bankWallet, pos.NativeAsset) {
+	case lockMintNoSpokeForBurn:
+		return fmt.Errorf("spoke chain not configured — cannot burn tCeBM for position %s", positionID)
+
+	case lockMintBurnFromBank:
 		// ── Commercial bank bridge-in: burn the bank's pre-tokenised tCeBM ──────────────
 		// The bank must have obtained tCeBM via Reserve Tokenisation (ApproveEscrow).
 		// CB-A holds CENTRAL_BANK_ROLE and can burn from any address, but MUST NOT mint
 		// new tCeBM here. If the burn fails (insufficient balance), the bridge-in is rejected.
-		if e.spokeEC == nil {
-			return fmt.Errorf("spoke chain not configured — cannot burn tCeBM for position %s", positionID)
-		}
 		if burnErr := e.spokeBurnFrom(ctx, pos.NativeAsset, bankWallet, amount); burnErr != nil {
 			return fmt.Errorf("spoke burn-from bank (position=%s bank=%s): %w", positionID, bankWallet, burnErr)
 		}
 		log.Printf("[BesuRelayerExecutor] spoke burn-from ok — position=%s bank=%s token=%s amount=%s",
 			positionID, bankWallet, pos.NativeAsset, amount.String())
-	} else if e.spokeEC != nil && pos.NativeAsset != "" && !e.cfg.SkipSpokeLock {
+
+	case lockMintSovereignLock:
 		// ── Sovereign CB self-service: fund THIS position then lock via SpokeBridge ──────
 		if fundErr := e.ensureSpokeFunds(ctx, pos, amount); fundErr != nil {
 			return fmt.Errorf("spoke fund (position=%s): %w", positionID, fundErr)
@@ -225,6 +316,34 @@ func (e *BesuRelayerExecutor) SubmitLockEvent(ctx context.Context, _ /*idempoten
 		if lockErr := e.spokeLock(ctx, pos.NativeAsset, amount, txID); lockErr != nil {
 			return fmt.Errorf("spoke lock (position=%s): %w", positionID, lockErr)
 		}
+
+	case lockMintUnbackedRefused:
+		// Nothing would be locked or burned on the spoke, so the Hub mint below would create
+		// wrapped supply with no reserve behind it. Refused outside the local lab, and named
+		// precisely enough that the operator knows which of the three causes applies.
+		return fmt.Errorf(
+			"refusing to mint on the Hub with no spoke-side leg for position %s "+
+				"(environment=%q skip_spoke_lock=%v spoke_configured=%v native_asset=%q): "+
+				"this would create unbacked wrapped tokens; set ENVIRONMENT=%s for a local lab, "+
+				"or configure the spoke chain (SPOKE_BESU_RPC_URL / SPOKE_BRIDGE_ADDRESS) and clear BRIDGE_SKIP_SPOKE_LOCK",
+			positionID, e.cfg.Environment, e.cfg.SkipSpokeLock, e.spokeReady, pos.NativeAsset, EnvironmentLocal)
+
+	case lockMintUnbackedAllowed:
+		// Local lab: allowed, but never quietly. One line per occurrence, because the whole
+		// point is that this mint has no reserve behind it and a reader of the logs should not
+		// have to infer that from an absence.
+		log.Printf("[BesuRelayerExecutor] WARNING unbacked mint — position=%s token=%s amount=%s: "+
+			"no spoke lock or burn (environment=%s skip_spoke_lock=%v spoke_configured=%v native_asset=%q). "+
+			"Local-lab only: the Hub supply this creates has no spoke-side reserve behind it.",
+			positionID, pos.MirroredAsset, amount.String(),
+			e.cfg.Environment, e.cfg.SkipSpokeLock, e.spokeReady, pos.NativeAsset)
+
+	default:
+		// Unreachable today: every lockMintAction has a case above. It exists because an
+		// unmatched Go switch does nothing, so a future action added without a case here would
+		// fall through to the Hub mint — the one outcome this function exists to gate. Failing
+		// closed makes that a refused position instead of unbacked supply.
+		return fmt.Errorf("unhandled lock-mint plan for position %s — refusing to mint", positionID)
 	}
 
 	// Hub mint: W-tCeBM.mint(recipient, amount). CB hub signer must hold CENTRAL_BANK_ROLE.

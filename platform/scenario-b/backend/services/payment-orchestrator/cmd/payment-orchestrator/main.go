@@ -202,6 +202,9 @@ func main() {
 				SpokeSignerKey:   getEnv("SPOKE_SIGNER_KEY", getEnv("BESU_OPERATOR_KEY", "")),
 				SpokeBridgeAddr:  getEnv("SPOKE_BRIDGE_ADDRESS", ""),
 				SkipSpokeLock:    getEnv("BRIDGE_SKIP_SPOKE_LOCK", "") == "true",
+				// Deployment profile, from the manifest's spec.environment. Only an explicit
+				// "local" permits a Hub mint with no spoke-side leg; anything else refuses.
+				Environment: getEnv("ENVIRONMENT", ""),
 			})
 			dialCancel()
 			if execErr != nil {

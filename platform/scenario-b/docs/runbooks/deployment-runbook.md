@@ -256,7 +256,43 @@ as replays. Payments stop settling.
 **Recovery.** None in place. Restore each CB's Postgres from a snapshot taken before the first
 residue return.
 
-### 2. Sovereign issuance-authority handover
+### 2. Unbacked-mint guard — `BRIDGE_SKIP_SPOKE_LOCK` now requires `ENVIRONMENT=local`
+
+**What changed.** `BRIDGE_SKIP_SPOKE_LOCK=true` skips `SpokeBridge.lock` entirely, so the Hub
+mint that follows it has no spoke-side reserve behind it. The same outcome is reached by two
+other configurations: no spoke chain wired (`SPOKE_BESU_RPC_URL` / `SPOKE_BRIDGE_ADDRESS`
+empty), and a position with no `native_asset` to lock. All three are useful in a local lab and
+break the 1:1 backing of the wrapped token anywhere else.
+
+The payment-orchestrator now gates them on the deployment profile:
+
+| Configuration | `ENVIRONMENT=local` | any other value, including unset |
+| --- | --- | --- |
+| `BRIDGE_SKIP_SPOKE_LOCK=true` | boots; each mint logs `WARNING unbacked mint` | **refuses to boot**, naming the flag |
+| No spoke chain, or no native asset | mints, with the same warning per occurrence | the lock-mint is **refused** per position |
+| Commercial bridge-in (burns the bank's tCeBM) | unaffected | unaffected — it is backed by construction |
+
+A forgotten `ENVIRONMENT` hardens rather than opens, the same default the Keycloak realm gate
+uses for `sslRequired` (R1-10.7).
+
+**Point of no return.** None — this step adds a check and changes no data. It is listed here
+because it can stop a service that used to start.
+
+**What a downgrade breaks.** Nothing. The previous binary ignores `ENVIRONMENT`.
+
+**Recovery.** Set `ENVIRONMENT=local` for a lab stack, or wire the spoke
+(`SPOKE_BESU_RPC_URL`, `SPOKE_BRIDGE_ADDRESS`) and set `BRIDGE_SKIP_SPOKE_LOCK=false` for a
+stack that must mint against real reserves.
+
+**Known gap, stated deliberately.** The compose templates default `ENVIRONMENT` to `local`,
+which is accurate today — manifest validation rejects any `spec.environment` other than `local`,
+so every toolkit-provisioned stack is a lab, `deploy-lnet` included. It also means the guard has
+no teeth on the deployment that will eventually need it most. When staging/prod profiles are
+enabled (ADR-004), `ENVIRONMENT` must be threaded from `spec.environment` through the compose
+env instead of defaulted in the template. Until then, harden a specific stack by exporting
+`ENVIRONMENT` and `BRIDGE_SKIP_SPOKE_LOCK=false` before `apply`.
+
+### 3. Sovereign issuance-authority handover
 
 **What changed.** `register-currency` deploys the W-token, registers the currency with the hub
 signer as interim central bank (`CurrencyRegistry.registerCurrency` admits only
@@ -303,7 +339,7 @@ on-chain state and completes only the outstanding steps, so a run interrupted be
 registration and handover converges. Handing authority back to the hub is **not** automated — it
 requires an explicit `grantRole` signed with the token's `DEFAULT_ADMIN_ROLE`.
 
-### 3. Per-CB hub identity in the environment
+### 4. Per-CB hub identity in the environment
 
 **What changed.** The hub signing key is per central bank and derived deterministically from the
 spoke id: `HUB_SIGNER_PRIVATE_KEY`, plus `LOCAL_CB_HUB_SIGNER` (the same identity as an address)
@@ -353,7 +389,7 @@ is also the hub governance admin in local stacks.
 > KMS therefore also means the gateway stops receiving a key in its environment and starts asking
 > the KMS to sign, which is a new signing path in the backend rather than a configuration change.
 
-### 4. Corridor opening is bilateral (procedure change)
+### 5. Corridor opening is bilateral (procedure change)
 
 **What changed.** No data migration — the procedure. `PairRegistry` admits only
 `getCentralBankOf(tokenA)` as proposer and `getCentralBankOf(tokenB)` as confirmer. Since each
@@ -369,7 +405,7 @@ token B calls `POST /api/v2/amm/pairs/confirm`. Both are governance-portal actio
 registered. Harmless but wasteful; do not retry the endpoint in a loop, as each attempt deploys
 another one.
 
-### 5. Residue returns are retried after upgrade (behaviour change on existing rows)
+### 6. Residue returns are retried after upgrade (behaviour change on existing rows)
 
 **What changed.** A residue return whose *enqueue* failed used to stay `RETURN_FAILED` forever:
 no bridge position was created, so the relayer's queue had nothing to retry. A worker in the
@@ -405,7 +441,7 @@ queue item sits in `IN_FLIGHT` with `attempt_count = 0` is a symptom of an unres
 an exhausted retry budget; `[residue-retry]` and `[RelayerWorker]` will both be silent. Check Hub
 RPC liveness (`eth_blockNumber`) before looking at the queue.
 
-### 6. Hub reconciliation is now watched (new, additive)
+### 7. Hub reconciliation is now watched (new, additive)
 
 **What it is.** An issuing CB reconciles its own Hub W-token balance against its own records every
 `HUB_RECONCILIATION_INTERVAL_SEC` (default 300). The banks never hold W-token — it is minted to the
@@ -472,7 +508,7 @@ backfills it at startup (`IN`/`OUT`, derived from the relayer queue's event type
 rows), plus an index on `(mirrored_asset, leg, bridge_state)`. Both are additive and idempotent; the
 backfill only touches rows whose direction is empty, so a re-run and a rollback are both no-ops.
 
-### 7. Delegated-swap replay guard is now a CLAIM, taken before the trade (behaviour change)
+### 8. Delegated-swap replay guard is now a CLAIM, taken before the trade (behaviour change)
 
 `cross_currency_hub_swaps` is created by `AutoMigrate` and keys each delegated Hub AMM swap on the
 bridge-in position that funded it, so a retried delegation cannot trade twice against the same
@@ -538,7 +574,7 @@ the bridge-in position; deleting the claim is a deliberate, recorded decision, n
 A downgrade to the previous binary keeps working (it ignores the new columns) but silently returns to
 guarding the write instead of the trade.
 
-### 8. W-token administration is separated from issuance (point of no return)
+### 9. W-token administration is separated from issuance (point of no return)
 
 **What changes.** The currency handover left this CB's **gateway** identity holding both
 `CENTRAL_BANK_ROLE` (mint/burn) and `DEFAULT_ADMIN_ROLE` (decide who may issue). Provisioning now
@@ -588,7 +624,7 @@ can do what and fixes the topology, and the administration key is derivable by a
 repository (see the custody warning under item 3). It becomes a secrecy boundary only when production
 custody lands — at which point this topology does not change, only where the key lives.
 
-### 9. Service-to-service authentication is per entity (behaviour change + opt-in enforcement)
+### 10. Service-to-service authentication is per entity (behaviour change + opt-in enforcement)
 
 **What changed.** The `/internal/*` routes authenticated callers with `INTERNAL_RELAY_AUTH_SECRET`, a
 symmetric secret **identical in every entity**. It therefore proved that *some* entity was calling,

@@ -68,7 +68,20 @@ services:
       SPOKE_SIGNER_KEY: "${CB_PRIVATE_KEY:?}"
       # Local dev: skip the SpokeBridge.lock leg for the CB's OWN sovereign liquidity
       # positions (hub-only mint); the commercial-bank burn-from path above still runs.
-      BRIDGE_SKIP_SPOKE_LOCK: "true"
+      BRIDGE_SKIP_SPOKE_LOCK: "${BRIDGE_SKIP_SPOKE_LOCK:-true}"
+      # Deployment profile for the flag above. The Hub mint that BRIDGE_SKIP_SPOKE_LOCK
+      # permits has no spoke-side reserve behind it, so the orchestrator refuses it unless
+      # the profile is explicitly "local" — and refuses to boot at all with the flag set
+      # outside local.
+      #
+      # Defaulting to local is accurate rather than convenient: manifest validation still
+      # rejects any spec.environment other than "local" (toolkit/engine/manifest/validate.go),
+      # so every stack this template renders today IS a local lab, deploy-lnet included. When
+      # staging/prod profiles are enabled (ADR-004), this must be threaded from
+      # spec.environment through the compose env instead of defaulted here — otherwise the
+      # guard has no teeth on the deployment that needs it most. Until then an operator can
+      # harden a specific stack by exporting ENVIRONMENT and BRIDGE_SKIP_SPOKE_LOCK=false.
+      ENVIRONMENT: "${ENVIRONMENT:-local}"
       # R2-H-8 service-mesh mTLS — the orchestrator is a gRPC server (gateway→PO).
       # Opt-in via GRPC_MTLS_ENABLE (empty by default → plaintext, unchanged).
       GRPC_MTLS_CERT_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/payment-orchestrator.crt}"
