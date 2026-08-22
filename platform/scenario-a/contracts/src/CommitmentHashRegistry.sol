@@ -1,18 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 import {IIdentityRegistry} from "./interfaces/IIdentityRegistry.sol";
-import {AccessControl} from "@openzeppelin-contracts/access/AccessControl.sol";
 
 /// @title CommitmentHashRegistry
 /// @notice Registry of FX agreement commitment hashes for HTLC gates when Pente is not available.
 /// @dev Stores keccak256(tradeId || originAmount || counterAmount || rate) commitments per trade.
 ///      Used as fallback gate in HashTimeLockedContract when FXAgreement.sol is deployed privately in Pente.
-contract CommitmentHashRegistry is AccessControl {
-    /// @notice Access control role for governance
-    bytes32 public constant GOVERNANCE_ROLE = keccak256("GOVERNANCE_ROLE");
-
+contract CommitmentHashRegistry {
     /// @notice Reference to shared identity registry for clearance gates
+    /// @dev This is the ONLY authorization gate on this contract. It previously also inherited
+    ///      AccessControl and granted the deployer a GOVERNANCE_ROLE that nothing ever checked
+    ///      (finding R2-LOW): every state-changing function gates on IDENTITY_REGISTRY.canGovern
+    ///      via onlyGovernance. A role that is granted but never enforced reads as a second
+    ///      control and is none, so it was removed rather than wired up — wiring it would have
+    ///      restricted these calls to the deployer, which is the deploy script, not the CB that
+    ///      actually operates them.
     IIdentityRegistry public immutable IDENTITY_REGISTRY;
 
     /// @notice Commitment hash state for an FX trade
@@ -94,7 +97,6 @@ contract CommitmentHashRegistry is AccessControl {
             revert CRG__InvalidParameters();
         }
         IDENTITY_REGISTRY = IIdentityRegistry(_identityRegistry);
-        _grantRole(GOVERNANCE_ROLE, msg.sender);
     }
 
     /// @notice Registers an FX agreement commitment hash (for fallback HTLC gating)

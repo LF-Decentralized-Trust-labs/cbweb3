@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 /// @title FXAgreementLibrary
 /// @notice Shared data structures for the on-chain bilateral FX agreement lifecycle.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 import {IAutomatedMarketMaker} from "./interfaces/IAutomatedMarketMaker.sol";
 import {IIdentityRegistry} from "./interfaces/IIdentityRegistry.sol";
