@@ -81,6 +81,9 @@ curl http://localhost:58080/healthz   # central-bank-a
 | Document | Description |
 |----------|-------------|
 | [test-execution-plan.md](test-execution-plan.md) | Test execution plan: strategy, scope, 9-phase timeline with LNET/Banks RACI matrix, API-First E2E flows, performance thresholds, security controls, CI/CD quality gates (pending), and evidence bundle format |
+| [../../docs/deliverables/D12-timeline-actuals.md](../../docs/deliverables/D12-timeline-actuals.md) | Execution record: planned vs actual phase dates and the recorded deviations (both scenarios) |
+| [../../docs/deliverables/D12-defect-log.md](../../docs/deliverables/D12-defect-log.md) | Defect register: format, severity/SLA, lifecycle, and the defects the executed phases produced (both scenarios) |
+| [../../docs/deliverables/D12-uat-records.md](../../docs/deliverables/D12-uat-records.md) | UAT record and sign-off formats, participant coverage, and the preconditions blocking Phase 5 (both scenarios) |
 | [../tests/TEST-CATALOG.md](../tests/TEST-CATALOG.md) | Test case catalog: 159 cases (120 implemented, 39 planned) across smart contract (Foundry), API unit (Go), integration, and E2E levels — mapped to existing tryout scripts |
 
 **Run tests manually:**
