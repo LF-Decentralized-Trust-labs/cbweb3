@@ -8,6 +8,22 @@
 
 ---
 
+## Pedido de decisão
+
+Este bloco existe para que a decisão possa ser tomada sem ler o ADR inteiro. O corpo
+abaixo continua sendo a fundamentação.
+
+| | |
+|---|---|
+| **O que se pede** | Aprovar a migração `Zeto_Anon` → `Zeto_AnonNullifierEnc` (encryption-to-authority) e a construção do caminho de disclosure, **ou** rejeitar em favor da Opção B (domínio Noto), **ou** rejeitar ambas e aceitar formalmente que valores privados não são auditáveis por meio criptográfico nesta fase. |
+| **Quem assina** | IDB e LNet — a decisão define quem detém a chave de autoridade e sob que governança ela é usada. |
+| **Recomendação a aprovar** | Opção A (ver §Recomendação). |
+| **Se aprovado, desbloqueia** | `[R1-§7.3 / R2-A-ARCH-3]` (implementação do modelo de token) e a parte de auditoria de `[R1-9.2]`. |
+| **Se não for aprovado** | O REQ-COM-005 continua sem meio criptográfico de cumprimento e isso precisa ser registrado como limitação aceita, com sign-off — não como pendência técnica. A implementação permanece bloqueada em qualquer caso: começar antes da decisão é construir a opção que pode ser rejeitada. |
+| **Evidência reverificada** | `develop` @ `bfa89aa1`, 2026-08-22. `Zeto_Anon` e o stub `PaladinBypass` continuam em vigor; duas citações de caminho foram corrigidas após a retirada do caminho legado `deploy/local` (ver notas no corpo). |
+
+---
+
 ## Contexto
 
 A constituição do projeto exige que transferências de valor interbancárias usem
@@ -20,10 +36,13 @@ Hoje existe uma tensão não resolvida entre esses dois objetivos:
 
 - **O domínio Zeto implantado é `Zeto_Anon`** (anonimato puro), sem canal de
   auditoria embutido. Isso vale inclusive para os novos templates do toolkit:
-  - `scenario-a/provisioning/templates/central-bank/paladin-config/bank/config.yaml.tmpl:53`
+  - `scenario-a/provisioning/templates/central-bank/paladin-config/bank/config.yaml.tmpl:62`
     (`- name: "Zeto_Anon"`)
-  - Mesmo padrão nos demais templates: `.../central-bank/config.yaml.tmpl` e
-    `.../commercial-bank/paladin-config/commercial-bank/config.yaml.tmpl`.
+  - Mesmo padrão, na mesma linha, nos demais templates:
+    `.../central-bank/paladin-config/central-bank/config.yaml.tmpl:62` e
+    `.../commercial-bank/paladin-config/commercial-bank/config.yaml.tmpl:62`.
+  - *(Linha corrigida de 53 para 62 na reverificação de 2026-08-22; o conteúdo da
+    citação não mudou.)*
   - `Zeto_Anon` não emite ciphertext endereçado a uma autoridade; o supervisor
     não tem meio criptográfico de reconstruir o valor/participantes de uma
     transação a partir da cadeia.
@@ -171,8 +190,10 @@ criptográfico e deve ser desenhada com a autoridade competente.
    `circuits` e os artefatos de prover da variante `_Enc` estão presentes na imagem
    Paladin (hoje **não** há artefato `*_enc` no repositório); (c) implantar o novo
    verifier g16 e os contratos de implementação da variante; (d) re-registrar a
-   variante no `ZetoFactory` (hoje `deploy_zeto_factory_test.go:140-194` registra
-   apenas `Zeto_Anon`); e (e) parametrizar a chave pública de autoridade via
+   variante no `ZetoFactory` (hoje
+   `scenario-a/provisioning/paladin/scripts/deploy_zeto_factory_test.go` registra
+   apenas `Zeto_Anon` — o arquivo saiu de `deploy/local/paladin/scripts/` quando o
+   caminho legado foi retirado em `3b14ecaa`, o registro em si não mudou); e (e) parametrizar a chave pública de autoridade via
    manifesto.
 4. **Implementar o `PaladinClient` real e conectá-lo a um caminho vivo** — hoje o
    stub `PaladinBypass` (`scenario-a/backend/shared/blockchain/privacy/paladin.go:12-28`)
