@@ -5,6 +5,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -465,5 +466,55 @@ func TestComposeEnvCarriesAnInstitutionCodeDistinctFromTheRole(t *testing.T) {
 	}
 	if env["INSTITUTION_CODE"] == env["BANK_CODE"] {
 		t.Fatal("the institution code must differ from BANK_CODE, which the template sets to the role")
+	}
+}
+
+// One institution, one id. The hub's compliance service hashes the bank_code from this payload
+// into the on-chain institutionId, and the AMM resume quorum — which counts distinct
+// institutions — reads the hub registry. If this code diverges from the INSTITUTION_CODE the
+// same CB uses on its own spoke registry, one central bank ends up with two institution ids and
+// the invariant stops being checkable by inspection. Both values were unique before this was
+// aligned, so nothing was exploitable; the point is that it must stay one value.
+func TestRegisterCBSendsTheSameInstitutionCodeAsTheSpokeEnv(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"already_registered":false}`))
+	}))
+	defer srv.Close()
+
+	cfg := testSpokeCfg(t, &exec.FakeRunner{})
+	cfg.CBAddress = ""
+	cfg.InstitutionCode = "central-bank-brazil" // what applyFoundSpoke sets: the manifest prefix
+	hp, err := bundle.EmitHub(bundle.HubBundle{
+		ChainID: 1337, HubRPC: "http://hub:8545", HubWS: "ws://hub:8546", HubGateway: srv.URL,
+		Contracts: map[string]string{
+			"identityRegistry": "0xh1", "fxAgreement": "0xh4",
+			"pairRegistry": "0xh5", "currencyRegistry": "0xh6", "manualOracle": "0xh7",
+		},
+	}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.HubBundlePath = hp
+
+	if err := findStep(FoundSpokeSteps(cfg), "register-cb").Run(context.Background()); err != nil {
+		t.Fatalf("register-cb: %v", err)
+	}
+
+	var payload map[string]string
+	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
+		t.Fatalf("register-cb payload is not JSON: %v (%s)", err, gotBody)
+	}
+	want := envMap(cfg.ComposeEnv())["INSTITUTION_CODE"]
+	if payload["bank_code"] != want {
+		t.Fatalf("register-cb bank_code = %q, but the spoke env carries INSTITUTION_CODE=%q — "+
+			"one central bank would hold two institution ids, one per registry",
+			payload["bank_code"], want)
+	}
+	if payload["bank_code"] == cfg.SpokeID && cfg.InstitutionCode != cfg.SpokeID {
+		t.Fatal("bank_code fell back to the spoke id even though an institution code was configured")
 	}
 }

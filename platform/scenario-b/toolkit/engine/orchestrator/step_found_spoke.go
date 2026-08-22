@@ -893,12 +893,21 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				}
 				// The hub registers THIS CB's own hub identity, not the founder's.
 				cbAddr := c.cbHubAddress()
+				// bank_code is what the hub's compliance service hashes into the on-chain
+				// institutionId, so it must be the SAME code this CB uses on its own spoke
+				// registry (INSTITUTION_CODE). Sending the spoke id here instead gave one central
+				// bank two institution ids — one per registry. Both were unique, so no quorum was
+				// ever satisfiable by a single institution, but "one institution, one id" is the
+				// invariant this control rests on, and two ids make it unverifiable by inspection.
+				// institutionCode() falls back to SpokeID, so an unconfigured caller keeps the
+				// previous value; already-registered CBs keep theirs (registration is idempotent
+				// and never rewrites the id), so this aligns fresh provisioning.
 				payload, err := json.Marshal(map[string]string{
 					"spoke_id":         c.SpokeID,
 					"cb_address":       cbAddr,
 					"institution_name": c.SpokeID,
 					"role":             "ROLE_CENTRAL_BANK",
-					"bank_code":        c.SpokeID,
+					"bank_code":        c.institutionCode(),
 				})
 				if err != nil {
 					return err

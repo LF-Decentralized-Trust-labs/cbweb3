@@ -20,11 +20,17 @@ func InstitutionIDFromString(s string) [32]byte {
 // a single canonical source: bankCode.
 //
 // bankCode is the per-institution identity — every wallet belonging to one institution
-// carries the same bankCode. In Scenario B that code is the manifest entity id, which the
-// compose template hands each service as BANK_CODE, and which the on-chain seed scripts
-// hash the same way (keccak256("central-bank-a"), see contracts/script/SeedHub.s.sol).
-// Deriving the id from bankCode is therefore what guarantees that all of an institution's
-// wallets resolve to the same institutionId regardless of which path registered them.
+// carries the same bankCode. Deriving the id from it is what guarantees that all of an
+// institution's wallets resolve to the same institutionId regardless of which path
+// registered them, and the on-chain seed scripts hash the same string the same way
+// (keccak256("central-bank-a"), see contracts/script/SeedHub.s.sol).
+//
+// Do NOT read BANK_CODE to fill this argument. In Scenario B the compose template sets
+// BANK_CODE to the entity ROLE, so every central bank carries "central-bank" and hashing it
+// would make all of them one institution — see InstitutionCodeFromEnv below, which is the
+// only sanctioned way to resolve THIS service's own institution code. Callers here pass a
+// per-participant code that arrives on the request (req.BankCode, participant.BankCode),
+// which is the institution being registered, not the one doing the registering.
 //
 // That property is load-bearing for the AMM circuit-breaker resume quorum, which counts
 // distinct institutions rather than distinct addresses: one central bank operating two

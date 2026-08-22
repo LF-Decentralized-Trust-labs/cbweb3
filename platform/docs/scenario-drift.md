@@ -137,6 +137,13 @@ Por isso o B ganhou `INSTITUTION_CODE`, renderizado por entidade nos três modos
 `registry.InstitutionCodeFromEnv` devolve também se o código encontrado é único, para que o
 bootstrap de governança avise em vez de registrar um id colidente em silêncio.
 
+**Um código por instituição, nos dois registros.** O mesmo `INSTITUTION_CODE` vale para o
+registro do próprio spoke e para o registro do hub: o passo `register-cb` envia esse código
+como `bank_code`, e é dele que a compliance do hub deriva o `institutionId`. O registro que o
+AMM lê é o do hub, mas manter os dois iguais é o que torna "uma instituição, um id"
+verificável por inspeção — pinado por
+`TestRegisterCBSendsTheSameInstitutionCodeAsTheSpokeEnv`.
+
 **Não unifique as duas fontes sem antes unificar o que é `BANK_CODE`.** Trocar o B para
 `BANK_CODE` reintroduz a colisão descrita acima; trocar o A para `INSTITUTION_CODE` exige
 que o toolkit do A passe a renderizá-lo.
