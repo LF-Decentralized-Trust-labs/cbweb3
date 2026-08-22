@@ -402,10 +402,33 @@ export GRPC_AUTHZ_ENFORCE=true
 With `GRPC_MTLS_ENABLE` unset the `GRPC_MTLS_*` paths interpolate to empty and the
 transport stays plaintext — existing deployments are unaffected. Setting
 `GRPC_AUTHZ_ENFORCE=true` without `GRPC_MTLS_ENABLE=1` is refused at service start
-(enforcing over a plaintext, header-settable identity is a fail-open). Smoke test
-that plaintext is rejected once enabled: a plaintext gRPC dial to any service port
-must fail the TLS handshake; a portal round-trip (login → governance list) must
-still succeed over the mTLS mesh.
+(enforcing over a plaintext, header-settable identity is a fail-open).
+
+Verify it with `./mtls-smoke.sh`, which is that check made repeatable: it reads each
+gateway's own environment to establish whether the mesh is actually on (so a pass
+cannot be vacuous), dials every internal gRPC port in plaintext from inside the
+entity's docker network and requires the handshake to be refused, then confirms the
+gateway still serves. Run `sample-tryout.sh` after it for the full login →
+governance-list round-trip over the mesh.
+
+```bash
+export GRPC_MTLS_ENABLE=1 GRPC_AUTHZ_ENFORCE=true
+./deploy-all.sh --clean      # provision with the mesh on
+./mtls-smoke.sh              # verify enforcement
+```
+
+### Per-method authorization
+
+With enforcement on, each service also restricts its **value-moving** methods to the
+callers that legitimately make them, rather than to any authenticated peer: minting,
+burning, settlement, deposit/escrow/redeem approval and the FX lifecycle accept only
+the `api-gateway` identity; participant freeze and CSR signing accept the gateway and
+`auth`; certificate issuance and the participant record accept `auth` only. Reads keep
+the baseline policy and still honour `GRPC_AUTHZ_ALLOWED_CALLERS`. The lists are
+compiled in (`internal/grpc/server/authz_policy.go` per service) because the caller
+identities are the mesh certificate CNs the toolkit issues — known without operator
+configuration — and a test fails the build if a new mutating RPC is added without
+one.
 
 > Cross-entity gRPC is not part of this mesh (there is none today — cross-VM
 > traffic is Besu JSON-RPC + HTTP). A federated/shared service CA would be needed

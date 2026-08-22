@@ -355,3 +355,111 @@ func TestOptionsFromEnv_ExplicitPolicyWinsOverAllowedCallers(t *testing.T) {
 		t.Fatalf("explicit policy argument must win, got %#v", opts.Policy)
 	}
 }
+
+// MethodPolicy is the control that turns "an authenticated peer" into "the caller
+// that may perform this operation". These cases pin the properties the servers
+// depend on; a regression here silently widens every value-moving RPC.
+func TestMethodPolicy(t *testing.T) {
+	const mint = "/payment.v1.Svc/MintToken"
+	const read = "/payment.v1.Svc/GetBalance"
+	gateway := &Identity{Subject: "api-gateway", Method: "mtls"}
+	orchestrator := &Identity{Subject: "payment-orchestrator", Method: "mtls"}
+
+	p := RestrictMethods(AllowAuthenticated{}, []string{"api-gateway"}, mint)
+
+	if err := p.Authorize(context.Background(), gateway, mint); err != nil {
+		t.Fatalf("the listed caller must be admitted on a restricted method: %v", err)
+	}
+	if err := p.Authorize(context.Background(), orchestrator, mint); err == nil {
+		t.Fatal("an authenticated but unlisted caller must be refused on a restricted method")
+	}
+	if err := p.Authorize(context.Background(), orchestrator, read); err != nil {
+		t.Fatalf("an unrestricted method must fall through to the default: %v", err)
+	}
+	if err := p.Authorize(context.Background(), nil, read); err == nil {
+		t.Fatal("an anonymous caller must still be refused by the default policy")
+	}
+}
+
+// A MethodPolicy built without a Default must refuse rather than wave calls through:
+// an unlisted method with no default is the one shape that would authorize
+// everything by accident.
+func TestMethodPolicy_NilDefaultFailsClosed(t *testing.T) {
+	p := MethodPolicy{ByMethod: map[string]Policy{"/a.Svc/Restricted": AllowList{Subjects: map[string]bool{"x": true}}}}
+	if err := p.Authorize(context.Background(), &Identity{Subject: "x", Method: "mtls"}, "/a.Svc/Unlisted"); err == nil {
+		t.Fatal("an unlisted method with no default must be refused")
+	}
+}
+
+// WithRestriction must add caller sets without dropping the ones already declared:
+// a server states several (only the gateway may approve KYC; the gateway and auth
+// may both sign a CSR), and losing one silently re-opens a method.
+func TestMethodPolicy_WithRestrictionKeepsEarlierSets(t *testing.T) {
+	const approve = "/compliance.v1.Svc/ApproveKYC"
+	const sign = "/compliance.v1.Svc/SignParticipantCSR"
+
+	p := RestrictMethods(AllowAuthenticated{}, []string{"api-gateway"}, approve).
+		WithRestriction([]string{"api-gateway", "auth"}, sign)
+
+	authSvc := &Identity{Subject: "auth", Method: "mtls"}
+	if err := p.Authorize(context.Background(), authSvc, sign); err != nil {
+		t.Fatalf("auth must be admitted on the method it legitimately calls: %v", err)
+	}
+	if err := p.Authorize(context.Background(), authSvc, approve); err == nil {
+		t.Fatal("the earlier, narrower restriction must survive WithRestriction")
+	}
+}
+
+// Audit mode must not lose the caller identity when only AUTHORIZATION fails.
+//
+// A per-method policy refuses more calls than a service-wide one, and before this the
+// interceptor dropped the identity on any failure — so during the transition (enforce
+// off) every call the policy did not list would have fallen back to the payload actor,
+// degrading audit attribution in the name of preparing to improve it. Authentication
+// answered "who"; only authorization said "not this method".
+func TestAuthenticate_AuditModeKeepsIdentityWhenPolicyRefuses(t *testing.T) {
+	o := Options{
+		Authenticator: HeaderAuthenticator{},
+		Policy:        AllowList{Subjects: map[string]bool{"api-gateway": true}},
+		Enforce:       false,
+	}
+	md := metadata.New(map[string]string{HeaderMetadataKey: "noc-1"})
+	ctx := metadata.NewIncomingContext(context.Background(), md)
+
+	newCtx, err := o.authenticate(ctx, "/svc/Restricted")
+	if err != nil {
+		t.Fatalf("audit mode must not reject: %v", err)
+	}
+	if got := Actor(newCtx); got != "noc-1" {
+		t.Fatalf("the authenticated caller must still be attributed, got %q", got)
+	}
+}
+
+// Under enforcement the same call is refused, and no identity leaks into the handler.
+func TestAuthenticate_EnforcedModeRejectsWhenPolicyRefuses(t *testing.T) {
+	o := Options{
+		Authenticator: HeaderAuthenticator{},
+		Policy:        AllowList{Subjects: map[string]bool{"api-gateway": true}},
+		Enforce:       true,
+	}
+	md := metadata.New(map[string]string{HeaderMetadataKey: "noc-1"})
+	ctx := metadata.NewIncomingContext(context.Background(), md)
+
+	if _, err := o.authenticate(ctx, "/svc/Restricted"); err == nil {
+		t.Fatal("enforcement must refuse an unauthorized caller")
+	}
+}
+
+// Authentication failure is different from authorization failure: there is no identity
+// to carry, so audit mode proceeds with none rather than inventing one.
+func TestAuthenticate_AuditModeCarriesNoIdentityWhenUnauthenticated(t *testing.T) {
+	o := Options{Authenticator: HeaderAuthenticator{}, Policy: AllowAuthenticated{}, Enforce: false}
+
+	newCtx, err := o.authenticate(context.Background(), "/svc/Any")
+	if err != nil {
+		t.Fatalf("audit mode must not reject: %v", err)
+	}
+	if got := Actor(newCtx); got != "" {
+		t.Fatalf("no identity should be established, got %q", got)
+	}
+}

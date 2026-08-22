@@ -75,7 +75,7 @@ func New(cfg Config) (*grpc.Server, error) {
 		logger:          cfg.Logger,
 		fxAgreements:    make(map[string]*domain.FXAgreementRecord),
 	}
-	serverOpts, err := authz.ServerOptionsFromEnv(cfg.Logger, nil)
+	serverOpts, err := authz.ServerOptionsFromEnv(cfg.Logger, serverPolicy())
 	if err != nil {
 		return nil, fmt.Errorf("configure gRPC security: %w", err)
 	}

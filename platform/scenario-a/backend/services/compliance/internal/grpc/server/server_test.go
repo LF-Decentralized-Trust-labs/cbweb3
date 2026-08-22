@@ -13,6 +13,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/repository"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
 	pki "github.com/LACNetNetworks/cbweb3-platform/backend/shared/identity"
+	authz "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	compliancv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/compliance/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -528,7 +529,7 @@ func TestManageParticipantStatus(t *testing.T) {
 func TestCircuitBreaker_RoundTrip(t *testing.T) {
 	t.Parallel()
 	svc := newTestService()
-	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-actor-subject", "noc-operator"))
+	ctx := authz.NewContext(context.Background(), &authz.Identity{Subject: "noc-operator", Method: "mtls"})
 
 	// Default state: not paused.
 	st, err := svc.GetCircuitBreakerStatus(ctx, &emptypb.Empty{})
@@ -609,7 +610,7 @@ func TestUpdateSystemParameters_MissingReason(t *testing.T) {
 func TestUpdateSystemParameters_ActorFromCtx(t *testing.T) {
 	t.Parallel()
 	svc := newTestService()
-	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-actor-subject", "ctx-actor"))
+	ctx := authz.NewContext(context.Background(), &authz.Identity{Subject: "ctx-actor", Method: "mtls"})
 	_, err := svc.UpdateSystemParameters(ctx, &compliancv1.UpdateSystemParametersRequest{Reason: "r"})
 	if err != nil {
 		t.Fatalf("update: %v", err)
@@ -623,9 +624,11 @@ func TestCtxHelpers(t *testing.T) {
 	md := metadata.Pairs(
 		"x-correlation-id", "corr-1",
 		"x-forwarded-for", "1.2.3.4",
-		"x-actor-subject", "actor-1",
 	)
 	ctx := metadata.NewIncomingContext(context.Background(), md)
+	// The actor comes from the authenticated identity, not from metadata: the
+	// x-actor-subject header this test used to set is no longer read at all.
+	ctx = authz.NewContext(ctx, &authz.Identity{Subject: "actor-1", Method: "mtls"})
 	if correlationIDFromCtx(ctx) != "corr-1" {
 		t.Error("correlation id")
 	}

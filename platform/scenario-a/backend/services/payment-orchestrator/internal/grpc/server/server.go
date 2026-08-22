@@ -136,7 +136,7 @@ func New(cfg Config) (*grpc.Server, func(context.Context), error) {
 	// The x-caller-identity header is trusted only under GRPC_AUTHZ_ALLOW_HEADER_IDENTITY
 	// (transitional). Set the GRPC_MTLS_* vars for mutual TLS; GRPC_AUTHZ_ENFORCE
 	// (which requires mTLS) rejects unauthenticated callers.
-	serverOpts, err := authz.ServerOptionsFromEnv(cfg.Logger, nil)
+	serverOpts, err := authz.ServerOptionsFromEnv(cfg.Logger, serverPolicy())
 	if err != nil {
 		return nil, nil, fmt.Errorf("configure gRPC security: %w", err)
 	}

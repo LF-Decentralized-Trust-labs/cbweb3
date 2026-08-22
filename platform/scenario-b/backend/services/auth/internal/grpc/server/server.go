@@ -67,7 +67,7 @@ func New(kc keycloak.Client, kmsProvider kms.Provider, compliance complianceclie
 		nonceStore:       ns,
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	serverOpts, err := authz.ServerOptionsFromEnv(logger, nil)
+	serverOpts, err := authz.ServerOptionsFromEnv(logger, serverPolicy())
 	if err != nil {
 		return nil, err
 	}
