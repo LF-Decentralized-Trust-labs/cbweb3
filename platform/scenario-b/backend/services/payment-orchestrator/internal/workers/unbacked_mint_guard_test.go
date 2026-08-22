@@ -6,6 +6,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	podmain "github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/domain"
 )
 
 // planLockMint is the gate on Hub minting. The case that matters is the third one: a position
@@ -107,5 +109,75 @@ func TestNewBesuRelayerExecutor_RefusesTheDevFlagOutsideLocal(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "dial") {
 		t.Fatalf("the profile check must precede dialling, got: %v", err)
+	}
+}
+
+// planLockMint's verdict is inert unless SubmitLockEvent acts on it, and the pure-function
+// tests above cannot see that wiring: deleting the refusal case from the switch left every one
+// of them green. This test covers the half that carries the property — decision through to
+// refusal — with no chain involved.
+//
+// It works because the refused path returns before any chain call: SubmitLockEvent touches only
+// e.db and e.cfg to get there. hubEC is deliberately nil, so if the refusal were ever removed
+// this test would fail on the mint attempt rather than pass quietly.
+//
+// The local path is not exercised here for the same reason: it proceeds to the Hub mint, which
+// needs a chain. The decision itself is covered by TestPlanLockMint.
+func TestSubmitLockEvent_RefusesAnUnbackedMintOutsideLocal(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.Create(&podmain.BridgedAssetPosition{
+		PositionID:     "pos-unbacked",
+		OwnerBankID:    "central-bank-a",
+		SpokeNetwork:   "spoke-brl",
+		NativeAsset:    "0xTOKEN",
+		MirroredAsset:  "0x27187c765127eC4e957A0Be20Bfd66C4C6d75bE6",
+		MirroredAmount: "1000",
+		BridgeState:    podmain.BridgeStateLocking,
+	}).Error; err != nil {
+		t.Fatalf("seed position: %v", err)
+	}
+
+	// spokeReady false (no spoke wired) + a non-local profile = the refused case.
+	ex := &BesuRelayerExecutor{db: db, cfg: BesuRelayerConfig{Environment: "prod"}}
+
+	err := ex.SubmitLockEvent(context.Background(), "idem-1", "pos-unbacked")
+	if err == nil {
+		t.Fatal("expected the lock-mint to be refused with no spoke-side leg outside local")
+	}
+	for _, want := range []string{"refusing to mint", "pos-unbacked", "ENVIRONMENT"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("refusal must mention %q so the operator can act on it, got: %v", want, err)
+		}
+	}
+}
+
+// The same position in the local lab must NOT be refused by the gate. It cannot reach the Hub
+// mint here (no chain), so this asserts the gate specifically: whatever error comes back, it is
+// not the refusal.
+func TestSubmitLockEvent_DoesNotRefuseInTheLocalLab(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.Create(&podmain.BridgedAssetPosition{
+		PositionID:     "pos-local",
+		OwnerBankID:    "central-bank-a",
+		SpokeNetwork:   "spoke-brl",
+		NativeAsset:    "0xTOKEN",
+		MirroredAsset:  "0x27187c765127eC4e957A0Be20Bfd66C4C6d75bE6",
+		MirroredAmount: "1000",
+		BridgeState:    podmain.BridgeStateLocking,
+	}).Error; err != nil {
+		t.Fatalf("seed position: %v", err)
+	}
+
+	ex := &BesuRelayerExecutor{db: db, cfg: BesuRelayerConfig{Environment: EnvironmentLocal}}
+
+	// Recovered on purpose: past the gate the mint dereferences a nil chain client. What is
+	// asserted is that the gate let it through, not what the chain call does.
+	var err error
+	func() {
+		defer func() { _ = recover() }()
+		err = ex.SubmitLockEvent(context.Background(), "idem-2", "pos-local")
+	}()
+	if err != nil && strings.Contains(err.Error(), "refusing to mint") {
+		t.Fatalf("the local lab must not be refused by the guard, got: %v", err)
 	}
 }

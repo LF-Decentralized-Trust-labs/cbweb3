@@ -292,7 +292,7 @@ func (e *BesuRelayerExecutor) SubmitLockEvent(ctx context.Context, _ /*idempoten
 	}
 
 	bankWallet := strings.TrimSpace(pos.BurnFromSpokeAddress)
-	switch planLockMint(e.cfg.Environment, e.spokeEC != nil, e.cfg.SkipSpokeLock, bankWallet, pos.NativeAsset) {
+	switch planLockMint(e.cfg.Environment, e.spokeReady, e.cfg.SkipSpokeLock, bankWallet, pos.NativeAsset) {
 	case lockMintNoSpokeForBurn:
 		return fmt.Errorf("spoke chain not configured — cannot burn tCeBM for position %s", positionID)
 
@@ -325,8 +325,8 @@ func (e *BesuRelayerExecutor) SubmitLockEvent(ctx context.Context, _ /*idempoten
 			"refusing to mint on the Hub with no spoke-side leg for position %s "+
 				"(environment=%q skip_spoke_lock=%v spoke_configured=%v native_asset=%q): "+
 				"this would create unbacked wrapped tokens; set ENVIRONMENT=%s for a local lab, "+
-				"or configure the spoke chain (SPOKE_RPC_URL / SPOKE_BRIDGE_ADDRESS) and clear BRIDGE_SKIP_SPOKE_LOCK",
-			positionID, e.cfg.Environment, e.cfg.SkipSpokeLock, e.spokeEC != nil, pos.NativeAsset, EnvironmentLocal)
+				"or configure the spoke chain (SPOKE_BESU_RPC_URL / SPOKE_BRIDGE_ADDRESS) and clear BRIDGE_SKIP_SPOKE_LOCK",
+			positionID, e.cfg.Environment, e.cfg.SkipSpokeLock, e.spokeReady, pos.NativeAsset, EnvironmentLocal)
 
 	case lockMintUnbackedAllowed:
 		// Local lab: allowed, but never quietly. One line per occurrence, because the whole
@@ -336,7 +336,14 @@ func (e *BesuRelayerExecutor) SubmitLockEvent(ctx context.Context, _ /*idempoten
 			"no spoke lock or burn (environment=%s skip_spoke_lock=%v spoke_configured=%v native_asset=%q). "+
 			"Local-lab only: the Hub supply this creates has no spoke-side reserve behind it.",
 			positionID, pos.MirroredAsset, amount.String(),
-			e.cfg.Environment, e.cfg.SkipSpokeLock, e.spokeEC != nil, pos.NativeAsset)
+			e.cfg.Environment, e.cfg.SkipSpokeLock, e.spokeReady, pos.NativeAsset)
+
+	default:
+		// Unreachable today: every lockMintAction has a case above. It exists because an
+		// unmatched Go switch does nothing, so a future action added without a case here would
+		// fall through to the Hub mint — the one outcome this function exists to gate. Failing
+		// closed makes that a refused position instead of unbacked supply.
+		return fmt.Errorf("unhandled lock-mint plan for position %s — refusing to mint", positionID)
 	}
 
 	// Hub mint: W-tCeBM.mint(recipient, amount). CB hub signer must hold CENTRAL_BANK_ROLE.
