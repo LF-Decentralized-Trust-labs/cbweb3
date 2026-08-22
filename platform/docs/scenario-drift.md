@@ -39,7 +39,7 @@ estão marcadas como tal, para que ninguém gaste tempo nelas.
 | --- | --- | --- |
 | Exports de Dialog na UI | **Já convergido** | Os dois pacotes exportam os mesmos 66 símbolos |
 | Auth do NOC | **Já convergido** | O middleware difere apenas no caminho de import |
-| Circuit breaker do AMM | **Convergir** (aberta) | Mesmo quórum (2), mas só o A conta instituições distintas — e o A é o vestigial |
+| Circuit breaker do AMM | **Convergida** (R2-H-4) | Os dois contam instituições distintas e vinculam a assinatura à época da pausa |
 | Taxa do AMM | **Convergir** (parcial) | Mecanismo igual; padrão 0,3% em A e 0% em B |
 | Superfície do AMM | **Intencional** | B tem liquidez cooperativa e saque; A não |
 | Proteções de rota | **Convergir** | A comenta rotas; B escolhe conjunto por flag de build |
@@ -91,44 +91,63 @@ vale para os dois cenários, não só para o A.
 
 ---
 
-## 3. Circuit breaker do AMM — convergir (divergência nova, criada de propósito)
+## 3. Circuit breaker do AMM — convergida (R2-H-4)
 
-O port do R2-H-2 aconteceu. Os dois contratos têm `pause`, `signResume`, `isPaused` e
-`RESUME_QUORUM`, e o quórum numérico é o mesmo:
+O port do R2-H-2 aconteceu nos dois cenários. Os dois contratos têm `pause`, `signResume`,
+`isPaused` e `RESUME_QUORUM`, e o quórum numérico é o mesmo:
 
 - `scenario-a/contracts/src/AutomatedMarketMaker.sol:31` — `RESUME_QUORUM = 2`
 - `scenario-b/contracts/src/AutomatedMarketMaker.sol:32` — `RESUME_QUORUM = 2`
 
 O breaker assimétrico (pausa 1-de-N, retomada 2-de-N) que a constituição exige está
-implementado nos dois. **O que os dois contam é que passou a divergir**, e vale registrar
-antes que alguém leia a assimetria como acidente:
+implementado nos dois, e desde o R2-H-4 **o que os dois contam também é o mesmo**:
 
 | | Cenário A | Cenário B |
 | --- | --- | --- |
-| Deduplicação da retomada | por **instituição** (`institutionSigned`, via `IdentityRegistry.getInstitutionId`) | por **endereço** (`signed[msg.sender]`) |
-| Vinculação à época da pausa | sim (`pauseEpoch`) | não |
-| `institutionId` no registro de identidades | sim, obrigatório e não-zero | não existe |
+| Deduplicação da retomada | por **instituição** (`institutionSigned`, via `IdentityRegistry.getInstitutionId`) | por **instituição** (idem) |
+| Vinculação à época da pausa | sim (`pauseEpoch`) | sim (`pauseEpoch`) |
+| `institutionId` no registro de identidades | sim, obrigatório e não-zero | sim, obrigatório e não-zero |
 
-A dedupe por endereço deixa um banco central com duas carteiras de governança formar
-o 2-de-N sozinho — exatamente o que o quórum existe para impedir. O cenário A fechou isso
-(follow-up do R2-H-2). **O cenário B continua em aberto**, e o caminho que existia para
-fechá-lo foi descartado: o branch `fix/amm-resume-quorum-to-require-distinct-institutions`
-(PR #80) **não será integrado**, por decisão do time (2026-08-22).
+Vale registrar por que essa convergência precisou de dois cards em vez de um. O R2-H-2 foi
+aplicado ao AMM do cenário A, que **não é implantado por nenhum caminho de deploy em
+funcionamento** (ver §5 e o ADR-003 sobre o hub); o do cenário B é o que executa swaps de
+verdade. Ou seja: por um período o quórum corrigido era o vestigial e o vulnerável era o de
+produção. O R2-H-4 fechou isso. O branch `fix/amm-resume-quorum-to-require-distinct-institutions`
+(PR #80) **não será integrado**, por decisão do time (2026-08-22) — o port foi feito por outro
+caminho.
 
-Duas consequências que valem ser ditas sem rodeio:
+### A única diferença que permanece, e é deliberada: a origem do `institutionId`
 
-- **A divergência não é mais temporária por si só.** Ela só fecha se o cenário B receber a
-  mesma correção por outro caminho; até lá, esta tabela descreve um estado estável, não uma
-  janela de integração.
-- **A instância que importa é a do B, não a do A.** O AMM do cenário A não é implantado por
-  nenhum caminho de deploy em funcionamento (ver §5 e o ADR-003 sobre o hub); o do cenário B
-  é o que executa swaps de verdade. Ou seja: o quórum ainda vulnerável a duas carteiras de
-  uma mesma instituição é o do cenário **em produção**, e o já corrigido é o vestigial.
+O desenho é idêntico (`institutionSigned` por proposta, `getInstitutionId` no registro,
+id derivado por `keccak256`), mas **a string que entra no hash não vem do mesmo lugar**:
 
-O desenho a replicar continua registrado e validado no cenário A — `institutionSigned` por
-proposta, `getInstitutionId` no registro de identidades, id derivado de `keccak256(bankCode)`
-igual nos três produtores (serviços Go, script de seed, toolkit). Portar isso para o B é uma
-mudança de escopo conhecido; o que falta é um card, não um desenho.
+| | Cenário A | Cenário B |
+| --- | --- | --- |
+| Fonte do código de instituição | `BANK_CODE` (por instituição) | `INSTITUTION_CODE` (renderizado por entidade pelo toolkit) |
+| Por que | o `bankCode` do A já é único por instituição | `BANK_CODE` no B é o **papel** da entidade |
+
+No cenário B, `apply.go` deriva a entidade de `spec.topology.role` e o template define
+`BANK_CODE: "${ENTITY}"` — então **todo banco central carrega `central-bank`**. Derivar o
+`institutionId` disso faria de todos os bancos centrais **uma única instituição**; como o
+quórum exige duas distintas, um AMM pausado **nunca mais poderia ser retomado**. É o mesmo
+motivo pelo qual `RELAY_KEY_ID` já existia separado de `BANK_CODE`, uma camada acima.
+
+Por isso o B ganhou `INSTITUTION_CODE`, renderizado por entidade nos três modos
+(`found-spoke` → prefixo único do manifesto, `join` → id do banco, `found-hub` → `hub`), e
+`registry.InstitutionCodeFromEnv` devolve também se o código encontrado é único, para que o
+bootstrap de governança avise em vez de registrar um id colidente em silêncio.
+
+**Não unifique as duas fontes sem antes unificar o que é `BANK_CODE`.** Trocar o B para
+`BANK_CODE` reintroduz a colisão descrita acima; trocar o A para `INSTITUTION_CODE` exige
+que o toolkit do A passe a renderizá-lo.
+
+### Migração de cadeias já provisionadas
+
+Participantes registrados **antes** dessa mudança foram gravados pela assinatura de quatro
+argumentos e têm `institutionId = 0`. O AMM recusa uma assinatura sem instituição
+(`AMM__InvalidInstitutionId`), então essas carteiras de governança **não conseguem assinar
+uma retomada** até serem registradas de novo com um código de instituição. Em provisionamento
+novo (o caminho do toolkit) isso não aparece, porque o registro já nasce com o id.
 
 ---
 

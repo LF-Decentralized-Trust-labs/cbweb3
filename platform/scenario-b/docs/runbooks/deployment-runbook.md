@@ -200,6 +200,45 @@ This release contains **forward-only** steps. Once each has run, downgrading the
 toolkit leaves the platform in a state the previous version cannot operate. There is no
 automated rollback. Read this section before deploying and take the snapshot in the checklist.
 
+### 0. Institution id on the identity registry (R2-H-4)
+
+**What changed.** `IdentityRegistry.registerParticipant` now takes a fifth argument, a non-zero
+`institutionId`, and stores it on the participant. The AMM circuit-breaker resume quorum counts
+distinct **institutions** rather than distinct addresses, and refuses a signature it cannot
+attribute (`AMM__InvalidInstitutionId`). Each pause also opens a new epoch, so a resume proposal
+raised under an earlier pause is refused (`AMM__ProposalExpired`).
+
+**Why it is forward-only.** The ABI of `registerParticipant` changed. Older service binaries call
+the four-argument form and will fail against a registry deployed from this release.
+
+**Migration for an already-provisioned chain.** Participants registered before this release hold
+`institutionId = 0`. Their governance wallets **cannot sign a resume** until they are registered
+again with an institution code. Verify before relying on the breaker:
+
+```bash
+# For each governance wallet, a zero result means it cannot participate in a resume.
+cast call "$HUB_IDENTITY_REGISTRY" 'getInstitutionId(address)(bytes32)' "$WALLET" --rpc-url "$HUB_RPC_URL"
+```
+
+A freshly provisioned stack is unaffected: every registration path now supplies the id.
+
+**`INSTITUTION_CODE` must be set per entity, and it is not `BANK_CODE`.** The compose template
+sets `BANK_CODE` to the entity **role**, so every central bank in a deployment carries
+`central-bank`. Hashing that into an institution id would make all central banks **one**
+institution — and because the quorum requires two distinct ones, **a paused AMM could never be
+resumed**. The toolkit renders `INSTITUTION_CODE` per entity (the manifest-unique prefix on a
+central bank, the bank id on a bank). If you render compose by hand, set it explicitly:
+
+```bash
+# WRONG on a central bank — this is the role, shared by every CB
+INSTITUTION_CODE=central-bank
+# Right — unique per entity
+INSTITUTION_CODE=central-bank-brazil
+```
+
+The compliance service logs a warning at bootstrap when it had to fall back to `BANK_CODE`.
+Treat that warning as a configuration error, not noise.
+
 ### 1. Residue leg — replay-protection index
 
 **What changed.** The unique index on `bridged_asset_positions` moved from `swap_tx_hash` alone
