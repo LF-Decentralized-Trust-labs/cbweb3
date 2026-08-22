@@ -39,7 +39,7 @@ estão marcadas como tal, para que ninguém gaste tempo nelas.
 | --- | --- | --- |
 | Exports de Dialog na UI | **Já convergido** | Os dois pacotes exportam os mesmos 66 símbolos |
 | Auth do NOC | **Já convergido** | O middleware difere apenas no caminho de import |
-| Circuit breaker do AMM | **Convergir** (nova) | Mesmo quórum (2), mas só o A conta instituições distintas |
+| Circuit breaker do AMM | **Convergir** (aberta) | Mesmo quórum (2), mas só o A conta instituições distintas — e o A é o vestigial |
 | Taxa do AMM | **Convergir** (parcial) | Mecanismo igual; padrão 0,3% em A e 0% em B |
 | Superfície do AMM | **Intencional** | B tem liquidez cooperativa e saque; A não |
 | Proteções de rota | **Convergir** | A comenta rotas; B escolhe conjunto por flag de build |
@@ -111,13 +111,24 @@ antes que alguém leia a assimetria como acidente:
 
 A dedupe por endereço deixa um banco central com duas carteiras de governança formar
 o 2-de-N sozinho — exatamente o que o quórum existe para impedir. O cenário A fechou isso
-(follow-up do R2-H-2); o cenário B tem a correção equivalente pronta no branch
-`fix/amm-resume-quorum-to-require-distinct-institutions` (PR #80), **ainda não integrado**.
+(follow-up do R2-H-2). **O cenário B continua em aberto**, e o caminho que existia para
+fechá-lo foi descartado: o branch `fix/amm-resume-quorum-to-require-distinct-institutions`
+(PR #80) **não será integrado**, por decisão do time (2026-08-22).
 
-Portanto: divergência **temporária e intencional na direção certa**. Ela se resolve
-integrando o PR #80, não removendo a checagem do A. As duas implementações usam o mesmo
-desenho (`institutionSigned` por proposta + `getInstitutionId` no registro) justamente
-para que a integração não precise reconciliar nada.
+Duas consequências que valem ser ditas sem rodeio:
+
+- **A divergência não é mais temporária por si só.** Ela só fecha se o cenário B receber a
+  mesma correção por outro caminho; até lá, esta tabela descreve um estado estável, não uma
+  janela de integração.
+- **A instância que importa é a do B, não a do A.** O AMM do cenário A não é implantado por
+  nenhum caminho de deploy em funcionamento (ver §5 e o ADR-003 sobre o hub); o do cenário B
+  é o que executa swaps de verdade. Ou seja: o quórum ainda vulnerável a duas carteiras de
+  uma mesma instituição é o do cenário **em produção**, e o já corrigido é o vestigial.
+
+O desenho a replicar continua registrado e validado no cenário A — `institutionSigned` por
+proposta, `getInstitutionId` no registro de identidades, id derivado de `keccak256(bankCode)`
+igual nos três produtores (serviços Go, script de seed, toolkit). Portar isso para o B é uma
+mudança de escopo conhecido; o que falta é um card, não um desenho.
 
 ---
 
