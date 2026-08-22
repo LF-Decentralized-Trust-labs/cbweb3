@@ -99,13 +99,53 @@ func backfillBridgeDirection(db *gorm.DB) error {
 // the record of value that actually moved. An operator must decide which position is real and
 // what to do about the other.
 //
-// A fresh database has no table yet and a pre-direction database has no column; both skip.
+// The rows it must catch are usually NOT labelled IN yet, which is the subtlety worth stating.
+// A database old enough to hold duplicates may predate the direction column entirely, or hold
+// the column with the rows still unlabelled after an interrupted boot. In both cases
+// direction = 'IN' matches nothing, the index gets created over an empty direction, and the
+// backfill — the very statement that would label those rows IN — is what violates it. The
+// operator would then get the opaque message on every restart with no way forward, since the
+// failing statement is the one that would make the guard able to see the rows at all.
+//
+// So the predicate asks what the backfill WILL write, mirroring its classification: a row is
+// inbound if it is already labelled IN, or is unlabelled and carries none of the three durable
+// OUT signals. Each signal is used only if its column or table is present, because a schema old
+// enough to lack direction may lack those too.
+//
+// A fresh database has no table yet and skips.
 func guardDuplicateBridgeInCorrelations(db *gorm.DB) error {
 	m := db.Migrator()
 	pos := &apidomain.BridgedAssetPosition{}
-	if !m.HasTable(pos) || !m.HasColumn(pos, "direction") || !m.HasColumn(pos, "correlation_id") {
+	if !m.HasTable(pos) || !m.HasColumn(pos, "correlation_id") {
 		return nil
 	}
+
+	// "Will be OUT", in the backfill's own terms (see backfillBridgeDirection).
+	var outClauses []string
+	var args []any
+	if m.HasTable(&apidomain.RelayerQueueItem{}) {
+		outClauses = append(outClauses,
+			"EXISTS (SELECT 1 FROM relayer_queue_items q WHERE q.position_id = bridged_asset_positions.position_id AND q.event_type = ?)")
+		args = append(args, "BURN_UNLOCK")
+	}
+	if m.HasColumn(pos, "leg") {
+		outClauses = append(outClauses, "leg = ?")
+		args = append(args, apidomain.BridgeLegResidue)
+	}
+	if m.HasColumn(pos, "burn_from_hub_address") {
+		outClauses = append(outClauses, "burn_from_hub_address <> ''")
+	}
+	willBeIn := "1 = 1" // no signal available: everything unlabelled becomes IN
+	if len(outClauses) > 0 {
+		willBeIn = "NOT (" + strings.Join(outClauses, " OR ") + ")"
+	}
+
+	inbound := willBeIn
+	if m.HasColumn(pos, "direction") {
+		inbound = "(direction = ? OR ((direction IS NULL OR direction = '') AND " + willBeIn + "))"
+		args = append([]any{apidomain.BridgeDirectionIn}, args...)
+	}
+
 	type dup struct {
 		CorrelationID string
 		N             int64
@@ -113,7 +153,8 @@ func guardDuplicateBridgeInCorrelations(db *gorm.DB) error {
 	var dups []dup
 	err := db.Model(pos).
 		Select("correlation_id, COUNT(*) AS n").
-		Where("correlation_id <> '' AND direction = ?", apidomain.BridgeDirectionIn).
+		Where("correlation_id <> ''").
+		Where(inbound, args...).
 		Group("correlation_id").
 		Having("COUNT(*) > 1").
 		Order("n DESC").

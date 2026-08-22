@@ -17,6 +17,7 @@ import (
 type SpokeBridgeLockCaller interface {
 	LockAsset(ctx context.Context, ownerBankID, spokeNetwork, nativeAsset, amount string) (*podmain.LockResult, error)
 }
+
 // RelayerSubmitter enqueues events to the Hyperledger Cacti Relayer.
 type RelayerSubmitter interface {
 	SubmitLockEvent(ctx context.Context, idempotencyKey, positionID string) error
@@ -54,6 +55,12 @@ func (s *BridgeLockMintService) LockAndEnqueue(ctx context.Context, ownerBankID,
 	// would be invisible to the reconciliation until the gateway's startup backfill defaults it to
 	// IN. If this service is ever wired up, add the column to podmain.BridgedAssetPosition and set
 	// it here rather than relying on that backfill.
+	//
+	// The same applies to correlation_id, and there it is not only a visibility problem: an
+	// inbound position is unique per correlation id (partial index, owned by the gateway
+	// migration), and that is what stops a replayed notification burning a bank's tCeBM twice.
+	// A row written here with an empty correlation id sits outside the index and bypasses the
+	// guard silently. Set both, or the replay protection does not cover this producer.
 	pos := &podmain.BridgedAssetPosition{
 		PositionID:     positionID,
 		OwnerBankID:    ownerBankID,
@@ -71,12 +78,12 @@ func (s *BridgeLockMintService) LockAndEnqueue(ctx context.Context, ownerBankID,
 
 	idempotencyKey := fmt.Sprintf("lock:%s:%s", positionID, lockResult.TxHash)
 	item := &podmain.RelayerQueueItem{
-		ItemID:          uuid.NewString(),
-		IdempotencyKey:  idempotencyKey,
-		EventType:       podmain.RelayerEventTypeLockMint,
-		PositionID:      positionID,
-		State:           podmain.RelayerItemStatePending,
-		NextAttemptAt:   now,
+		ItemID:         uuid.NewString(),
+		IdempotencyKey: idempotencyKey,
+		EventType:      podmain.RelayerEventTypeLockMint,
+		PositionID:     positionID,
+		State:          podmain.RelayerItemStatePending,
+		NextAttemptAt:  now,
 	}
 	if err := s.db.WithContext(ctx).Create(item).Error; err != nil {
 		return nil, fmt.Errorf("persist relayer queue item failed: %w", err)

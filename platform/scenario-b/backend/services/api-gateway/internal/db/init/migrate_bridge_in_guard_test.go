@@ -94,3 +94,102 @@ func TestRunAutoMigrate_AcceptsSharedCorrelationsOnOtherDirections(t *testing.T)
 		t.Fatalf("re-migrate over legitimate shared correlations: %v", err)
 	}
 }
+
+// The state the guard exists for is a database that predates the direction column: the
+// duplicates are there, unlabelled, and the backfill is what will label them IN. If the guard
+// skips because the column is missing, AutoMigrate creates the index over an empty direction
+// and the backfill then violates it — with the opaque driver message the guard was written to
+// replace, on every boot, with no way forward: the statement that would label the rows IN is
+// the statement that fails.
+func TestRunAutoMigrate_GuardFiresOnAPreDirectionTable(t *testing.T) {
+	db := newDB(t)
+	if err := dbinit.RunAutoMigrate(db); err != nil {
+		t.Fatalf("initial migrate: %v", err)
+	}
+
+	// Wind the schema back to before direction existed, keeping the rows.
+	m := db.Migrator()
+	pos := &domain.BridgedAssetPosition{}
+	if m.HasIndex(pos, "idx_bridge_in_correlation") {
+		if err := m.DropIndex(pos, "idx_bridge_in_correlation"); err != nil {
+			t.Fatalf("drop index: %v", err)
+		}
+	}
+	if err := db.Exec(`INSERT INTO bridged_asset_positions
+		(position_id, owner_bank_id, spoke_network, native_asset, mirrored_asset, mirrored_amount,
+		 bridge_state, leg, correlation_id, burn_from_hub_address, direction)
+		VALUES ('pos-1','bank-a','spoke-brl','tCeBM-BRL','W-BRL','1000','ACTIVE','SETTLEMENT','corr-pre-direction','',''),
+		       ('pos-2','bank-a','spoke-brl','tCeBM-BRL','W-BRL','1000','ACTIVE','SETTLEMENT','corr-pre-direction','','')`).
+		Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := m.DropColumn(pos, "direction"); err != nil {
+		t.Fatalf("drop direction column: %v", err)
+	}
+
+	err := dbinit.RunAutoMigrate(db)
+	if err == nil {
+		t.Fatal("migration accepted a pre-direction table whose backfill will violate the index")
+	}
+	if !strings.Contains(err.Error(), "corr-pre-direction") {
+		t.Fatalf("error must name the affected correlation, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "UNIQUE constraint") {
+		t.Fatalf("the guard must pre-empt the driver-level constraint error, got: %v", err)
+	}
+}
+
+// Same deadlock, one step later: the column exists but the rows are still unlabelled, which is
+// what a boot that added the column and then failed before the backfill completed leaves
+// behind. direction = 'IN' does not match them either, so the guard must ask what the backfill
+// WILL write, not only what is already written.
+func TestRunAutoMigrate_GuardFiresOnUnlabelledRows(t *testing.T) {
+	db := newDB(t)
+	if err := dbinit.RunAutoMigrate(db); err != nil {
+		t.Fatalf("initial migrate: %v", err)
+	}
+	m := db.Migrator()
+	pos := &domain.BridgedAssetPosition{}
+	if m.HasIndex(pos, "idx_bridge_in_correlation") {
+		if err := m.DropIndex(pos, "idx_bridge_in_correlation"); err != nil {
+			t.Fatalf("drop index: %v", err)
+		}
+	}
+	if err := db.Exec(`INSERT INTO bridged_asset_positions
+		(position_id, owner_bank_id, spoke_network, native_asset, mirrored_asset, mirrored_amount,
+		 bridge_state, leg, correlation_id, burn_from_hub_address, direction)
+		VALUES ('pos-u1','bank-a','spoke-brl','tCeBM-BRL','W-BRL','1000','ACTIVE','SETTLEMENT','corr-unlabelled','',''),
+		       ('pos-u2','bank-a','spoke-brl','tCeBM-BRL','W-BRL','1000','ACTIVE','SETTLEMENT','corr-unlabelled','','')`).
+		Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	err := dbinit.RunAutoMigrate(db)
+	if err == nil {
+		t.Fatal("migration accepted unlabelled duplicates the backfill will label IN")
+	}
+	if !strings.Contains(err.Error(), "corr-unlabelled") {
+		t.Fatalf("error must name the affected correlation, got: %v", err)
+	}
+}
+
+// The mirror case must stay quiet: unlabelled duplicates that the backfill will classify OUT
+// never enter the inbound index, so refusing them would block a boot for no reason.
+func TestRunAutoMigrate_GuardIgnoresUnlabelledRowsBoundForOUT(t *testing.T) {
+	db := newDB(t)
+	if err := dbinit.RunAutoMigrate(db); err != nil {
+		t.Fatalf("initial migrate: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO bridged_asset_positions
+		(position_id, owner_bank_id, spoke_network, native_asset, mirrored_asset, mirrored_amount,
+		 bridge_state, leg, correlation_id, burn_from_hub_address, direction)
+		VALUES ('pos-o1','bank-b','spoke-ars','tCeBM-ARS','W-ARS','900','ACTIVE','SETTLEMENT','corr-out','0xHUB',''),
+		       ('pos-o2','bank-a','spoke-brl','tCeBM-BRL','W-BRL','100','ACTIVE','RESIDUE','corr-out','0xHUB','')`).
+		Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if err := dbinit.RunAutoMigrate(db); err != nil {
+		t.Fatalf("guard must not fire on duplicates bound for OUT: %v", err)
+	}
+}
