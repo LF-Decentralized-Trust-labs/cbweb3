@@ -546,16 +546,32 @@ deploy time.
 institutionId`) and `getInstitutionId(address)` is new. A registry deployed before this
 change does not answer `getInstitutionId`, and an AMM pointed at it refuses every resume
 signature with `AMM__InvalidInstitutionId`. There is no migration path on a deployed
-instance — the registry holds no such field. Redeploy the contracts and re-sync the
-addresses, then re-run participant registration:
+instance — the registry holds no such field. It has to be redeployed, and the toolkit is the
+only path that does so (see the note at the top of this runbook: the legacy `deploy/local`
+targets were retired on 2026-08-21).
 
 ```bash
-make contracts.deploy-all-with-sync     # deploy + sync-addresses + register-participants
+# Local: the registry is deployed by the onboard-registry step, which is gated on
+# PARTICIPANT_REGISTRY_ADDRESS in <dataDir>/.deployed-addrs.env — an existing data dir
+# therefore keeps the old registry. --clean wipes the data dirs, so it redeploys.
+cd scenario-a/samples && ./deploy-all.sh --clean
+
+# Multi-host: ship.sh wipes the remote tree, so the artifacts recompile and the
+# registry is deployed fresh.
+cd deploy-lnet && ./deploy.sh a <target>
 ```
 
-Both paths must be redeployed together: local (`make spoke-all`, toolkit/samples) and any
-multi-infra deployment (`deploy-lnet`). A stack with a new AMM and an old registry, or the
-reverse, fails at the first resume rather than at deploy.
+To move one entity rather than the whole lab, drop `PARTICIPANT_REGISTRY_ADDRESS` from that
+entity's `.deployed-addrs.env` and re-apply its manifest; the step then re-deploys and
+re-registers.
+
+Do **not** reach for `make contracts.deploy-all-with-sync` here, even though the target still
+exists. It belongs to the retired six-entity local topology: its sync step writes
+`backend/config/.env.infra.*`, files nothing provisions any more, and after the legacy
+removal moved the script its own `ROOT_DIR` resolves above the repository root.
+
+The AMM and the registry must move together. A stack with a new AMM and an old registry, or
+the reverse, fails at the first resume rather than at deploy.
 
 **One institution must resolve to one id.** The id is `keccak256(bankCode)`, computed
 identically in three places — the Go services
@@ -567,7 +583,8 @@ the contract sees two institutions and that bank can resume on its own — the f
 control exists to prevent, and it fails silently. Check the codes agree:
 
 ```bash
-grep GOVERNANCE_BANK_CODE backend/config/.env.infra.central-bank-a
+# The toolkit renders the CB's env into the data dir, not into backend/config.
+grep GOVERNANCE_BANK_CODE <dataDir>/stack/<entity>/.env.infra
 cast call $IDENTITY_REGISTRY "getInstitutionId(address)(bytes32)" $WALLET --rpc-url $RPC
 ```
 
