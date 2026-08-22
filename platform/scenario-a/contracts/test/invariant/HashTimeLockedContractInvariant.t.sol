@@ -59,7 +59,13 @@ contract HashTimeLockedContractInvariantTest is StdInvariant, Test {
     }
 
     function _verify(address who, string memory name) private {
-        registry.registerParticipant(who, name, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0));
+        registry.registerParticipant(
+            who,
+            name,
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            keccak256(abi.encodePacked("inst-", who))
+        );
         registry.verifyParticipant(who);
     }
 

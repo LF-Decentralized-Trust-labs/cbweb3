@@ -50,10 +50,12 @@ func (s *renderCBEnvStep) Run(_ context.Context) error {
 	ports := entityPorts(s.besuRPCPort)
 
 	data := EntityEnvData{
-		EntityName:    s.entityName,
-		IsCentralBank: true,
-		SpokeID:       s.spokeID,
-		FiatSymbol:    s.currency,
+		EntityName: s.entityName,
+		// Same value the onboard-registry step hashed into the CB's on-chain institutionId.
+		GovernanceBankCode: s.entityName,
+		IsCentralBank:      true,
+		SpokeID:            s.spokeID,
+		FiatSymbol:         s.currency,
 		// CB/NOC/Governance authenticate against the CB's own Keycloak instance.
 		KeycloakURL:    fmt.Sprintf("http://%s-keycloak:8080", prefix),
 		KCRealm:        s.entityName,

@@ -61,11 +61,15 @@ interface IIdentityRegistry {
     /// @param name Legal name of the entity.
     /// @param role Assigned functional role in the network.
     /// @param zkPointer Link to the entity's private compliance proofs.
+    /// @param institutionId Opaque institution-level identifier shared by all wallets of the same
+    ///        institution. Used by quorum mechanisms (the circuit-breaker resume) to enforce
+    ///        approval from distinct institutions rather than distinct addresses. Must be non-zero.
     function registerParticipant(
         address account,
         string calldata name,
         IdentityRegistryLibrary.ParticipantRole role,
-        bytes32 zkPointer
+        bytes32 zkPointer,
+        bytes32 institutionId
     ) external;
 
     /// @notice Verifies a previously registered participant, moving them Pending -> Verified.
@@ -73,6 +77,11 @@ interface IIdentityRegistry {
     ///      ParticipantNotPending if the account is not currently in the Pending state.
     /// @param account The wallet address to promote from Pending to Verified.
     function verifyParticipant(address account) external;
+
+    /// @notice Returns the institution identifier for a registered participant.
+    /// @param account The wallet address to query.
+    /// @return The institution-level bytes32 identifier, or bytes32(0) if not registered.
+    function getInstitutionId(address account) external view returns (bytes32);
 
     /// @notice Modifies the status of a participant (e.g., suspension).
     /// @param account The address to be updated.

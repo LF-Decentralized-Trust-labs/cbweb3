@@ -127,13 +127,13 @@ func (f *fakeNonce) GetAndDelete(_ context.Context, k string) (string, bool, err
 }
 
 type fakeRegistry struct {
-	registerFn    func(ctx context.Context, addr, inst, role string, fp [32]byte) (string, error)
+	registerFn    func(ctx context.Context, addr, inst, role string, fp, institutionID [32]byte) (string, error)
 	verifyFn      func(ctx context.Context, addr string) (string, error)
 	canTransactFn func(ctx context.Context, addr string) (bool, error)
 }
 
-func (f *fakeRegistry) RegisterParticipant(ctx context.Context, addr, inst, role string, fp [32]byte) (string, error) {
-	return f.registerFn(ctx, addr, inst, role, fp)
+func (f *fakeRegistry) RegisterParticipant(ctx context.Context, addr, inst, role string, fp, institutionID [32]byte) (string, error) {
+	return f.registerFn(ctx, addr, inst, role, fp, institutionID)
 }
 func (f *fakeRegistry) VerifyParticipant(ctx context.Context, addr string) (string, error) {
 	if f.verifyFn != nil {
@@ -156,6 +156,9 @@ func (f *fakeRegistry) CanTransact(ctx context.Context, addr string) (bool, erro
 func (f *fakeRegistry) IsWhitelisted(_ context.Context, _ string) (bool, error) { return true, nil }
 func (f *fakeRegistry) GetParticipant(_ context.Context, _ string) (registry.OnChainParticipant, error) {
 	return registry.OnChainParticipant{}, nil
+}
+func (f *fakeRegistry) GetInstitutionID(_ context.Context, _ string) ([32]byte, error) {
+	return [32]byte{}, nil
 }
 func (f *fakeRegistry) GetCertFingerprint(_ context.Context, _ string) ([32]byte, error) {
 	return [32]byte{}, nil
@@ -388,7 +391,11 @@ func newOnboardSvc() (*identityService, *fakeKeycloak, *fakeKMS, *fakeRegistry, 
 		getUsernameFn: func(ctx context.Context, a, u string) (string, error) { return "uname", nil },
 	}
 	km := &fakeKMS{createFn: func(ctx context.Context, uid string) (kms.KeyInfo, error) { return kms.KeyInfo{Address: "0xw"}, nil }}
-	reg := &fakeRegistry{registerFn: func(ctx context.Context, a, i, r string, fp [32]byte) (string, error) { return "0xtx", nil }}
+	reg := &fakeRegistry{
+		registerFn: func(ctx context.Context, a, i, r string, fp, institutionID [32]byte) (string, error) {
+			return "0xtx", nil
+		},
+	}
 	comp := &fakeCompliance{upsertFn: func(ctx context.Context, p complianceclient.Participant) error { return nil }}
 	return &identityService{keycloak: kc, kms: km, blockchainClient: reg, compliance: comp}, kc, km, reg, comp
 }
@@ -397,7 +404,7 @@ func TestOnboardParticipant_CommercialBank_FullFlow(t *testing.T) {
 	t.Parallel()
 	svc, _, _, reg, _ := newOnboardSvc()
 	var registered bool
-	reg.registerFn = func(ctx context.Context, a, i, r string, fp [32]byte) (string, error) {
+	reg.registerFn = func(ctx context.Context, a, i, r string, fp, institutionID [32]byte) (string, error) {
 		registered = true
 		return "0xtx", nil
 	}
@@ -416,6 +423,33 @@ func TestOnboardParticipant_CommercialBank_FullFlow(t *testing.T) {
 	}
 }
 
+// The institutionId written on-chain must come from the bank code, not the display name:
+// it is what makes two wallets of one institution count as one in the AMM resume quorum,
+// and a name-derived id would split them the moment the name is spelled differently.
+func TestOnboardParticipant_DerivesInstitutionIDFromBankCode(t *testing.T) {
+	t.Parallel()
+	svc, _, _, reg, _ := newOnboardSvc()
+	var got [32]byte
+	reg.registerFn = func(ctx context.Context, a, i, r string, fp, institutionID [32]byte) (string, error) {
+		got = institutionID
+		return "0xtx", nil
+	}
+
+	if _, err := svc.OnboardParticipant(context.Background(), &authv1.OnboardParticipantRequest{
+		Username: "bank1", Email: "b@x.com", Role: domain.RoleCommercialBank,
+		InstitutionName: "Bank One", BankCode: "bank-a",
+	}); err != nil {
+		t.Fatalf("onboard: %v", err)
+	}
+
+	if want := registry.InstitutionIDFromString("bank-a"); got != want {
+		t.Fatalf("institutionId = %x, want keccak256(bank-a) = %x", got, want)
+	}
+	if got == registry.InstitutionIDFromString("Bank One") {
+		t.Error("institutionId was derived from the display name, not the bank code")
+	}
+}
+
 func TestOnboardParticipant_PasswordRole_NoKMSNoChain(t *testing.T) {
 	t.Parallel()
 	svc, _, km, reg, _ := newOnboardSvc()
@@ -423,7 +457,7 @@ func TestOnboardParticipant_PasswordRole_NoKMSNoChain(t *testing.T) {
 		t.Fatal("KMS should not be called")
 		return kms.KeyInfo{}, nil
 	}
-	reg.registerFn = func(ctx context.Context, a, i, r string, fp [32]byte) (string, error) {
+	reg.registerFn = func(ctx context.Context, a, i, r string, fp, institutionID [32]byte) (string, error) {
 		t.Fatal("chain should not be called")
 		return "", nil
 	}
@@ -492,7 +526,7 @@ func TestOnboardParticipant_ErrorPaths(t *testing.T) {
 
 	// On-chain error for commercial bank.
 	svc, _, _, reg, _ := newOnboardSvc()
-	reg.registerFn = func(ctx context.Context, a, i, r string, fp [32]byte) (string, error) {
+	reg.registerFn = func(ctx context.Context, a, i, r string, fp, institutionID [32]byte) (string, error) {
 		return "", errors.New("chain down")
 	}
 	if _, err := svc.OnboardParticipant(context.Background(), &authv1.OnboardParticipantRequest{Username: "x", Email: "e", Role: domain.RoleCommercialBank}); status.Code(err) != codes.Internal {

@@ -54,6 +54,13 @@ contract RegisterParticipants is Script {
         address account;
         string name;
         IdentityRegistryLibrary.ParticipantRole role;
+        /// @dev Institution code, NOT a per-wallet value. Every wallet of the same institution must
+        ///      carry the same code, because the AMM resume quorum counts distinct institutions and
+        ///      derives them from keccak256(bankCode) — the same derivation the Go services use
+        ///      (backend/shared/blockchain/registry.InstitutionIDForParticipant). A second wallet of
+        ///      this central bank registered under a different code would count as a second
+        ///      institution and could satisfy the 2-of-N resume on its own.
+        string bankCode;
     }
 
     function run() public {
@@ -75,10 +82,15 @@ contract RegisterParticipants is Script {
         // The local-dev KMS seeding (KMS_SEED_* on each bank's auth service) makes
         // the onboarded wallet equal that bank's BESU_OPERATOR_KEY address, so the
         // onboarded identity is the one that signs HTLC txs and passes onlyVerified.
+        // CENTRAL_BANK_CODE must match GOVERNANCE_BANK_CODE on this spoke's compliance service, so a
+        // wallet registered here and one registered by that service resolve to the same institution.
+        string memory centralBankCode = vm.envOr("CENTRAL_BANK_CODE", string("central-bank-a"));
+
         Participant[1] memory participants = [Participant(
                 0x627306090abaB3A6e1400e9345bC60c78a8BEf57,
                 "Central Bank",
-                IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK
+                IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+                centralBankCode
             )];
 
         vm.startBroadcast(adminKey);
@@ -96,7 +108,8 @@ contract RegisterParticipants is Script {
                 participants[i].account,
                 participants[i].name,
                 participants[i].role,
-                keccak256(abi.encodePacked("local_dev_", participants[i].name))
+                keccak256(abi.encodePacked("local_dev_", participants[i].name)),
+                keccak256(abi.encodePacked(participants[i].bankCode))
             );
             registry.verifyParticipant(participants[i].account);
             console.log("Registered and verified:", participants[i].name, participants[i].account);

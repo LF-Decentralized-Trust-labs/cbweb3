@@ -33,14 +33,15 @@ type recordingRegistry struct {
 	lastAddr     string
 	lastInst     string
 	lastRole     string
+	lastInstID   [32]byte
 	returnErr    error
 }
 
-func (r *recordingRegistry) RegisterParticipant(_ context.Context, addr, inst, role string, _ [32]byte) (string, error) {
+func (r *recordingRegistry) RegisterParticipant(_ context.Context, addr, inst, role string, _, institutionID [32]byte) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls++
-	r.lastAddr, r.lastInst, r.lastRole = addr, inst, role
+	r.lastAddr, r.lastInst, r.lastRole, r.lastInstID = addr, inst, role, institutionID
 	if r.returnErr != nil {
 		return "", r.returnErr
 	}
@@ -455,6 +456,33 @@ func TestApproveKYC_RegistersOnChain(t *testing.T) {
 	}
 	if reg.lastAddr != "0xabc" || reg.lastRole != "commercial_bank" || reg.lastInst != "Bank A" {
 		t.Errorf("registered wrong participant: addr=%q role=%q inst=%q", reg.lastAddr, reg.lastRole, reg.lastInst)
+	}
+}
+
+// KYC approval is the path that puts a commercial bank's wallet on-chain, so it is also
+// where that wallet acquires its institution. Deriving from bank_code (not the display
+// name) is what keeps a bank's second wallet inside the same institution — the property
+// the AMM resume quorum counts on.
+func TestApproveKYC_DerivesInstitutionIDFromBankCode(t *testing.T) {
+	t.Parallel()
+	svc, reg := newCATestService(t)
+	ctx := context.Background()
+	_, _ = svc.UpsertParticipant(ctx, &compliancv1.UpsertParticipantRequest{
+		Participant: &compliancv1.Participant{
+			UserId: "bank-user", InstitutionName: "Bank A", WalletAddress: "0xabc",
+			Role: "commercial_bank", BankCode: "bank-a", Status: string(domain.StatusCredentialRequested),
+		},
+	})
+
+	if _, err := svc.ApproveKYC(ctx, &compliancv1.ApproveKYCRequest{Subject: "bank-user", ActorSubject: "cb", Reason: "ok"}); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+
+	if want := registry.InstitutionIDFromString("bank-a"); reg.lastInstID != want {
+		t.Fatalf("institutionId = %x, want keccak256(bank-a) = %x", reg.lastInstID, want)
+	}
+	if reg.lastInstID == registry.InstitutionIDFromString("Bank A") {
+		t.Error("institutionId was derived from the institution name, not the bank code")
 	}
 }
 

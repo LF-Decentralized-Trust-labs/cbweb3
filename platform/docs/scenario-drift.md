@@ -39,7 +39,7 @@ estão marcadas como tal, para que ninguém gaste tempo nelas.
 | --- | --- | --- |
 | Exports de Dialog na UI | **Já convergido** | Os dois pacotes exportam os mesmos 66 símbolos |
 | Auth do NOC | **Já convergido** | O middleware difere apenas no caminho de import |
-| Circuit breaker do AMM | **Já convergido** | Mesmo mecanismo, mesmo quórum (2) |
+| Circuit breaker do AMM | **Convergir** (nova) | Mesmo quórum (2), mas só o A conta instituições distintas |
 | Taxa do AMM | **Convergir** (parcial) | Mecanismo igual; padrão 0,3% em A e 0% em B |
 | Superfície do AMM | **Intencional** | B tem liquidez cooperativa e saque; A não |
 | Proteções de rota | **Convergir** | A comenta rotas; B escolhe conjunto por flag de build |
@@ -91,16 +91,33 @@ vale para os dois cenários, não só para o A.
 
 ---
 
-## 3. Circuit breaker do AMM — já convergido
+## 3. Circuit breaker do AMM — convergir (divergência nova, criada de propósito)
 
 O port do R2-H-2 aconteceu. Os dois contratos têm `pause`, `signResume`, `isPaused` e
-`RESUME_QUORUM`, e o quórum é o mesmo:
+`RESUME_QUORUM`, e o quórum numérico é o mesmo:
 
 - `scenario-a/contracts/src/AutomatedMarketMaker.sol:31` — `RESUME_QUORUM = 2`
 - `scenario-b/contracts/src/AutomatedMarketMaker.sol:32` — `RESUME_QUORUM = 2`
 
 O breaker assimétrico (pausa 1-de-N, retomada 2-de-N) que a constituição exige está
-implementado nos dois.
+implementado nos dois. **O que os dois contam é que passou a divergir**, e vale registrar
+antes que alguém leia a assimetria como acidente:
+
+| | Cenário A | Cenário B |
+| --- | --- | --- |
+| Deduplicação da retomada | por **instituição** (`institutionSigned`, via `IdentityRegistry.getInstitutionId`) | por **endereço** (`signed[msg.sender]`) |
+| Vinculação à época da pausa | sim (`pauseEpoch`) | não |
+| `institutionId` no registro de identidades | sim, obrigatório e não-zero | não existe |
+
+A dedupe por endereço deixa um banco central com duas carteiras de governança formar
+o 2-de-N sozinho — exatamente o que o quórum existe para impedir. O cenário A fechou isso
+(follow-up do R2-H-2); o cenário B tem a correção equivalente pronta no branch
+`fix/amm-resume-quorum-to-require-distinct-institutions` (PR #80), **ainda não integrado**.
+
+Portanto: divergência **temporária e intencional na direção certa**. Ela se resolve
+integrando o PR #80, não removendo a checagem do A. As duas implementações usam o mesmo
+desenho (`institutionSigned` por proposta + `getInstitutionId` no registro) justamente
+para que a integração não precise reconciliar nada.
 
 ---
 

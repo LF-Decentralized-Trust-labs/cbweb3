@@ -12,7 +12,7 @@ import (
 // reads return safe defaults (canTransact=true, verified status).
 type NoopRegistryClient struct{}
 
-func (NoopRegistryClient) RegisterParticipant(_ context.Context, _, _, _ string, _ [32]byte) (string, error) {
+func (NoopRegistryClient) RegisterParticipant(_ context.Context, _, _, _ string, _, _ [32]byte) (string, error) {
 	return "0x0000000000000000000000000000000000000000000000000000000000000000", nil
 }
 
@@ -38,12 +38,16 @@ func (NoopRegistryClient) IsWhitelisted(_ context.Context, _ string) (bool, erro
 
 func (NoopRegistryClient) GetParticipant(_ context.Context, _ string) (OnChainParticipant, error) {
 	return OnChainParticipant{
-		Role:   RoleNone,
-		Status: KycStatusVerified,
+		Role:       RoleNone,
+		Status:     KycStatusVerified,
 		LastUpdate: big.NewInt(0),
 	}, nil
 }
 
 func (NoopRegistryClient) GetCertFingerprint(_ context.Context, _ string) ([32]byte, error) {
+	return [32]byte{}, nil
+}
+
+func (NoopRegistryClient) GetInstitutionID(_ context.Context, _ string) ([32]byte, error) {
 	return [32]byte{}, nil
 }

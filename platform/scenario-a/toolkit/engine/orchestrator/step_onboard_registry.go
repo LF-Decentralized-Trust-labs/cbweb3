@@ -38,7 +38,8 @@ const (
 				{"name": "wallet", "type": "address"},
 				{"name": "name", "type": "string"},
 				{"name": "role", "type": "uint8"},
-				{"name": "zkPointer", "type": "bytes32"}
+				{"name": "zkPointer", "type": "bytes32"},
+				{"name": "institutionId", "type": "bytes32"}
 			],
 			"outputs": []
 		},
@@ -63,7 +64,13 @@ const (
 )
 
 type onboardRegistryStep struct {
-	spokeID             string
+	spokeID string
+	// institutionCode identifies the central bank as an INSTITUTION (the manifest's
+	// metadata.name). It is rendered into the CB's env as GOVERNANCE_BANK_CODE, so the
+	// wallet registered here and any wallet the compliance service registers later derive
+	// the same institutionId. They must agree: the AMM resume quorum counts institutions,
+	// and two ids for one central bank would let it resume alone with two keys.
+	institutionCode     string
 	dataDir             string
 	besuRPCURL          string
 	keyProvider         kp.KeyProvider
@@ -71,9 +78,10 @@ type onboardRegistryStep struct {
 	timeout             time.Duration
 }
 
-func newOnboardRegistryStep(spokeID, dataDir, besuRPCURL string, keyProvider kp.KeyProvider, participantArtifact string, timeout time.Duration) Step {
+func newOnboardRegistryStep(spokeID, institutionCode, dataDir, besuRPCURL string, keyProvider kp.KeyProvider, participantArtifact string, timeout time.Duration) Step {
 	return &onboardRegistryStep{
 		spokeID:             spokeID,
+		institutionCode:     institutionCode,
 		dataDir:             dataDir,
 		besuRPCURL:          besuRPCURL,
 		keyProvider:         keyProvider,
@@ -201,11 +209,21 @@ func (s *onboardRegistryStep) Run(ctx context.Context) error {
 	h := sha256.Sum256([]byte(evmAddr + s.spokeID))
 	copy(zkPointer[:], h[:])
 
+	// institutionId identifies the INSTITUTION, not this wallet: it is keccak256 of the central
+	// bank's code, the same derivation the Go services use
+	// (backend/shared/blockchain/registry.InstitutionIDForParticipant) and the seed script uses
+	// (contracts/script/RegisterParticipants.s.sol). The AMM resume quorum counts distinct
+	// institutions, so a second CB wallet provisioned later must land on this same value — which is
+	// why it is derived from the spoke's central-bank code and not from the wallet address. The
+	// contract rejects a zero id, so this can never be left unset.
+	institutionID := institutionIDFromCode(s.institutionCode)
+
 	callData, err := parsedABI.Pack("registerParticipant",
 		addr,
 		"Central Bank "+s.spokeID,
 		RoleCentralBank,
 		zkPointer,
+		institutionID,
 	)
 	if err != nil {
 		return fmt.Errorf("pack registerParticipant: %w", err)
@@ -291,4 +309,17 @@ func waitForReceipt(ctx context.Context, client *ethclient.Client, txHash common
 func init() {
 	// Validate identityRegistryABI at package init to catch typos early.
 	_ = crypto.Keccak256 // ensure go-ethereum crypto is linked
+}
+
+// institutionIDFromCode derives the on-chain institutionId from an institution code.
+//
+// It is keccak256 of the code — the same derivation as
+// backend/shared/blockchain/registry.InstitutionIDForParticipant and as the seed script
+// in contracts/script/RegisterParticipants.s.sol. The three must stay identical: a wallet
+// registered by the toolkit and a wallet registered by the compliance service belong to
+// one institution only if both paths compute the same 32 bytes for it.
+func institutionIDFromCode(code string) [32]byte {
+	var out [32]byte
+	copy(out[:], crypto.Keccak256([]byte(code)))
+	return out
 }

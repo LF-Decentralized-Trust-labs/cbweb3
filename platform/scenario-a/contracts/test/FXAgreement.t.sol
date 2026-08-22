@@ -60,15 +60,27 @@ contract FXAgreementTest is Test {
         identityRegistry = new IdentityRegistry(admin);
         vm.startPrank(admin);
         identityRegistry.registerParticipant(
-            counterpartyA, "Commercial Bank A", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+            counterpartyA,
+            "Commercial Bank A",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            bytes32("inst-counterpartyA")
         );
         identityRegistry.verifyParticipant(counterpartyA);
         identityRegistry.registerParticipant(
-            counterpartyB, "Commercial Bank B", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+            counterpartyB,
+            "Commercial Bank B",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            bytes32("inst-counterpartyB")
         );
         identityRegistry.verifyParticipant(counterpartyB);
         identityRegistry.registerParticipant(
-            centralBank, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            centralBank,
+            "Central Bank",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-centralBank")
         );
         identityRegistry.verifyParticipant(centralBank);
         vm.stopPrank();

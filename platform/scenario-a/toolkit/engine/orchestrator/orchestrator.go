@@ -166,7 +166,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 		newRegisterNodesStep(spokeID, dataDir, besuRPCURL, m.Spec.Node.AdvertisedHost, deps.KeyProvider, deps.Timeouts.OnboardRegistry),
 		newStartPaladinStep(spokeID, dataDir, deps.ComposeTemplatePath, deps.PaladinCBURL, deps.PaladinImage, m.Spec.Node.AdvertisedHost, deps.Timeouts.PaladinHealthCheck, deps.Timeouts.PaladinHealthCheckInterval),
 		newCreateZetoStep(spokeID, dataDir, deps.PaladinCBURL, deps.ScriptsDir, deps.Timeouts.GoTestStep),
-		newOnboardRegistryStep(spokeID, dataDir, besuRPCURL, deps.KeyProvider,
+		newOnboardRegistryStep(spokeID, m.Metadata.Name, dataDir, besuRPCURL, deps.KeyProvider,
 			filepath.Join(deps.ContractsOutDir, "IdentityRegistry.sol", "IdentityRegistry.json"),
 			deps.Timeouts.OnboardRegistry),
 		// Besu-layer settlement contracts (Scenario A): fCeBM + HTLC. deploy-htlc

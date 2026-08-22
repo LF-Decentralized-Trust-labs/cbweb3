@@ -6,6 +6,7 @@ import {AutomatedMarketMaker} from "../src/AutomatedMarketMaker.sol";
 import {IAutomatedMarketMaker} from "../src/interfaces/IAutomatedMarketMaker.sol";
 import {TokenizedCentralBankMoney} from "../src/TokenizedCentralBankMoney.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IIdentityRegistry} from "../src/interfaces/IIdentityRegistry.sol";
 import {IdentityRegistryLibrary} from "../src/libraries/IdentityRegistryLibrary.sol";
 import {DeployAMM} from "../script/AutomatedMarketMaker.s.sol";
 
@@ -58,19 +59,35 @@ contract AutomatedMarketMakerTest is Test {
         identityRegistry = new IdentityRegistry(admin);
         vm.startPrank(admin);
         identityRegistry.registerParticipant(
-            liquidityProvider, "LP Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+            liquidityProvider,
+            "LP Bank",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            bytes32("inst-liquidityProvider")
         );
         identityRegistry.verifyParticipant(liquidityProvider);
         identityRegistry.registerParticipant(
-            swapper, "Commercial Bank A", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+            swapper,
+            "Commercial Bank A",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            bytes32("inst-swapper")
         );
         identityRegistry.verifyParticipant(swapper);
         identityRegistry.registerParticipant(
-            governance, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            governance,
+            "Central Bank",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-governance")
         );
         identityRegistry.verifyParticipant(governance);
         identityRegistry.registerParticipant(
-            governance2, "Central Bank B", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            governance2,
+            "Central Bank B",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-governance2")
         );
         identityRegistry.verifyParticipant(governance2);
         vm.stopPrank();
@@ -234,7 +251,9 @@ contract AutomatedMarketMakerTest is Test {
         bytes32 proposalId = amm.proposeResume();
         assertTrue(amm.paused(), "Still paused after first signature");
 
-        /// @dev Second, distinct Central Bank signs → quorum reached → AMM resumes.
+        /// @dev Second, distinct Central Bank signs → quorum reached → AMM resumes. "Distinct" is now
+        ///      institution-level: governance and governance2 were registered under different
+        ///      institutionIds, so both signatures count (see the same-institution test below).
         vm.prank(governance2);
         amm.signResume(proposalId);
 
@@ -262,6 +281,100 @@ contract AutomatedMarketMakerTest is Test {
         amm.signResume(proposalId);
 
         assertTrue(amm.paused(), "AMM must remain paused; a governor cannot form quorum alone");
+    }
+
+    /// @dev R2-H-2 follow-up: the 2-of-N resume counts distinct INSTITUTIONS, not distinct keys. One
+    ///      central bank operating two governance wallets must not be able to resume on its own — that
+    ///      is the whole point of the quorum, and address-keyed dedupe alone did not deliver it.
+    ///      The second half of the test matters as much as the first: the very proposal a sibling key
+    ///      could not advance is advanced by a genuinely different institution, so the rule blocks the
+    ///      attack without breaking the legitimate path.
+    function test_Resume_SecondKeyOfSameInstitution_CannotFormQuorum() public {
+        address governanceSibling = makeAddr("governanceSibling");
+        vm.startPrank(admin);
+        identityRegistry.registerParticipant(
+            governanceSibling,
+            "Central Bank (second key)",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-governance")
+        );
+        identityRegistry.verifyParticipant(governanceSibling);
+        vm.stopPrank();
+
+        vm.prank(governance);
+        amm.pause("halt");
+
+        vm.prank(governance);
+        bytes32 proposalId = amm.proposeResume();
+
+        /// @dev A different address, the same institution: rejected, and nothing about the proposal moves.
+        vm.prank(governanceSibling);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAutomatedMarketMaker.AMM__InstitutionAlreadySigned.selector, proposalId, bytes32("inst-governance")
+            )
+        );
+        amm.signResume(proposalId);
+
+        assertTrue(amm.paused(), "one institution must not resume with two of its own keys");
+        assertEq(amm.resumeSignatures(proposalId), 1, "the rejected signature must not be counted");
+
+        /// @dev A genuinely distinct institution still reaches quorum on the same proposal.
+        vm.prank(governance2);
+        amm.signResume(proposalId);
+
+        assertFalse(amm.paused(), "two distinct institutions must still be able to resume");
+        assertEq(amm.resumeSignatures(proposalId), 2);
+    }
+
+    /// @dev The proposer's own institution is recorded, so the sibling key is blocked whether it signs
+    ///      first or second. Without this the proposer's slot would be the hole in the rule.
+    function test_Resume_SiblingKeyProposes_OriginalKeyCannotComplete() public {
+        address governanceSibling = makeAddr("governanceSibling");
+        vm.startPrank(admin);
+        identityRegistry.registerParticipant(
+            governanceSibling,
+            "Central Bank (second key)",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-governance")
+        );
+        identityRegistry.verifyParticipant(governanceSibling);
+        vm.stopPrank();
+
+        vm.prank(governance);
+        amm.pause("halt");
+
+        vm.prank(governanceSibling);
+        bytes32 proposalId = amm.proposeResume();
+
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAutomatedMarketMaker.AMM__InstitutionAlreadySigned.selector, proposalId, bytes32("inst-governance")
+            )
+        );
+        amm.signResume(proposalId);
+
+        assertTrue(amm.paused());
+        assertEq(amm.resumeSignatures(proposalId), 1);
+    }
+
+    /// @dev A governance-capable signer that carries no institutionId cannot be attributed to an
+    ///      institution, so it is refused rather than counted. Reached here with a registry stub: the
+    ///      real registry rejects a zero institutionId at registration, and this is the defence for an
+    ///      AMM pointed at some other registry — including one deployed before institutionId existed.
+    function test_Revert_Resume_SignerWithoutInstitutionId() public {
+        InstitutionlessRegistry stub = new InstitutionlessRegistry();
+        AutomatedMarketMaker stubAmm = new AutomatedMarketMaker(address(tokenA), address(tokenB), address(stub));
+
+        vm.prank(governance);
+        stubAmm.pause("halt");
+
+        vm.prank(governance);
+        vm.expectRevert(abi.encodeWithSelector(IAutomatedMarketMaker.AMM__InvalidInstitutionId.selector, governance));
+        stubAmm.proposeResume();
     }
 
     /// @dev Signing a non-existent proposal reverts.
@@ -586,5 +699,47 @@ contract DeployAMMTest is Test {
 
         /// @dev Assert: ensure env-derived deployer address is valid
         assertTrue(expectedDeployer != address(0), "Expected deployer should not be zero address");
+    }
+}
+
+/// @title InstitutionlessRegistry
+/// @notice Registry stub that clears every governance gate but reports no institution.
+/// @dev Exists to reach one branch the real registry can no longer produce: since registerParticipant
+///      rejects a zero institutionId, a participant that passes canGovern always has one. An AMM can
+///      still be constructed against a foreign or pre-institutionId registry, and this pins what
+///      happens then — the signature is refused, not silently attributed to institution zero, which
+///      every such signer would share.
+contract InstitutionlessRegistry is IIdentityRegistry {
+    function isWhitelisted(address) external pure returns (bool) {
+        return true;
+    }
+
+    function getParticipant(address) external pure returns (IdentityRegistryLibrary.Participant memory p) {
+        return p;
+    }
+
+    function canTransact(address) external pure returns (bool) {
+        return true;
+    }
+
+    function canGovern(address) external pure returns (bool) {
+        return true;
+    }
+
+    function registerParticipant(address, string calldata, IdentityRegistryLibrary.ParticipantRole, bytes32, bytes32)
+        external {}
+
+    function verifyParticipant(address) external {}
+
+    function getInstitutionId(address) external pure returns (bytes32) {
+        return bytes32(0);
+    }
+
+    function updateStatus(address, IdentityRegistryLibrary.KycStatus) external {}
+
+    function setCertFingerprint(address, bytes32) external {}
+
+    function getCertFingerprint(address) external pure returns (bytes32) {
+        return bytes32(0);
     }
 }

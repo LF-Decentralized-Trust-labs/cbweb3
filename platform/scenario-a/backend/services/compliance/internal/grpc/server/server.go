@@ -366,7 +366,11 @@ func (s *complianceService) ApproveKYC(ctx context.Context, req *compliancv1.App
 		// a concern here — the status precondition above rejects any already-approved/active
 		// participant before this point. The CB governance key holds both roles in local/pilot
 		// (see docs/runbooks/identity-registry-role-separation.md).
-		if _, regErr := s.blockchain.RegisterParticipant(ctx, p.WalletAddress, p.InstitutionName, p.Role, [32]byte{}); regErr != nil {
+		// institutionId is derived from the participant's bank code (the value shared by every
+		// wallet of that institution), so two wallets of one bank cannot present themselves to the
+		// AMM resume quorum as two institutions. See registry.InstitutionIDForParticipant.
+		institutionID := registry.InstitutionIDForParticipant(p.BankCode, p.InstitutionName)
+		if _, regErr := s.blockchain.RegisterParticipant(ctx, p.WalletAddress, p.InstitutionName, p.Role, [32]byte{}, institutionID); regErr != nil {
 			return nil, status.Errorf(codes.Internal, "on-chain participant registration: %v", regErr)
 		}
 		if _, verifyErr := s.blockchain.VerifyParticipant(ctx, p.WalletAddress); verifyErr != nil {
