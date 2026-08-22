@@ -672,24 +672,16 @@ func TestFullHappyPath(t *testing.T) {
 				break
 			}
 		}
-		// Known product gap, deliberately left failing rather than skipped.
-		//
-		// The on-chain shares exist — Step 1 above read CB-A holding 50% of the LP
-		// supply — but /liquidity/positions is empty, because that projection is
-		// written by the commit/LCR flow and the sovereign deposit-side/finalize path
-		// that replaced it never creates a position row. /liquidity/remove requires an
-		// lp_id, so there is currently NO API handle to a sovereignly-seeded position:
-		// a central bank can fund a pool and then cannot withdraw through the API.
-		//
-		// Skipping here would hide that behind a green run, and asserting on the
-		// on-chain shares instead would test around the defect. The failure stays, and
-		// says what it means.
+		// This assertion caught a real gap and now guards the fix. Sovereign
+		// escrow-and-finalize seeding used to leave no /liquidity/positions row, so a
+		// central bank could fund a pool and then not withdraw from it: the on-chain
+		// shares were there, but /liquidity/remove is keyed by lp_id and only that row
+		// carries one. deposit-side records the CB's own position now; if that write
+		// regresses, this is where it surfaces.
 		require.NotEmpty(t, lpID,
 			"no ACTIVE liquidity position for %s, though Step 1 read CB-A holding on-chain LP shares. "+
-				"Sovereign deposit-side/finalize does not write a /liquidity/positions row, and "+
-				"/liquidity/remove requires the lp_id that only that row carries — so a "+
-				"sovereignly-seeded position cannot be withdrawn through the API. Product gap, not a "+
-				"test defect.", cfg.PoolPair)
+				"Sovereign deposit-side is expected to record the depositing CB's own position — "+
+				"without it there is no lp_id for /liquidity/remove to address.", cfg.PoolPair)
 		t.Logf("Withdrawing position lp_id=%s provider=%s", lpID, providerID)
 
 		t.Logf("Step 3: CB-A withdraws %d bps (partial) -> home currency zap-out...", withdrawFractionBps)
