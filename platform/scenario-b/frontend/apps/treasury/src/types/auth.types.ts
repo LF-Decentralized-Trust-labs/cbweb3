@@ -3,6 +3,11 @@
 export type Role = "TREASURY";
 
 export type TreasuryUser = {
+  /**
+   * The realm roles the session's token carries, from /auth/me. `role` below is a fixed
+   * label, not a claim: authorization must read this.
+   */
+  roles: string[];
   id: string;
   name: string;
   institutionId: string;

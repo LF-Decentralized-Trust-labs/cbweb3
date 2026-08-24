@@ -19,6 +19,7 @@ const wait = async (ms = 250) => new Promise((resolve) => setTimeout(resolve, ms
 const currentUser: SysAdminUser = {
   id: "noc-admin-1",
   name: "NOC Administrator",
+  roles: ["ROLE_NOC_ADMIN"],
   role: "SYS_ADMIN",
   institutionId: "central-ops-bra",
 };

@@ -127,6 +127,7 @@ func main() {
 	// Routes — NOC portal read (Keycloak JWT, any NOC role)
 	portal := app.Group("/api/v1",
 		middleware.RequireAuth(kc),
+		middleware.RequireAnyRole(middleware.NOCPortalRoles...),
 	)
 	dashHandler.Register(portal)
 	poolsHandler.Register(portal)
