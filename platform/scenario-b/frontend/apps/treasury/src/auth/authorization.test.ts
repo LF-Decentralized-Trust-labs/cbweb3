@@ -21,14 +21,27 @@ function user(roles: string[]): TreasuryUser {
 }
 
 describe("hasTreasuryAccess", () => {
-  it("admits a session carrying ROLE_TREASURY", () => {
+  // The portal's routes are guarded by RequireLiquidityProviderRole (central_bank or mlp),
+  // so those are what must be admitted. Scenario B gives `central_bank` to its governance
+  // operator too, and the API serves them — refusing them here would make the portal
+  // stricter than the gateway, which is a defect, not caution.
+  it("admits the roles the API admits on the routes this portal calls", () => {
+    expect(hasTreasuryAccess(user(["central_bank"]))).toBe(true);
+    expect(hasTreasuryAccess(user(["mlp"]))).toBe(true);
+  });
+
+  it("admits a governance operator, who holds central_bank and is served by the API", () => {
+    expect(hasTreasuryAccess(user(["central_bank", "ROLE_GOVERNANCE"]))).toBe(true);
+  });
+
+  it("admits ROLE_TREASURY, for a deployment that issues it without central_bank", () => {
     expect(hasTreasuryAccess(user(["ROLE_TREASURY"]))).toBe(true);
   });
 
-  it("refuses supervisor, governance and bank sessions", () => {
+  it("refuses sessions the API refuses on those routes", () => {
     expect(hasTreasuryAccess(user(["ROLE_SUPERVISOR"]))).toBe(false);
-    expect(hasTreasuryAccess(user(["ROLE_GOVERNANCE"]))).toBe(false);
-    expect(hasTreasuryAccess(user(["ROLE_COMMERCIAL_BANK"]))).toBe(false);
+    expect(hasTreasuryAccess(user(["ROLE_NOC_ADMIN"]))).toBe(false);
+    expect(hasTreasuryAccess(user(["commercial_bank", "ROLE_COMMERCIAL_BANK"]))).toBe(false);
   });
 
   it("refuses a user with no roles rather than falling through to a default", () => {
