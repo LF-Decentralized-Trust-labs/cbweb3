@@ -146,6 +146,12 @@ func (f *fakeCBCaller) ActiveResumeProposal(_ context.Context, _ string) (string
 	return f.resumeID, f.resumeSigs, f.resumeQuorum, f.resumeErr
 }
 
+// LatestBreakerTxHash reports no chain reference, so these cases exercise the fallback to
+// this gateway's own signature table.
+func (f *fakeCBCaller) LatestBreakerTxHash(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
+
 func TestCircuitBreakerService_Lifecycle(t *testing.T) {
 	db := newTestDB(t, &domain.ScenarioBRiskControlState{}, &domain.CircuitBreakerSignature{})
 	// Seed a risk control row so Updates() has a target.

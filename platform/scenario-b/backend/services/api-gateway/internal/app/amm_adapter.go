@@ -426,6 +426,21 @@ func (a *ammAdapter) ActiveResumeProposal(ctx context.Context, pair string) (str
 	return "0x" + hex.EncodeToString(pid[:]), int(sigs.Int64()), int(quorum.Int64()), nil
 }
 
+// LatestBreakerTxHash returns the transaction hash of the pair's most recent circuit-breaker
+// action, by any institution, read from the AMM's own events. Empty when the pair has never
+// had one — which is not an error and must not gate a status read.
+func (a *ammAdapter) LatestBreakerTxHash(ctx context.Context, pair string) (string, error) {
+	c, err := a.clientFor(ctx, pair)
+	if err != nil {
+		return "", err
+	}
+	txHash, found, err := c.LatestBreakerTxHash(ctx)
+	if err != nil || !found {
+		return "", err
+	}
+	return txHash, nil
+}
+
 // --- tokenPrepareAdapter ---
 
 // tokenPrepareAdapter implements the AMMTokenPreparer interface used by the token

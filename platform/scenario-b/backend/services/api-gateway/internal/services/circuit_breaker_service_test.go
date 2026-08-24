@@ -29,6 +29,12 @@ type txHashCaller struct {
 	resumeID    string
 	resumeSigs  int
 	resumeQuoru int
+	// chainTx is what the AMM's events report as the pair's latest breaker action, by any
+	// institution. It is deliberately separate from the per-action hashes above so a test
+	// can distinguish "the status read the chain" from "the status read this gateway's own
+	// signature row" — the two agree only by accident in a single-institution fixture.
+	chainTx    string
+	chainTxErr error
 }
 
 func (f *txHashCaller) PauseCircuitBreaker(_ context.Context, _ string, _ []byte) (string, error) {
@@ -55,6 +61,10 @@ func (f *txHashCaller) IsPaused(_ context.Context, _ string) (bool, error) { ret
 
 func (f *txHashCaller) ActiveResumeProposal(_ context.Context, _ string) (string, int, int, error) {
 	return f.resumeID, f.resumeSigs, f.resumeQuoru, nil
+}
+
+func (f *txHashCaller) LatestBreakerTxHash(_ context.Context, _ string) (string, error) {
+	return f.chainTx, f.chainTxErr
 }
 
 // newCBTestDB seeds a risk-control row so the state Updates() have a target.
@@ -227,6 +237,61 @@ func TestCircuitBreakerService_NoChain_ActionsSucceedWithoutTxHash(t *testing.T)
 	}
 	if status.TxHash != "" {
 		t.Fatalf("expected absent status hash in no-chain mode, got %q", status.TxHash)
+	}
+}
+
+// FR-006 / rule D-2: the reported hash is the pair's latest action on the LEDGER, not the
+// latest action this gateway happens to have performed.
+//
+// This is the topology the deployment actually has and the one the test above cannot reach:
+// each Central Bank runs its own gateway and its own database, and records only the actions
+// it performed itself. Here this gateway's table holds a pause it made, while the chain has
+// since seen a newer action by the counterparty CB. Reading the local table would answer with
+// the stale local pause, and the two Central Banks would cite different transactions for the
+// same pair — under a portal that tells the operator the value comes from the ledger.
+func TestCircuitBreakerService_GetStatus_PrefersLedgerOverThisGatewaysOwnRow(t *testing.T) {
+	const pair = "W-BRL-W-ARS"
+	db := newCBTestDB(t, pair)
+	caller := &txHashCaller{pauseTx: "0xmine-local"}
+	svc := NewCircuitBreakerService(db, caller)
+	ctx := context.Background()
+
+	if _, err := svc.Pause(ctx, pair, "cb-bra", "INCIDENT", []byte{0x01}); err != nil {
+		t.Fatalf("pause failed: %v", err)
+	}
+	// The counterparty CB acts on its own gateway: nothing lands in this database, but the
+	// AMM's events move on.
+	caller.chainTx = "0xtheirs-on-chain"
+
+	status, err := svc.GetStatus(ctx, pair)
+	if err != nil {
+		t.Fatalf("get status failed: %v", err)
+	}
+	if status.TxHash != "0xtheirs-on-chain" {
+		t.Fatalf("expected the ledger's latest action 0xtheirs-on-chain, got %q", status.TxHash)
+	}
+}
+
+// A gateway with no AMM wired still reports what it can: its own signature row is the only
+// record of a breaker action there, so the fallback must not be dropped along with the
+// switch to a ledger-sourced reference.
+func TestCircuitBreakerService_GetStatus_FallsBackToLocalRowWithoutChainReference(t *testing.T) {
+	const pair = "W-BRL-W-ARS"
+	db := newCBTestDB(t, pair)
+	// chainTx empty and a lookup error: both mean "the ledger gave nothing".
+	caller := &txHashCaller{pauseTx: "0xmine-local", chainTxErr: errors.New("no amm wired")}
+	svc := NewCircuitBreakerService(db, caller)
+	ctx := context.Background()
+
+	if _, err := svc.Pause(ctx, pair, "cb-bra", "INCIDENT", []byte{0x01}); err != nil {
+		t.Fatalf("pause failed: %v", err)
+	}
+	status, err := svc.GetStatus(ctx, pair)
+	if err != nil {
+		t.Fatalf("get status failed: %v", err)
+	}
+	if status.TxHash != "0xmine-local" {
+		t.Fatalf("expected the local row 0xmine-local as fallback, got %q", status.TxHash)
 	}
 }
 

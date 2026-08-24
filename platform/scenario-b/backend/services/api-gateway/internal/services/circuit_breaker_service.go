@@ -28,6 +28,11 @@ type AMMCircuitBreakerCaller interface {
 	// ExecuteResume makes no chain call — the AMM auto-unpauses inside signResume once
 	// quorum is met — so it has no transaction hash to return by design.
 	ExecuteResume(ctx context.Context, pair, requestID string) error
+	// LatestBreakerTxHash reads the transaction hash of the pair's most recent breaker
+	// action, by ANY institution, from the AMM's own events. Empty (with a nil error) when
+	// the pair has never had one. This is the shared source: a gateway's own signature table
+	// only holds the actions that gateway performed, so it cannot answer "the pair's latest".
+	LatestBreakerTxHash(ctx context.Context, pair string) (string, error)
 	// IsPaused reads the pair's on-chain circuit-breaker state (shared across all CBs).
 	IsPaused(ctx context.Context, pair string) (bool, error)
 	// ActiveResumeProposal returns the on-chain resume proposal (id, collected signatures,
@@ -191,7 +196,19 @@ type CircuitBreakerStatus struct {
 // no on-chain reference — either it has had no action, or the environment has no chain wired.
 // A lookup failure is reported as absent rather than as an error: the reference is never
 // allowed to gate a status read.
+//
+// The AMM's events are the source, not this gateway's signature table. The table records only
+// the actions this Central Bank performed, so reading it answers "my last action": two Central
+// Banks inspecting the same halted pair would then cite different transactions, while the
+// portal tells the operator the reference comes from the ledger and is the same for everyone.
+// The table remains the fallback for a gateway with no AMM wired, where it is the only record
+// there is — and where it can only describe local actions anyway.
 func (s *CircuitBreakerService) latestTxRef(ctx context.Context, pair string) string {
+	if s.ammCaller != nil {
+		if ref, err := s.ammCaller.LatestBreakerTxHash(ctx, pair); err == nil && ref != "" {
+			return ref
+		}
+	}
 	var sig domain.CircuitBreakerSignature
 	err := s.db.WithContext(ctx).
 		Where("control_id = ?", pair).

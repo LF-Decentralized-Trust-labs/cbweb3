@@ -307,6 +307,51 @@ func (c *Client) LatestResumeProposal(ctx context.Context) ([32]byte, bool, erro
 	return last.Topics[1], true, nil
 }
 
+// breakerEventSigs are the four circuit-breaker lifecycle events the AMM emits. Any of
+// them is a breaker action worth citing, so LatestBreakerTxHash matches on all four
+// rather than on the one this Central Bank happens to have submitted.
+var breakerEventSigs = []common.Hash{
+	crypto.Keccak256Hash([]byte("LogCircuitBreakerPaused(address,uint256,string)")),
+	crypto.Keccak256Hash([]byte("LogResumeProposed(bytes32,address,uint256)")),
+	crypto.Keccak256Hash([]byte("LogResumeSigned(bytes32,address,uint256)")),
+	crypto.Keccak256Hash([]byte("LogCircuitBreakerResumed(bytes32,uint256)")),
+}
+
+// LatestBreakerTxHash returns the transaction hash of the most recent circuit-breaker
+// action on this pair's AMM, by ANY institution, or found=false when the pair has never
+// had one.
+//
+// It reads the chain rather than a gateway's own signature table on purpose. Each Central
+// Bank only records the actions it performed itself, so a local lookup answers "my last
+// action" and two Central Banks inspecting the same pair get different hashes — while the
+// portal tells the operator the reference is read from the ledger and is therefore the
+// same everywhere. Sourcing it from the AMM's own events makes that claim true: every
+// gateway reduces the same log set and returns the same hash.
+func (c *Client) LatestBreakerTxHash(ctx context.Context) (string, bool, error) {
+	cctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	logs, err := c.ec.FilterLogs(cctx, ethereum.FilterQuery{
+		FromBlock: big.NewInt(0),
+		Addresses: []common.Address{c.contract},
+		// A single topic0 slot holding several values is an OR, so one query covers all
+		// four events and the ordering below is across the whole breaker lifecycle.
+		Topics: [][]common.Hash{breakerEventSigs},
+	})
+	if err != nil {
+		return "", false, err
+	}
+	if len(logs) == 0 {
+		return "", false, nil
+	}
+	last := logs[0]
+	for _, lg := range logs[1:] {
+		if lg.BlockNumber > last.BlockNumber || (lg.BlockNumber == last.BlockNumber && lg.Index > last.Index) {
+			last = lg
+		}
+	}
+	return last.TxHash.Hex(), true, nil
+}
+
 // QuoteExactOutput retrieves the required input amount for an exact-output swap. The
 // `pair` parameter is used only for bookkeeping; the on-chain formula uses reserves.
 // Returns the fee-inclusive amountIn so callers can use it directly as max_amount_in

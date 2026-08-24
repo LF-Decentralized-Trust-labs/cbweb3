@@ -80,7 +80,7 @@ Errors unchanged: `400` invalid body / missing `pair`, `bank_id`, `reason_code`;
 }
 ```
 
-`tx_hash` is the `on_chain_tx_ref` of the most recent `CircuitBreakerSignature` for the pair by `SignedAt`, regardless of signer (rule D-2). This is what lets the value survive a reload and appear identically to every central bank (FR-005, FR-006).
+`tx_hash` is the transaction hash of the pair's most recent breaker action as recorded by the AMM's own events — `LogCircuitBreakerPaused`, `LogResumeProposed`, `LogResumeSigned`, `LogCircuitBreakerResumed` — taking the latest by block number then log index, regardless of which institution submitted it (rule D-2). Sourcing it from the ledger rather than from a gateway's own signature table is what lets the value survive a reload *and* appear identically to every central bank (FR-005, FR-006); a gateway-local lookup satisfies only the first. Where no AMM is wired, the local `on_chain_tx_ref` is the fallback.
 
 `state` continues to be sourced from on-chain `IsPaused()` plus the active proposal; the hash does not become a source of truth for state.
 

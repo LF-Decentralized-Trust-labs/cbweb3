@@ -26,7 +26,7 @@ One row per breaker write action. Already carries the field this feature needs.
 
 **Validation rules**:
 - **D-1**: `OnChainTxRef` is populated whenever a chain call produced a hash, and left empty when no chain is wired. Empty means "no on-chain reference exists", never "unknown".
-- **D-2**: `SignedAt` orders actions within a pair. The pair's current hash is the `OnChainTxRef` of the row with the greatest `SignedAt` for that `ControlID`.
+- **D-2**: The pair's current hash is read from the AMM's own breaker events, not from this table. Each central bank runs its own gateway and database and records only the actions it performed itself, so the row with the greatest `SignedAt` for a `ControlID` answers "this gateway's last action", and two central banks inspecting the same pair would cite different transactions. The table remains the fallback where no AMM is wired, which is also the only place it can be authoritative — there, local actions are the whole record.
 - **D-3**: `RequestID` and `OnChainTxRef` are distinct identifiers and must not be used interchangeably. `Pause` currently assigns `RequestID: txRef`, which is a conflation; the feature must not extend that pattern to the resume actions, where `RequestID` genuinely carries the proposal ID needed for signing.
 
 ### `scenario_b_risk_control_states`
