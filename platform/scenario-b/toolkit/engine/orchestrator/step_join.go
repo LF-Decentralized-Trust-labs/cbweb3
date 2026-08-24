@@ -172,16 +172,17 @@ func (c JoinConfig) provisionKeycloakRealm(ctx context.Context) error {
 	// which is why Redis is handled differently). This is not new — the value used to be
 	// the constant admin — but the exposure window is real and belongs in a follow-up
 	// once realm provisioning moves to an imported realm file, as Scenario A does it.
+	b.WriteString(kcadmPreamble)
 	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password %[2]s && ",
 		kc, mustInfraSecret(c.DataDir, "KC_ADMIN_PASSWORD"))
-	fmt.Fprintf(&b, "(%[1]s create realms -s realm=%[2]s -s enabled=true || true) && ", kc, bankKeycloakRealm)
+	fmt.Fprintf(&b, "(%[1]s create realms -s realm=%[2]s -s enabled=true || kcw 'create realm') && ", kc, bankKeycloakRealm)
 	fmt.Fprintf(&b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s secret=%[4]s -s enabled=true "+
-		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[5]s || true) && ",
+		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[5]s || kcw 'create backend client') && ",
 		kc, bankKeycloakRealm, bankKeycloakClient, bankKeycloakSecret, audienceMapperArg(keycloakBackendAudience))
 	// The bank auth's GetAdminToken (client_credentials) resolves users on login, so
 	// its service account needs the realm-management view/manage user roles.
 	fmt.Fprintf(&b, "(%[1]s add-roles -r %[2]s --uusername service-account-%[3]s "+
-		"--cclientid realm-management --rolename manage-users --rolename view-users || true) && ",
+		"--cclientid realm-management --rolename manage-users --rolename view-users || kcw 'grant realm-management roles to the service account') && ",
 		kc, bankKeycloakRealm, bankKeycloakClient)
 	// Per-role operator accounts from the manifest (spec.adminUsers); fall back to a
 	// single default bank admin when none are declared.
@@ -190,6 +191,7 @@ func (c JoinConfig) provisionKeycloakRealm(ctx context.Context) error {
 		users = []AdminUser{{Role: "BANK", Username: bankUser, Password: bankPass}}
 	}
 	appendKeycloakUsers(&b, kc, bankKeycloakRealm, users)
+	appendKeycloakAssertions(&b, kc, bankKeycloakRealm, bankKeycloakClient, users)
 	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", b.String())
 	return err
 }
