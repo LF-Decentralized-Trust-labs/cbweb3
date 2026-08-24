@@ -484,6 +484,33 @@ func FoundHubSteps(c HubConfig) []Step {
 			},
 		},
 		{
+			// Mirrors the spoke: provision-keycloak-hub is skipped once KEYCLOAK_CLIENT_SECRET
+			// exists, so an origin newly declared in spec.noc.portalOrigins would never reach a
+			// hub that is already provisioned. Registering origins is declarative, so it
+			// converges on its own every run.
+			Name: "reconcile-noc-origins",
+			Deps: []string{"provision-keycloak-hub"},
+			Check: func(ctx context.Context) (bool, error) {
+				return nocOriginsAlreadyRegistered(ctx, c.Runner, c.keycloakContainer(),
+					keycloakAdminCLI, hubKeycloakRealm,
+					mustInfraSecret(secretsDirOf(c.HubEnvFile), "KC_ADMIN_PASSWORD"),
+					nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...))
+			},
+			Run: func(ctx context.Context) error {
+				if _, err := c.Runner.Run(ctx, "docker", "compose", "-p", c.ContainerPrefix,
+					"-f", c.template("entity-keycloak"), "--env-file", c.HubEnvFile, "up", "-d"); err != nil {
+					return err
+				}
+				if err := c.WaitKeycloak(ctx); err != nil {
+					return err
+				}
+				return reconcileNOCOrigins(ctx, c.Runner, c.keycloakContainer(),
+					keycloakAdminCLI, hubKeycloakRealm,
+					mustInfraSecret(secretsDirOf(c.HubEnvFile), "KC_ADMIN_PASSWORD"),
+					nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...))
+			},
+		},
+		{
 			Name: "render-hub-env",
 			Deps: []string{"deploy-hub-contracts"},
 			// Always re-render: backend env (contract addresses, secrets) must be
