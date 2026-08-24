@@ -84,7 +84,10 @@ type SpokeConfig struct {
 	KeycloakEnv         []string
 	GatewayURL          string
 	NOCBackendURL       string // where this CB's noc-agent pushes (spec.noc.backendURL; default host.docker.internal:8090)
-	Registrar           relayregistrar.RelayRegistrar
+	// NOCPortalOrigins are extra browser origins for the noc-portal Keycloak client
+	// (spec.noc.portalOrigins) — the standalone NOC portal this CB does not serve itself.
+	NOCPortalOrigins []string
+	Registrar        relayregistrar.RelayRegistrar
 
 	// Injectable seams (defaults wired by WithDefaults).
 	WaitRPC          func(ctx context.Context) error
@@ -440,7 +443,7 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	fmt.Fprintf(&b, "(%[1]s add-roles -r %[2]s --uusername service-account-%[3]s "+
 		"--cclientid realm-management --rolename manage-users --rolename view-users || true) && ",
 		kc, spokeKeycloakRealm, spokeKeycloakClient)
-	if err := appendNOCPortalClient(&b, kc, spokeKeycloakRealm, nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy())); err != nil {
+	if err := appendNOCPortalClient(&b, kc, spokeKeycloakRealm, nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...)); err != nil {
 		return err
 	}
 	// Per-role operator accounts from the manifest (spec.adminUsers). Fall back to a

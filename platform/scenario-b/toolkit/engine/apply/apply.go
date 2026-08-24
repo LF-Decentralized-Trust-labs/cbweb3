@@ -235,13 +235,14 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		Currency:            pd.Spec.Spoke.Currency,
 		// Optional ERC-20 metadata overrides; empty falls back to the currency-derived
 		// defaults ("Tokenized <ISO>"/"tCeBM_<ISO>", "Fiat <ISO>"/"fCeBM_<ISO>").
-		TokenName:       pd.Spec.Spoke.TokenName,
-		TokenSymbol:     pd.Spec.Spoke.TokenSymbol,
-		FiatTokenName:   pd.Spec.Spoke.FiatTokenName,
-		FiatTokenSymbol: pd.Spec.Spoke.FiatTokenSymbol,
-		AdminUsers:      toOrchestratorAdminUsers(pd.Spec.AdminUsers),
-		NOCBackendURL:   manifestNOCBackendURL(pd), // where this CB's noc-agent pushes
-		ProxyEnabled:    pd.Spec.Proxy == "enable",
+		TokenName:        pd.Spec.Spoke.TokenName,
+		TokenSymbol:      pd.Spec.Spoke.TokenSymbol,
+		FiatTokenName:    pd.Spec.Spoke.FiatTokenName,
+		FiatTokenSymbol:  pd.Spec.Spoke.FiatTokenSymbol,
+		AdminUsers:       toOrchestratorAdminUsers(pd.Spec.AdminUsers),
+		NOCBackendURL:    manifestNOCBackendURL(pd),    // where this CB's noc-agent pushes
+		NOCPortalOrigins: manifestNOCPortalOrigins(pd), // extra origins for the noc-portal client
+		ProxyEnabled:     pd.Spec.Proxy == "enable",
 	}
 	cfg.WithDefaults()
 	if o.DryRun {
@@ -459,24 +460,25 @@ func applyFoundHub(ctx context.Context, o Options, pd *manifest.ParticipantDeplo
 		advertisedHost = pd.Spec.Node.AdvertisedHost
 	}
 	cfg := orchestrator.HubConfig{
-		Runner:          runner,
-		ContractsDir:    filepath.Join(root, "scenario-b", "contracts"),
-		TemplatesDir:    filepath.Join(root, "scenario-b", "provisioning", "templates"),
-		OutDir:          outDir,
-		ChainID:         uint64(pd.Spec.Hub.ChainID),
-		HubRPC:          firstNonEmpty(o.HubRPC, localRPC(rpcPort)),
-		HubWS:           firstNonEmpty(o.HubWS, localWS(wsPort)),
-		HubEnvFile:      filepath.Join(dataDir, ".env.hub"),
-		KeycloakEnv:     []string{filepath.Join(dataDir, ".env.hub")},
-		VolumePrefix:    prefix,
-		ContainerPrefix: "sc-b-cbweb3-" + prefix,
-		NetPrefix:       prefix,
-		RPCPort:         rpcPort,
-		WSPort:          wsPort,
-		P2PPort:         p2pPort,
-		AdvertisedHost:  advertisedHost,
-		FrontendHost:    pd.Spec.FrontendHost,
-		ProxyEnabled:    pd.Spec.Proxy == "enable",
+		Runner:           runner,
+		ContractsDir:     filepath.Join(root, "scenario-b", "contracts"),
+		TemplatesDir:     filepath.Join(root, "scenario-b", "provisioning", "templates"),
+		OutDir:           outDir,
+		ChainID:          uint64(pd.Spec.Hub.ChainID),
+		HubRPC:           firstNonEmpty(o.HubRPC, localRPC(rpcPort)),
+		HubWS:            firstNonEmpty(o.HubWS, localWS(wsPort)),
+		HubEnvFile:       filepath.Join(dataDir, ".env.hub"),
+		KeycloakEnv:      []string{filepath.Join(dataDir, ".env.hub")},
+		VolumePrefix:     prefix,
+		ContainerPrefix:  "sc-b-cbweb3-" + prefix,
+		NetPrefix:        prefix,
+		RPCPort:          rpcPort,
+		WSPort:           wsPort,
+		P2PPort:          p2pPort,
+		AdvertisedHost:   advertisedHost,
+		FrontendHost:     pd.Spec.FrontendHost,
+		NOCPortalOrigins: manifestNOCPortalOrigins(pd), // extra origins for the noc-portal client
+		ProxyEnabled:     pd.Spec.Proxy == "enable",
 	}
 	// No launcher on the hub: the launcher is the per-entity A/B entry point for
 	// commercial banks and central banks (found-spoke / join), not for the network
@@ -594,6 +596,16 @@ func manifestNOCLauncherURL(pd *manifest.ParticipantDeployment) string {
 		return ""
 	}
 	return pd.Spec.NOC.LauncherURL
+}
+
+// manifestNOCPortalOrigins returns spec.noc.portalOrigins — extra browser origins to
+// register on the noc-portal Keycloak client, for a standalone NOC portal this entity
+// does not serve itself (the observe stack, on its own port and possibly another host).
+func manifestNOCPortalOrigins(pd *manifest.ParticipantDeployment) []string {
+	if pd.Spec.NOC == nil {
+		return nil
+	}
+	return pd.Spec.NOC.PortalOrigins
 }
 
 // manifestNOCAMMGatewayURL returns spec.noc.ammGatewayURL (the api-gateway the NOC

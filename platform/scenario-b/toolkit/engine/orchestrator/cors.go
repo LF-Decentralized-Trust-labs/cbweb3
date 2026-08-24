@@ -2,7 +2,10 @@
 
 package orchestrator
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // CORS origins for the entity api-gateways. The operator portals are served on
 // distinct host ports (different origin from the api-gateway), and the SPAs call
@@ -68,13 +71,46 @@ func corsOriginSingle(rpcPort int, frontendHost string) string {
 // the worst shape for a public client, since there is no client secret between an
 // attacker's page and a token (finding R1-10.7). Scoping it to the portal's own origin
 // keeps the grant working and closes that.
-func nocPortalOrigins(rpcPort int, frontendHost string, proxy bool) []string {
+// extra carries spec.noc.portalOrigins: origins of NOC portals this entity does NOT serve
+// itself. A standalone NOC (observe mode) publishes the portal on its own fixed port, on its
+// own docker network, possibly on another host — and observe never touches Keycloak, so
+// nothing but the manifest can tell this entity where that portal will be. Without them the
+// standalone portal's password grant is refused by CORS before any credential is read, which
+// presents as "Failed to fetch" and looks nothing like a Keycloak problem.
+//
+// Extras are appended even in proxy mode: the proxy fronts the portals this entity serves, not
+// a NOC stack somewhere else.
+func nocPortalOrigins(rpcPort int, frontendHost string, proxy bool, extra ...string) []string {
+	var origins []string
 	if proxy && frontendHost != "" {
-		return []string{proxyOrigin(frontendHost)}
+		origins = []string{proxyOrigin(frontendHost)}
+	} else {
+		origins = []string{fmt.Sprintf("http://localhost:%d", rpcPort+12000)}
+		if frontendHost != "" && frontendHost != "localhost" {
+			origins = append(origins, fmt.Sprintf("http://%s:%d", frontendHost, rpcPort+12000))
+		}
 	}
-	origins := []string{fmt.Sprintf("http://localhost:%d", rpcPort+12000)}
-	if frontendHost != "" && frontendHost != "localhost" {
-		origins = append(origins, fmt.Sprintf("http://%s:%d", frontendHost, rpcPort+12000))
+	return appendUniqueOrigins(origins, extra)
+}
+
+// appendUniqueOrigins appends extras that are not already present. Keycloak tolerates a
+// duplicate, but the webOrigins list is read by operators auditing who may read a public
+// client's token response, and a repeated entry there reads as a mistake.
+func appendUniqueOrigins(origins, extra []string) []string {
+	seen := make(map[string]struct{}, len(origins)+len(extra))
+	for _, o := range origins {
+		seen[o] = struct{}{}
+	}
+	for _, e := range extra {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			continue
+		}
+		if _, dup := seen[e]; dup {
+			continue
+		}
+		seen[e] = struct{}{}
+		origins = append(origins, e)
 	}
 	return origins
 }

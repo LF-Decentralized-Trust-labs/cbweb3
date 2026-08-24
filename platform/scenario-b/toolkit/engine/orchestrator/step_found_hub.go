@@ -50,6 +50,9 @@ type HubConfig struct {
 	// FrontendHost is the browser-facing host baked into the hub governance portal's
 	// VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost).
 	FrontendHost string
+	// NOCPortalOrigins are extra browser origins for the noc-portal Keycloak client
+	// (spec.noc.portalOrigins) — the standalone NOC portal the hub does not serve itself.
+	NOCPortalOrigins []string
 	// NOCBackendURL is where the hub's noc-agent pushes (spec.noc.backendURL;
 	// default host.docker.internal:8090).
 	NOCBackendURL string
@@ -270,7 +273,7 @@ func (c HubConfig) provisionKeycloakRealm(ctx context.Context) error {
 	// Public noc-portal client so the hub's co-located NOC portal can password-grant
 	// against this realm (hub NOC operator users are a separate follow-up — found-hub
 	// does not yet provision operator accounts).
-	if err := appendNOCPortalClient(&b, kc, hubKeycloakRealm, nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy())); err != nil {
+	if err := appendNOCPortalClient(&b, kc, hubKeycloakRealm, nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...)); err != nil {
 		return err
 	}
 	script := strings.TrimSuffix(b.String(), " && ")

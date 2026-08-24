@@ -150,6 +150,21 @@ type NOC struct {
 	// LauncherURL is the launcher the NOC portal's "back to launcher" affordance
 	// returns to (VITE_LAUNCHER_URL). Empty → the affordance hides.
 	LauncherURL string `yaml:"launcherURL,omitempty" json:"launcherURL,omitempty"`
+	// PortalOrigins are EXTRA browser origins to register on the public noc-portal
+	// Keycloak client, on top of the co-located portal's own origin.
+	//
+	// The NOC portal password-grants against Keycloak from the browser, so Keycloak
+	// must know its origin or the token request is refused by CORS before any
+	// credential is checked. found-spoke/found-hub register the origin of the portal
+	// they serve themselves (RPC+12000). A standalone NOC — the observe mode, which
+	// publishes the portal on its own fixed port (3030) and may run on another host
+	// entirely — is served from an origin nothing else can know, and observe never
+	// touches Keycloak. Declare it here, on the entity that owns the realm.
+	//
+	// Each value must be a plain scheme://host[:port] with no path or trailing slash;
+	// that is the only shape that is both JSON-safe and shell-safe on the kcadm
+	// command line. Wildcards are rejected on purpose (finding R1-10.7).
+	PortalOrigins []string `yaml:"portalOrigins,omitempty" json:"portalOrigins,omitempty"`
 	// AMMGatewayURL is the api-gateway the NOC backend reads AMM pool status from,
 	// as reachable FROM THE NOC CONTAINER (the NOC runs on its own docker network,
 	// so a compose service name of another stack does not resolve — use the host
