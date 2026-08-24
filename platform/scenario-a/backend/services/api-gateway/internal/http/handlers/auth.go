@@ -167,8 +167,19 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		// participant not found or PKI not required → fall through to direct login.
 	}
 
-	// Direct login: Central Bank (client_credentials via Keycloak service account)
-	// or other non-PKI roles (ROLE_SUPERVISOR, ROLE_NOC, ROLE_GOVERNANCE_OFFICER).
+	// Direct login for non-PKI roles (ROLE_SUPERVISOR, ROLE_NOC, ROLE_GOVERNANCE_OFFICER)
+	// and for a central bank operator.
+	//
+	// This is a USER login: the auth service accepts only the OIDC password grant, by
+	// decision f55ade5b ("require user (password grant) login for portals"), so that an
+	// operator cannot authenticate with a realm client id/secret. The ClientID/ClientSecret
+	// field names are the wire contract's, not a description of the credential — what
+	// belongs in them is a Keycloak username and that user's password.
+	//
+	// This comment previously read "client_credentials via Keycloak service account",
+	// describing the behaviour that decision replaced. It cost real debugging time: the
+	// stale comment made a 401 look like a broken credential path rather than a client
+	// credential being refused on purpose.
 	token, err := h.authProvider.Authenticate(c.UserContext(), req.ClientID, req.ClientSecret)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
@@ -233,7 +244,6 @@ func (h *AuthHandler) Logout(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "logged out successfully"})
 }
 
-// containsRole checks if a role is in the claims roles list.
 // WalletBind handles PKI login step 2 (POST /api/v1/auth/wallet/bind).
 // The client submits the DER-encoded ECDSA signature of their nonce (hex) plus
 // their X.509 certificate PEM issued by the Central Bank CA.
@@ -350,13 +360,4 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
 		resp["privacyGroup"] = claims.PrivacyGroup
 	}
 	return c.Status(fiber.StatusOK).JSON(resp)
-}
-
-func containsRole(roles []string, role string) bool {
-	for _, r := range roles {
-		if r == role {
-			return true
-		}
-	}
-	return false
 }

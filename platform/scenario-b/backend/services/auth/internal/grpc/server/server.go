@@ -67,7 +67,7 @@ func New(kc keycloak.Client, kmsProvider kms.Provider, compliance complianceclie
 		nonceStore:       ns,
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	serverOpts, err := authz.ServerOptionsFromEnv(logger, nil)
+	serverOpts, err := authz.ServerOptionsFromEnv(logger, serverPolicy())
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +314,11 @@ func (s *identityService) OnboardParticipant(ctx context.Context, req *authv1.On
 		// Two-step onboarding (R1-10.6 / R2-10.6): registerParticipant only creates the
 		// participant in Pending; a follow-up verifyParticipant (VERIFIER_ROLE) is required
 		// before it can transact. The CB signer holds both roles (see role-separation runbook).
-		txHash, chainErr := s.blockchainClient.RegisterParticipant(ctx, resp.WalletAddress, displayName, req.Role, [32]byte{})
+		// See registry.InstitutionIDForParticipant: the id is derived from the bank code so that
+		// every wallet of one institution resolves to the same institution, which is what the AMM
+		// resume quorum counts.
+		institutionID := registry.InstitutionIDForParticipant(req.BankCode, displayName)
+		txHash, chainErr := s.blockchainClient.RegisterParticipant(ctx, resp.WalletAddress, displayName, req.Role, [32]byte{}, institutionID)
 		if chainErr != nil {
 			return nil, status.Errorf(codes.Internal, "onboard: on-chain registration: %v", chainErr)
 		}
@@ -618,11 +622,22 @@ func (s *identityService) ChangeClientSecret(ctx context.Context, req *authv1.Ch
 	return &authv1.ChangeClientSecretResponse{}, nil
 }
 
+// auditEmitTimeout bounds the detached audit call below.
+//
+// Detaching from the request context is deliberate — the audit entry must outlive the RPC
+// that triggered it — but detached is not the same as unbounded. Without a deadline a
+// compliance service that accepts the connection and then stops answering leaks one
+// goroutine per audited operation, for the life of the process (finding R2-LOW). Writing
+// one audit row is a single insert, so ten seconds is well past a healthy write.
+const auditEmitTimeout = 10 * time.Second
+
 // emitAudit fires an audit log entry asynchronously (fire-and-forget).
 // Failures in audit logging must NOT block the main business operation.
 func (s *identityService) emitAudit(ctx context.Context, action, actorSubject, actorAddress, targetSubject, correlationID, ip, result string) {
 	go func() {
-		if err := s.compliance.CreateAuditLog(context.Background(), complianceclient.AuditEntry{
+		callCtx, cancel := context.WithTimeout(context.Background(), auditEmitTimeout)
+		defer cancel()
+		if err := s.compliance.CreateAuditLog(callCtx, complianceclient.AuditEntry{
 			ActionType:    action,
 			ActorSubject:  actorSubject,
 			ActorAddress:  actorAddress,

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 import {IAutomatedMarketMaker} from "./interfaces/IAutomatedMarketMaker.sol";
 import {IIdentityRegistry} from "./interfaces/IIdentityRegistry.sol";
@@ -60,6 +60,10 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
         uint256 epoch;
         uint256 signatures;
         mapping(address => bool) signed;
+        /// @dev Institution-keyed mirror of {signed}. The quorum is a multi-institution control, so the
+        ///      address key alone is not enough: one central bank operating two governance wallets would
+        ///      otherwise satisfy 2-of-N on its own, which is the outcome the quorum exists to prevent.
+        mapping(bytes32 => bool) institutionSigned;
         bool executed;
     }
 
@@ -125,8 +129,9 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
     }
 
     /// @notice Create a resume proposal. The proposer's signature counts as the first signature.
-    /// @dev A single proposer is never enough to resume: quorum is {RESUME_QUORUM} (2-of-N). The proposal
-    ///      is stamped with the current {pauseEpoch}; signatures gathered here cannot outlive this pause.
+    /// @dev A single proposer is never enough to resume: quorum is {RESUME_QUORUM} (2-of-N) counted over
+    ///      distinct institutions. The proposal is stamped with the current {pauseEpoch}; signatures
+    ///      gathered here cannot outlive this pause.
     /// @return proposalId The identifier of the created resume proposal.
     function proposeResume() external onlyGovernance whenPaused returns (bytes32 proposalId) {
         uint256 nonce = _resumeNonce++;
@@ -137,13 +142,17 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
         proposal.epoch = pauseEpoch;
         proposal.signatures = 1;
         proposal.signed[msg.sender] = true;
+        bytes32 institutionId = _institutionOf(msg.sender);
+        proposal.institutionSigned[institutionId] = true;
         emit LogResumeProposed(proposalId, msg.sender, block.timestamp);
         emit LogResumeSigned(proposalId, msg.sender, 1);
     }
 
     /// @notice Sign a resume proposal. When signatures reach {RESUME_QUORUM}, the AMM auto-resumes.
-    /// @dev A given signer may only sign once (no self-quorum). Reverts if the proposal is unknown or was
-    ///      raised against a superseded pause epoch (R2-H-2) — enforcing a genuine 2-of-N per pause event.
+    /// @dev A given signer may only sign once, and a given institution may only sign once (no
+    ///      self-quorum at either level). Reverts if the proposal is unknown or was raised against a
+    ///      superseded pause epoch (R2-H-2) — enforcing a genuine 2-of-N per pause event, across two
+    ///      distinct institutions.
     function signResume(bytes32 proposalId) external onlyGovernance whenPaused {
         ResumeProposal storage proposal = _resumeProposals[proposalId];
         if (proposal.createdAt == 0) {
@@ -155,7 +164,12 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
         if (proposal.signed[msg.sender]) {
             revert AMM__AlreadySigned(proposalId, msg.sender);
         }
+        bytes32 institutionId = _institutionOf(msg.sender);
+        if (proposal.institutionSigned[institutionId]) {
+            revert AMM__InstitutionAlreadySigned(proposalId, institutionId);
+        }
         proposal.signed[msg.sender] = true;
+        proposal.institutionSigned[institutionId] = true;
         proposal.signatures += 1;
         emit LogResumeSigned(proposalId, msg.sender, proposal.signatures);
 
@@ -164,6 +178,18 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
             _unpause();
             emit LogCircuitBreakerResumed(proposalId, block.timestamp);
         }
+    }
+
+    /// @dev Resolves the signer's institution, reverting when the registry holds none. Reverting rather
+    ///      than counting an unattributed signature is deliberate: bytes32(0) is the value every
+    ///      unregistered address returns, so admitting it would let any two such signers form quorum as
+    ///      one "institution" — or worse, let one of them pair with a second wallet of the same kind.
+    function _institutionOf(address account) private view returns (bytes32) {
+        bytes32 institutionId = IDENTITY_REGISTRY.getInstitutionId(account);
+        if (institutionId == bytes32(0)) {
+            revert AMM__InvalidInstitutionId(account);
+        }
+        return institutionId;
     }
 
     /// @inheritdoc IAutomatedMarketMaker

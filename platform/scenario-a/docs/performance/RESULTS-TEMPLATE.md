@@ -13,7 +13,7 @@
 | Git commit | _SHA under test_ |
 | Environment | _devnet host(s), CPU/RAM, network topology (spoke-a + spoke-b)_ |
 | Besu version / consensus | 25.8.0 / QBFT |
-| Stack brought up via | `make spoke-all` (note any deviations) |
+| Stack brought up via | `cd samples && ./deploy-all.sh` (note any deviations) |
 | k6 version | _`k6 version` output_ |
 | Cacti relay version | v2.1.0 (note any deviations) |
 | Paladin version | v0.15 (note any deviations) |

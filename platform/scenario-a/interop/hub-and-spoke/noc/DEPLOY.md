@@ -4,7 +4,7 @@ This guide covers the complete local setup of the NOC stack: building images,
 configuring Keycloak, registering spokes in the database, provisioning agent
 API keys, and starting the agents.
 
-**Prerequisite:** `make spoke-all` must have completed successfully — Keycloak,
+**Prerequisite:** the sample stack (`cd samples && ./deploy-all.sh`) must have completed successfully — Keycloak,
 both Besu networks, Paladin nodes, and the Cacti relay must be running.
 
 ---

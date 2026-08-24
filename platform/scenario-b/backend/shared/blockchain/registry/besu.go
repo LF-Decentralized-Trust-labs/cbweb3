@@ -123,7 +123,7 @@ func (b *BesuClient) transactOpts(ctx context.Context) (*bind.TransactOpts, erro
 
 // RegisterParticipant registers a new participant on the IdentityRegistry contract.
 // Blocks until the transaction is mined or the context is cancelled.
-func (b *BesuClient) RegisterParticipant(ctx context.Context, wallet, name, role string, zkPointer [32]byte) (string, error) {
+func (b *BesuClient) RegisterParticipant(ctx context.Context, wallet, name, role string, zkPointer, institutionID [32]byte) (string, error) {
 	opts, err := b.transactOpts(ctx)
 	if err != nil {
 		return "", err
@@ -137,7 +137,7 @@ func (b *BesuClient) RegisterParticipant(ctx context.Context, wallet, name, role
 	// ~40k), and gas is free on the local genesis, so over-provisioning is safe.
 	opts.GasLimit = 500000
 
-	tx, err := b.contract.RegisterParticipant(opts, account, name, solidityRole, zkPointer)
+	tx, err := b.contract.RegisterParticipant(opts, account, name, solidityRole, zkPointer, institutionID)
 	if err != nil {
 		return "", fmt.Errorf("registry: registerParticipant tx: %w", err)
 	}
@@ -210,11 +210,76 @@ func (b *BesuClient) SetCertFingerprint(ctx context.Context, wallet string, fing
 	return tx.Hash().Hex(), nil
 }
 
-// RegisterCurrency deploys a founding central bank's bridge token (W-token),
-// maps that token to the central bank on the IdentityRegistry, and registers
-// the sovereign currency on the CurrencyRegistry. All three transactions are
-// signed by this client's signer, which in local is the central bank == the hub
-// admin (holding DEFAULT_ADMIN_ROLE and being the token's central bank).
+// currencyAuthorityPlan is what remains to be done so a sovereign currency's issuance
+// authority rests with its own central bank rather than with the hub that registered it.
+type currencyAuthorityPlan struct {
+	// SetCentralBankOf points IdentityRegistry.getCentralBankOf(token) at the CB. This is on
+	// the registry, whose administration legitimately stays with the hub.
+	SetCentralBankOf bool
+	// GrantCBRole gives the CB CENTRAL_BANK_ROLE on its W-token (mint/burn).
+	GrantCBRole bool
+	// GrantCBAdmin gives the CB DEFAULT_ADMIN_ROLE on its W-token, so it — and not the hub —
+	// decides who may issue its money. Without this the revocation below is cosmetic: the
+	// hub could grant CENTRAL_BANK_ROLE back to itself at any time.
+	//
+	// Only ever planned while the hub STILL administers the token. What this handover protects is
+	// narrower than "the CB administers": it is that the HUB does not. Once the hub is out,
+	// administration may legitimately rest with a dedicated sovereign identity rather than the CB's
+	// gateway (provisioning separates issuance from administration), and this package never sees
+	// that address. Planning a grant then would have the hub sign a transaction it no longer has the
+	// authority for — it reverts, and the whole re-apply of that spoke fails with it.
+	GrantCBAdmin bool
+	// RevokeSignerRole takes CENTRAL_BANK_ROLE away from the hub signer, so the hub cannot
+	// issue another sovereign's money.
+	RevokeSignerRole bool
+	// RevokeSignerAdmin takes DEFAULT_ADMIN_ROLE away from the hub signer. Applied LAST: it
+	// is what removes the hub's ability to perform any of the steps above.
+	RevokeSignerAdmin bool
+}
+
+// Empty reports whether the authority already rests where it should.
+func (p currencyAuthorityPlan) Empty() bool {
+	return !p.SetCentralBankOf && !p.GrantCBRole && !p.GrantCBAdmin &&
+		!p.RevokeSignerRole && !p.RevokeSignerAdmin
+}
+
+// planCurrencyAuthority decides which handover steps are still outstanding.
+//
+// Kept pure so the rule is testable without a chain: the on-chain calls around it are thin.
+// When the CB *is* the signer (single-entity local stacks), there is nothing to hand over
+// and nothing to revoke — revoking would leave the token with no issuer at all.
+func planCurrencyAuthority(signer, cb, currentCBOf common.Address, cbHasRole, signerHasRole, cbIsAdmin, signerIsAdmin bool) currencyAuthorityPlan {
+	if cb == (common.Address{}) || cb == signer {
+		return currencyAuthorityPlan{}
+	}
+	return currencyAuthorityPlan{
+		SetCentralBankOf: currentCBOf != cb,
+		GrantCBRole:      !cbHasRole,
+		// See GrantCBAdmin: conditioned on the hub still administering, so a token whose
+		// administration the sovereign has already moved on is left alone instead of triggering a
+		// grant the hub cannot sign.
+		GrantCBAdmin:      !cbIsAdmin && signerIsAdmin,
+		RevokeSignerRole:  signerHasRole,
+		RevokeSignerAdmin: signerIsAdmin,
+	}
+}
+
+// RegisterCurrency deploys a founding central bank's bridge token (W-token), registers the
+// sovereign currency on the CurrencyRegistry, and hands the token's issuance authority to
+// that central bank. Signed throughout by this client's signer (the hub governance key,
+// holding DEFAULT_ADMIN_ROLE).
+//
+// The order is forced by the contracts. CurrencyRegistry.registerCurrency requires
+// msg.sender == IdentityRegistry.getCentralBankOf(token), and the hub signer is the only
+// key available here — a sovereign CB does not hand its key to the hub. So the hub registers
+// the currency as the interim central bank and then hands over:
+//
+//	deploy(centralBank = signer) → setCentralBankOf(signer) → registerCurrency
+//	  → setCentralBankOf(cb) → grantRole(CENTRAL_BANK_ROLE, cb) → revokeRole(signer)
+//
+// Before this handover existed, cbAddress had to equal the hub signer, which is why every
+// CB shared one hub key: the founding CB's. That made each sovereign W-token mintable by
+// whoever held that single key.
 //
 // A fresh transactOpts is built before each transaction so nonces are managed
 // automatically; each tx is waited to be mined before the next is submitted.
@@ -229,13 +294,14 @@ func (b *BesuClient) RegisterCurrency(ctx context.Context, tokenName, tokenSymbo
 
 	cb := common.HexToAddress(cbAddress)
 
-	// 1) Deploy the W-token. admin == the signer (hub admin); centralBank == cb.
+	// 1) Deploy the W-token. admin == the signer; centralBank == the signer too, so the
+	// signer can perform registerCurrency below. Authority moves to cb in step 4.
 	opts1, err := b.transactOpts(ctx)
 	if err != nil {
 		return "", "", err
 	}
 	adminAddr := opts1.From
-	wTokenAddr, deployTx, _, err := bindings.DeployTokenizedCentralBankMoney(opts1, b.client, tokenName, tokenSymbol, adminAddr, cb)
+	wTokenAddr, deployTx, _, err := bindings.DeployTokenizedCentralBankMoney(opts1, b.client, tokenName, tokenSymbol, adminAddr, adminAddr)
 	if err != nil {
 		return "", "", fmt.Errorf("registry: deploy W-token: %w", err)
 	}
@@ -243,12 +309,12 @@ func (b *BesuClient) RegisterCurrency(ctx context.Context, tokenName, tokenSymbo
 		return wTokenAddr.Hex(), deployTx.Hash().Hex(), fmt.Errorf("registry: deploy W-token wait: %w", err)
 	}
 
-	// 2) Map the token to its central bank on the IdentityRegistry.
+	// 2) Map the token to its interim central bank (the signer) on the IdentityRegistry.
 	opts2, err := b.transactOpts(ctx)
 	if err != nil {
 		return wTokenAddr.Hex(), deployTx.Hash().Hex(), err
 	}
-	setCBTx, err := b.contract.SetCentralBankOf(opts2, wTokenAddr, cb)
+	setCBTx, err := b.contract.SetCentralBankOf(opts2, wTokenAddr, adminAddr)
 	if err != nil {
 		return wTokenAddr.Hex(), deployTx.Hash().Hex(), fmt.Errorf("registry: setCentralBankOf tx: %w", err)
 	}
@@ -257,7 +323,7 @@ func (b *BesuClient) RegisterCurrency(ctx context.Context, tokenName, tokenSymbo
 	}
 
 	// 3) Register the currency on the CurrencyRegistry (msg.sender must equal
-	// getCentralBankOf(token); in local the signer == cb).
+	// getCentralBankOf(token), which step 2 made the signer).
 	currencyReg, err := bindings.NewCurrencyRegistry(common.HexToAddress(b.cfg.CurrencyRegistryAddress), b.client)
 	if err != nil {
 		return wTokenAddr.Hex(), setCBTx.Hash().Hex(), fmt.Errorf("registry: binding CurrencyRegistry: %w", err)
@@ -274,7 +340,157 @@ func (b *BesuClient) RegisterCurrency(ctx context.Context, tokenName, tokenSymbo
 		return wTokenAddr.Hex(), regTx.Hash().Hex(), fmt.Errorf("registry: registerCurrency wait: %w", err)
 	}
 
+	// 4) Hand issuance authority to the sovereign CB. Failing here leaves the currency
+	// registered but issuable only by the hub — surfaced as an error so it is repaired
+	// (EnsureCurrencyAuthority) rather than silently accepted.
+	handoverTx, err := b.ensureCurrencyAuthority(ctx, wTokenAddr, cb)
+	if err != nil {
+		return wTokenAddr.Hex(), regTx.Hash().Hex(), err
+	}
+	if handoverTx != "" {
+		return wTokenAddr.Hex(), handoverTx, nil
+	}
 	return wTokenAddr.Hex(), regTx.Hash().Hex(), nil
+}
+
+// EnsureCurrencyAuthority completes (or repairs) the handover of an already-registered
+// currency's issuance authority to its central bank. Idempotent: it reads the current
+// on-chain state and submits only the outstanding steps, so re-running a provisioning
+// apply after a crash between registration and handover converges instead of skipping.
+// Returns the last transaction hash, empty when nothing was outstanding.
+func (b *BesuClient) EnsureCurrencyAuthority(ctx context.Context, tokenAddress, cbAddress string) (string, error) {
+	if b.signer == nil {
+		return "", ErrNoSigner
+	}
+	token := common.HexToAddress(tokenAddress)
+	if token == (common.Address{}) {
+		return "", errors.New("registry: token address is required for currency authority handover")
+	}
+	return b.ensureCurrencyAuthority(ctx, token, common.HexToAddress(cbAddress))
+}
+
+// ensureCurrencyAuthority reads the token's current authority and applies the outstanding
+// steps of planCurrencyAuthority. The role is revoked from the signer only after the CB
+// holds it, so the token is never left without an issuer.
+func (b *BesuClient) ensureCurrencyAuthority(ctx context.Context, token, cb common.Address) (string, error) {
+	wToken, err := bindings.NewTokenizedCentralBankMoney(token, b.client)
+	if err != nil {
+		return "", fmt.Errorf("registry: binding W-token %s: %w", token.Hex(), err)
+	}
+	role, err := wToken.CENTRALBANKROLE(&bind.CallOpts{Context: ctx})
+	if err != nil {
+		return "", fmt.Errorf("registry: read CENTRAL_BANK_ROLE: %w", err)
+	}
+	adminRole, err := wToken.DEFAULTADMINROLE(&bind.CallOpts{Context: ctx})
+	if err != nil {
+		return "", fmt.Errorf("registry: read DEFAULT_ADMIN_ROLE: %w", err)
+	}
+	signerHex, err := b.signer.SignerAddress(ctx)
+	if err != nil {
+		return "", fmt.Errorf("registry: resolve signer address: %w", err)
+	}
+	signerAddr := common.HexToAddress(signerHex)
+	currentCBOf, err := b.contract.GetCentralBankOf(&bind.CallOpts{Context: ctx}, token)
+	if err != nil {
+		return "", fmt.Errorf("registry: read getCentralBankOf: %w", err)
+	}
+	cbHasRole, err := wToken.HasRole(&bind.CallOpts{Context: ctx}, role, cb)
+	if err != nil {
+		return "", fmt.Errorf("registry: read CB role: %w", err)
+	}
+	signerHasRole, err := wToken.HasRole(&bind.CallOpts{Context: ctx}, role, signerAddr)
+	if err != nil {
+		return "", fmt.Errorf("registry: read signer role: %w", err)
+	}
+	cbIsAdmin, err := wToken.HasRole(&bind.CallOpts{Context: ctx}, adminRole, cb)
+	if err != nil {
+		return "", fmt.Errorf("registry: read CB admin role: %w", err)
+	}
+	signerIsAdmin, err := wToken.HasRole(&bind.CallOpts{Context: ctx}, adminRole, signerAddr)
+	if err != nil {
+		return "", fmt.Errorf("registry: read signer admin role: %w", err)
+	}
+
+	plan := planCurrencyAuthority(signerAddr, cb, currentCBOf, cbHasRole, signerHasRole, cbIsAdmin, signerIsAdmin)
+	if plan.Empty() {
+		return "", nil
+	}
+
+	last := ""
+	if plan.GrantCBRole {
+		opts, oerr := b.transactOpts(ctx)
+		if oerr != nil {
+			return last, oerr
+		}
+		tx, gerr := wToken.GrantRole(opts, role, cb)
+		if gerr != nil {
+			return last, fmt.Errorf("registry: grant CENTRAL_BANK_ROLE to %s: %w", cb.Hex(), gerr)
+		}
+		if werr := b.waitMined(ctx, tx); werr != nil {
+			return tx.Hash().Hex(), fmt.Errorf("registry: grant CENTRAL_BANK_ROLE wait: %w", werr)
+		}
+		last = tx.Hash().Hex()
+	}
+	if plan.GrantCBAdmin {
+		opts, oerr := b.transactOpts(ctx)
+		if oerr != nil {
+			return last, oerr
+		}
+		tx, gerr := wToken.GrantRole(opts, adminRole, cb)
+		if gerr != nil {
+			return last, fmt.Errorf("registry: grant DEFAULT_ADMIN_ROLE to %s: %w", cb.Hex(), gerr)
+		}
+		if werr := b.waitMined(ctx, tx); werr != nil {
+			return tx.Hash().Hex(), fmt.Errorf("registry: grant DEFAULT_ADMIN_ROLE wait: %w", werr)
+		}
+		last = tx.Hash().Hex()
+	}
+	if plan.SetCentralBankOf {
+		opts, oerr := b.transactOpts(ctx)
+		if oerr != nil {
+			return last, oerr
+		}
+		tx, serr := b.contract.SetCentralBankOf(opts, token, cb)
+		if serr != nil {
+			return last, fmt.Errorf("registry: setCentralBankOf(%s) tx: %w", cb.Hex(), serr)
+		}
+		if werr := b.waitMined(ctx, tx); werr != nil {
+			return tx.Hash().Hex(), fmt.Errorf("registry: setCentralBankOf(%s) wait: %w", cb.Hex(), werr)
+		}
+		last = tx.Hash().Hex()
+	}
+	if plan.RevokeSignerRole {
+		opts, oerr := b.transactOpts(ctx)
+		if oerr != nil {
+			return last, oerr
+		}
+		tx, rerr := wToken.RevokeRole(opts, role, signerAddr)
+		if rerr != nil {
+			return last, fmt.Errorf("registry: revoke CENTRAL_BANK_ROLE from hub signer: %w", rerr)
+		}
+		if werr := b.waitMined(ctx, tx); werr != nil {
+			return tx.Hash().Hex(), fmt.Errorf("registry: revoke CENTRAL_BANK_ROLE wait: %w", werr)
+		}
+		last = tx.Hash().Hex()
+	}
+	// LAST: this is the step that ends the hub's authority over the token, so everything above
+	// must already be in place. Doing it earlier would leave the remaining steps unauthorized
+	// and the token half-handed-over with no way to finish.
+	if plan.RevokeSignerAdmin {
+		opts, oerr := b.transactOpts(ctx)
+		if oerr != nil {
+			return last, oerr
+		}
+		tx, rerr := wToken.RevokeRole(opts, adminRole, signerAddr)
+		if rerr != nil {
+			return last, fmt.Errorf("registry: revoke DEFAULT_ADMIN_ROLE from hub signer: %w", rerr)
+		}
+		if werr := b.waitMined(ctx, tx); werr != nil {
+			return tx.Hash().Hex(), fmt.Errorf("registry: revoke DEFAULT_ADMIN_ROLE wait: %w", werr)
+		}
+		last = tx.Hash().Hex()
+	}
+	return last, nil
 }
 
 // IsCurrencyRegistered reports whether a currency symbol is already registered
@@ -369,7 +585,39 @@ func (b *BesuClient) RegisterPair(ctx context.Context, symbolA, symbolB, pairID 
 		return amm.Hex(), deployTx.Hash().Hex(), fmt.Errorf("registry: deploy AMM wait: %w", err)
 	}
 
-	// 2) proposePair (records tokenA/tokenB/amm under pairID).
+	// 2) proposePair / confirmPair are the two sovereigns' own acts: the PairRegistry
+	// requires msg.sender == getCentralBankOf(tokenA) to propose and
+	// getCentralBankOf(tokenB) to confirm. Once each currency's issuance authority rests
+	// with its own central bank, the hub is neither — it deploys the AMM (neutral
+	// infrastructure) and stops there, leaving each CB to sign its own side from its
+	// governance portal (POST /api/v2/amm/pairs/{propose,confirm}).
+	//
+	// The hub still performs both when it genuinely is the central bank of both tokens
+	// (single-entity stacks), so those setups keep working unchanged.
+	signerHex, err := b.signer.SignerAddress(ctx)
+	if err != nil {
+		return amm.Hex(), deployTx.Hash().Hex(), fmt.Errorf("registry: resolve signer address: %w", err)
+	}
+	signerAddr := common.HexToAddress(signerHex)
+	cbOfA, err := b.contract.GetCentralBankOf(&bind.CallOpts{Context: ctx}, tokenA)
+	if err != nil {
+		return amm.Hex(), deployTx.Hash().Hex(), fmt.Errorf("registry: read getCentralBankOf(tokenA): %w", err)
+	}
+	cbOfB, err := b.contract.GetCentralBankOf(&bind.CallOpts{Context: ctx}, tokenB)
+	if err != nil {
+		return amm.Hex(), deployTx.Hash().Hex(), fmt.Errorf("registry: read getCentralBankOf(tokenB): %w", err)
+	}
+	if signerAddr != cbOfA || signerAddr != cbOfB {
+		// Not a silent partial success: the AMM exists and the pair does not, and the caller
+		// is told exactly which acts remain and who owes them.
+		return amm.Hex(), deployTx.Hash().Hex(), &PairAwaitsSovereignsError{
+			PairID:    pairID,
+			AMM:       amm.Hex(),
+			ProposeBy: cbOfA.Hex(),
+			ConfirmBy: cbOfB.Hex(),
+		}
+	}
+
 	opts2, err := b.transactOpts(ctx)
 	if err != nil {
 		return amm.Hex(), deployTx.Hash().Hex(), err
@@ -396,6 +644,24 @@ func (b *BesuClient) RegisterPair(ctx context.Context, symbolA, symbolB, pairID 
 	}
 
 	return amm.Hex(), confTx.Hash().Hex(), nil
+}
+
+// PairAwaitsSovereignsError reports that the corridor's AMM was deployed but the pair
+// itself must be proposed and confirmed by the two issuing central banks, because the hub
+// is the central bank of neither token. It carries the addresses that owe each act so the
+// caller can route the request instead of guessing.
+type PairAwaitsSovereignsError struct {
+	PairID    string
+	AMM       string
+	ProposeBy string
+	ConfirmBy string
+}
+
+func (e *PairAwaitsSovereignsError) Error() string {
+	return fmt.Sprintf(
+		"pair %s: AMM deployed at %s, but proposePair must be signed by the central bank of token A (%s) and confirmPair by the central bank of token B (%s) — the hub is neither",
+		e.PairID, e.AMM, e.ProposeBy, e.ConfirmBy,
+	)
 }
 
 // IsPairRegistered reports whether a pair already exists (any status) in the
@@ -460,6 +726,7 @@ func (b *BesuClient) GetParticipant(ctx context.Context, address string) (OnChai
 	}
 	return OnChainParticipant{
 		LegalName:       p.LegalName,
+		InstitutionID:   p.InstitutionId,
 		Role:            p.Role,
 		Status:          p.Status,
 		ZkPointer:       p.ZkPointer,
@@ -476,4 +743,16 @@ func (b *BesuClient) GetCertFingerprint(ctx context.Context, address string) ([3
 		return [32]byte{}, fmt.Errorf("registry: getCertFingerprint: %w", err)
 	}
 	return fp, nil
+}
+
+// GetInstitutionID returns the institution-level identifier stored on-chain for a wallet.
+// A zero value means the wallet is not registered: the contract refuses to store a zero id,
+// so no registered participant can report one.
+func (b *BesuClient) GetInstitutionID(ctx context.Context, address string) ([32]byte, error) {
+	account := common.HexToAddress(address)
+	id, err := b.contract.GetInstitutionId(&bind.CallOpts{Context: ctx}, account)
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("registry: getInstitutionId: %w", err)
+	}
+	return id, nil
 }

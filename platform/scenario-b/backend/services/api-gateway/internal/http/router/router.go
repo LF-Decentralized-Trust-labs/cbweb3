@@ -24,7 +24,7 @@ type Dependencies struct {
 	OnboardingProxyHandler *handlers.OnboardingProxyHandler
 	// SpokesHandler serves the internal spoke self-registration endpoint (hub only).
 	SpokesHandler *handlers.SpokesHandler
-	AuthProvider           interfaces.IAuthProvider
+	AuthProvider  interfaces.IAuthProvider
 	// PaymentProxyHandler proxies /api/v1/payments/* to the Central Bank gateway.
 	// Only wired when CENTRAL_BANK_API_URL is set (commercial bank gateways).
 	PaymentProxyHandler *handlers.PaymentProxyHandler
@@ -159,17 +159,41 @@ func Setup(app *fiber.App, deps Dependencies) {
 	// Protected by X-Relay-Auth header, used by PaymentProxyHandler from commercial banks.
 	// Only wired on Central Bank gateways (PaymentHandler exists, PaymentProxyHandler doesn't).
 	if deps.PaymentHandler != nil && deps.PaymentProxyHandler == nil {
-		relaySecret := os.Getenv("INTERNAL_RELAY_AUTH_SECRET")
-		internal := app.Group("/internal/v1", middleware.RequireRelayAuth(relaySecret))
+		// Signature-preferred, secret-fallback — the same policy as the /internal/amm routes. These
+		// carry a commercial bank's deposits, escrows and redeems to its CB, so authenticating them by
+		// a secret identical in every entity meant any entity could drive another bank's tokenisation
+		// and redemption. The bank's proxy signs them; the secret remains for the migration window.
+		internal := app.Group("/internal/v1", middleware.RequireRelayAuthMigrating(deps.V2Deps.RelayAuth))
 
 		internalPayments := internal.Group("/payments")
-		internalPayments.Post("/deposits/exchange", deps.PaymentHandler.RequestFiatExchange)
-		internalPayments.Post("/deposits", deps.PaymentHandler.RegisterDeposit)
-		internalPayments.Get("/deposits", deps.PaymentHandler.ListDeposits)
-		internalPayments.Post("/escrows", deps.PaymentHandler.RequestEscrow)
-		internalPayments.Get("/escrows", deps.PaymentHandler.ListEscrows)
-		internalPayments.Post("/redeems", deps.PaymentHandler.RequestRedeem)
-		internalPayments.Get("/redeems", deps.PaymentHandler.ListRedeems)
+
+		// The creation routes are the write half of the same tenant boundary as the listings below,
+		// and they were open in the same way: requester_besu_address decides whose record is created
+		// and it arrived in the body, which the signature covers but does not attribute. The bank
+		// proxy injecting its own address protects honest proxy traffic only — an onboarded bank
+		// signs its own calls, so it could POST here naming another bank and have the record created
+		// against it. The field is therefore derived from the verified identity, exactly as
+		// requester_id is on the reads.
+		//
+		// The fiat exchange names no address to overwrite: it names a deposit, so it is bound by
+		// whose deposit that is.
+		scopeBodyToCaller := middleware.ScopeRequesterBodyToCaller(deps.V2Deps.RequesterScopeResolver)
+		internalPayments.Post("/deposits/exchange",
+			middleware.BindDepositToCaller(deps.V2Deps.RequesterScopeResolver, deps.PaymentHandler),
+			deps.PaymentHandler.RequestFiatExchange)
+		internalPayments.Post("/deposits", scopeBodyToCaller, deps.PaymentHandler.RegisterDeposit)
+		internalPayments.Post("/escrows", scopeBodyToCaller, deps.PaymentHandler.RequestEscrow)
+		internalPayments.Post("/redeems", scopeBodyToCaller, deps.PaymentHandler.RequestRedeem)
+		// The listing handlers are shared with the CB's own /api/v1/payments routes, where returning the
+		// whole book is the point. Here the caller is a single commercial bank, so requester_id is the
+		// tenant boundary — and it is therefore taken from the identity whose signature was verified,
+		// not from the query string, which no signature covers. A bank that signs a listing request and
+		// attaches another bank's address gets its own records back, and a caller with no verified
+		// identity gets none.
+		scopeToCaller := middleware.ScopeRequesterToCaller(deps.V2Deps.RequesterScopeResolver)
+		internalPayments.Get("/deposits", scopeToCaller, deps.PaymentHandler.ListDeposits)
+		internalPayments.Get("/escrows", scopeToCaller, deps.PaymentHandler.ListEscrows)
+		internalPayments.Get("/redeems", scopeToCaller, deps.PaymentHandler.ListRedeems)
 	}
 
 	// --- Internal spoke self-registration (hub only) ---

@@ -52,21 +52,36 @@ func Apply(ctx context.Context, o Options) (orchestrator.Report, error) {
 		f := res.Errors[0]
 		return orchestrator.Report{}, fmt.Errorf("invalid manifest: %s: %s", f.Field, f.Message)
 	}
+	var rep orchestrator.Report
 	// --rebuild makes every image-existence gate report "missing" for this run, so the
 	// build steps run against the current source instead of being skipped by tag.
 	orchestrator.SetForceImageRebuild(o.Rebuild)
 	switch pd.Spec.Mode {
 	case "found-hub":
-		return applyFoundHub(ctx, o, pd)
+		rep, err = applyFoundHub(ctx, o, pd)
 	case "found-spoke":
-		return applyFoundSpoke(ctx, o, pd)
+		rep, err = applyFoundSpoke(ctx, o, pd)
 	case "join":
-		return applyJoin(ctx, o, pd)
+		rep, err = applyJoin(ctx, o, pd)
 	case "observe":
-		return applyObserve(ctx, o, pd)
+		rep, err = applyObserve(ctx, o, pd)
 	default:
 		return orchestrator.Report{}, fmt.Errorf("unknown mode %q", pd.Spec.Mode)
 	}
+
+	// Report which directory this run actually used. node.dataDir is relative, so the same command from
+	// two working directories provisions two different entities — and the second one quietly mints a new
+	// identity. Naming the absolute path makes that visible in the output the operator already reads,
+	// including on the failure path, where it is most needed.
+	if rep.DataDir == "" {
+		// spec.node is absent in observe mode, so it cannot be dereferenced unconditionally.
+		manifestDataDir := ""
+		if pd.Spec.Node != nil {
+			manifestDataDir = pd.Spec.Node.DataDir
+		}
+		rep.DataDir = absOr(firstNonEmpty(o.DataDir, manifestDataDir, "."))
+	}
+	return rep, err
 }
 
 // applyObserve stands up an observe-mode NOC deployment: it consumes the NOC
@@ -114,7 +129,7 @@ func applyObserve(ctx context.Context, o Options, pd *manifest.ParticipantDeploy
 		KeycloakURL:     manifestNOCKeycloakURL(pd),   // portal VITE_KEYCLOAK_URL (CB/hub realm)
 		LauncherURL:     manifestNOCLauncherURL(pd),   // portal VITE_LAUNCHER_URL (back-to-launcher)
 		AMMGatewayURL:   manifestNOCAMMGatewayURL(pd), // backend AMM_GATEWAY_URL (Pool Stability)
-		ProxyEnabled:    pd.Spec.Proxy == "enable",  // serve portal + backend under the per-host proxy
+		ProxyEnabled:    pd.Spec.Proxy == "enable",    // serve portal + backend under the per-host proxy
 		// BackendPort/PortalPort fall back to the local convention in WithDefaults;
 		// spec.noc may carry explicit ports in a later phase.
 	}
@@ -159,7 +174,11 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 	// Relay is external (scenario-a strategy): its address comes from the manifest
 	// spec.relay.endpoint (an --relay flag overrides). Absent → local in-memory.
 	relayURI := firstNonEmpty(o.Relay, manifestRelayEndpoint(pd), "local")
-	reg, err := relayregistrar.New(relayURI)
+	// The relay authenticates POST /api/v1/spokes (finding R2-M-10), so the registrar has to
+	// carry the same credential the relay was started with: the env override first, then the
+	// value this toolkit injects into the relay's own compose environment.
+	relaySecret := firstNonEmpty(os.Getenv("INTERNAL_RELAY_AUTH_SECRET"), orchestrator.HubRelayAuthSecret)
+	reg, err := relayregistrar.NewWithSecret(relayURI, relaySecret)
 	if err != nil {
 		return orchestrator.Report{}, err
 	}
@@ -178,24 +197,31 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 	rpcPort, wsPort, p2pPort := nodePorts(pd.Spec.Node)
 	prefix := sanitizePrefix(pd.Metadata.Name) // e.g. "central-bank-brazil"
 	cfg := orchestrator.SpokeConfig{
-		ContractsDir:        filepath.Join(root, "scenario-b", "contracts"),
-		TemplatesDir:        filepath.Join(root, "scenario-b", "provisioning", "templates"),
-		OutDir:              outDir,
-		SpokeID:             pd.Spec.Spoke.ID,
-		SpokeChainID:        uint64(pd.Spec.Spoke.ChainID),
-		SpokeRPC:            firstNonEmpty(o.SpokeRPC, localRPC(rpcPort)),
-		SpokeWS:             firstNonEmpty(o.SpokeWS, localWS(wsPort)), // FR-008: first-class spoke WS (relay registration + bundle)
-		CBAddress:           o.CBAddress,
-		HubBundlePath:       hubBundlePath,
-		HubRPC:              hubRPC,
-		SpokeEnvFile:        filepath.Join(dataDir, ".env.spoke"),
-		KeycloakEnv:         []string{filepath.Join(dataDir, ".env.spoke")},
-		GatewayURL:          o.GatewayURL,
-		Registrar:           reg,
-		VolumePrefix:        prefix,
-		ContainerPrefix:     "sc-b-cbweb3-" + prefix,
-		NetPrefix:           prefix,
-		Entity:              firstNonEmpty(pd.Spec.Topology.Role, "central-bank"),
+		ContractsDir:    filepath.Join(root, "scenario-b", "contracts"),
+		TemplatesDir:    filepath.Join(root, "scenario-b", "provisioning", "templates"),
+		OutDir:          outDir,
+		SpokeID:         pd.Spec.Spoke.ID,
+		SpokeChainID:    uint64(pd.Spec.Spoke.ChainID),
+		SpokeRPC:        firstNonEmpty(o.SpokeRPC, localRPC(rpcPort)),
+		SpokeWS:         firstNonEmpty(o.SpokeWS, localWS(wsPort)), // FR-008: first-class spoke WS (relay registration + bundle)
+		CBAddress:       o.CBAddress,
+		HubBundlePath:   hubBundlePath,
+		HubRPC:          hubRPC,
+		HubChainID:      hub.ChainID,
+		SpokeEnvFile:    filepath.Join(dataDir, ".env.spoke"),
+		KeycloakEnv:     []string{filepath.Join(dataDir, ".env.spoke")},
+		GatewayURL:      o.GatewayURL,
+		Registrar:       reg,
+		VolumePrefix:    prefix,
+		ContainerPrefix: "sc-b-cbweb3-" + prefix,
+		NetPrefix:       prefix,
+		Entity:          firstNonEmpty(pd.Spec.Topology.Role, "central-bank"),
+		// The manifest name is unique by construction (the container prefix is built from it),
+		// which the topology role is not — every central bank shares the role "central-bank".
+		RelayKeyID: prefix,
+		// Same reasoning as RelayKeyID: the institution id must be unique per central bank, and
+		// the topology role is not. Every wallet this CB registers is stamped with this code.
+		InstitutionCode:     prefix,
 		RPCPort:             rpcPort,
 		WSPort:              wsPort,
 		P2PPort:             p2pPort,
@@ -238,14 +264,19 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 	// a re-apply skips re-registration. Not in dry-run (Check runs before the
 	// dry-run branch, so a live probe would be an effect) and only when the hub
 	// RPC + CB address are known.
-	if !o.DryRun && hubRPC != "" && o.CBAddress != "" {
+	// The probe must target the address register-cb will actually register: the CB's own
+	// derived hub identity, unless an operator pinned one via -cb-address. Probing the
+	// founder's address instead would report "already registered" for every CB and skip the
+	// registration of the one that matters.
+	if !o.DryRun && hubRPC != "" {
+		cbHubAddr := cfg.CBHubAddress()
 		identityRegistry := hub.Contracts["identityRegistry"]
 		// The probe runs in the HOST toolkit process, so localize the bundle's
 		// host.docker.internal hub RPC (a container sentinel) to localhost; a routable
 		// multi-VM hub RPC is left unchanged.
 		hubProbeRPC := orchestrator.HostReachable(hubRPC)
 		cfg.CBRegistered = func(ctx context.Context) (bool, error) {
-			return orchestrator.HubCBRegistered(ctx, hubProbeRPC, identityRegistry, o.CBAddress)
+			return orchestrator.HubCBRegistered(ctx, hubProbeRPC, identityRegistry, cbHubAddr)
 		}
 	}
 
@@ -318,34 +349,34 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 	rpcPort, wsPort, p2pPort := nodePorts(pd.Spec.Node)
 	prefix := sanitizePrefix(pd.Metadata.Name) // e.g. "bank-itau"
 	cfg := orchestrator.JoinConfig{
-		TemplatesDir:    filepath.Join(root, "scenario-b", "provisioning", "templates"),
-		OutDir:          outDir,
-		BankID:          pd.Spec.BankID,
-		Institution:     firstNonEmpty(pd.Spec.DisplayName, pd.Spec.BankID),
-		SpokeID:         pd.Spec.Spoke.ID,
-		SpokeChainID:    uint64(pd.Spec.Spoke.ChainID),
-		Currency:        pd.Spec.Spoke.Currency,                       // cross-checked against the spoke bundle in consume-spoke-bundle
-		BankRPC:         firstNonEmpty(o.SpokeRPC, localRPC(rpcPort)), // RPC of the bank's own node (wait-sync gate)
-		SpokeBundlePath: bundlePath,
-		DataDir:         dataDir,
-		BankEnvFile:     filepath.Join(dataDir, ".env.bank"),
-		KeycloakEnv:     []string{filepath.Join(dataDir, ".env.bank")},
-		VolumePrefix:    prefix,
-		ContainerPrefix: "sc-b-cbweb3-" + prefix,
-		NetPrefix:       prefix,
-		Entity:          prefix,
-		RPCPort:         rpcPort,
-		WSPort:          wsPort,
-		P2PPort:         p2pPort,
-		HubRPC:          firstNonEmpty(o.HubRPC, sb.HubRPC), // routable hub RPC from the spoke bundle
-		RelayEndpoint:      manifestRelayEndpoint(pd),      // the relay's own REST endpoint → CACTI_API_URL
-		RelayContainerName: manifestRelayContainerName(pd), // relay container for noc-agent log collection
-		NOCBackendURL:      manifestNOCBackendURL(pd),      // where this bank's noc-agent pushes
-		FrontendHost:    pd.Spec.FrontendHost,
-		LauncherEnabled: pd.Spec.Launcher == "enable",
-		LauncherPort:    pd.Spec.LauncherPort,
-		AdminUsers:      toOrchestratorAdminUsers(pd.Spec.AdminUsers),
-		ProxyEnabled:    pd.Spec.Proxy == "enable",
+		TemplatesDir:       filepath.Join(root, "scenario-b", "provisioning", "templates"),
+		OutDir:             outDir,
+		BankID:             pd.Spec.BankID,
+		Institution:        firstNonEmpty(pd.Spec.DisplayName, pd.Spec.BankID),
+		SpokeID:            pd.Spec.Spoke.ID,
+		SpokeChainID:       uint64(pd.Spec.Spoke.ChainID),
+		Currency:           pd.Spec.Spoke.Currency,                       // cross-checked against the spoke bundle in consume-spoke-bundle
+		BankRPC:            firstNonEmpty(o.SpokeRPC, localRPC(rpcPort)), // RPC of the bank's own node (wait-sync gate)
+		SpokeBundlePath:    bundlePath,
+		DataDir:            dataDir,
+		BankEnvFile:        filepath.Join(dataDir, ".env.bank"),
+		KeycloakEnv:        []string{filepath.Join(dataDir, ".env.bank")},
+		VolumePrefix:       prefix,
+		ContainerPrefix:    "sc-b-cbweb3-" + prefix,
+		NetPrefix:          prefix,
+		Entity:             prefix,
+		RPCPort:            rpcPort,
+		WSPort:             wsPort,
+		P2PPort:            p2pPort,
+		HubRPC:             firstNonEmpty(o.HubRPC, sb.HubRPC), // routable hub RPC from the spoke bundle
+		RelayEndpoint:      manifestRelayEndpoint(pd),          // the relay's own REST endpoint → CACTI_API_URL
+		RelayContainerName: manifestRelayContainerName(pd),     // relay container for noc-agent log collection
+		NOCBackendURL:      manifestNOCBackendURL(pd),          // where this bank's noc-agent pushes
+		FrontendHost:       pd.Spec.FrontendHost,
+		LauncherEnabled:    pd.Spec.Launcher == "enable",
+		LauncherPort:       pd.Spec.LauncherPort,
+		AdminUsers:         toOrchestratorAdminUsers(pd.Spec.AdminUsers),
+		ProxyEnabled:       pd.Spec.Proxy == "enable",
 	}
 	cfg.WithDefaults()
 	if o.DryRun {

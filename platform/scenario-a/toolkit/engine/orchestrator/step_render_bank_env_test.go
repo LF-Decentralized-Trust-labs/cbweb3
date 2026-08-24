@@ -46,11 +46,21 @@ func TestRenderBankEnvStep_CommercialBankMode(t *testing.T) {
 		"PARTICIPANT_REGISTRY_ADDRESS=0xREG",
 		"CENTRAL_BANK_API_URL=http://cbweb3-api-gateway.central-bank-brazil:8080",
 		"BESU_RPC_URL=http://host.docker.internal:8646",
-		"POSTGRES_DSN=postgres://default:default@cbweb3-bank-itau-postgres",
+		"POSTGRES_DSN=postgres://default:",
 	} {
 		if !strings.Contains(env, want) {
 			t.Errorf("rendered env missing %q", want)
 		}
+	}
+
+	// The DSN must carry a generated password, not the constant every entity used to
+	// share. Asserting the absence is the point: a future "simplification" back to a
+	// literal would still satisfy a shape-only check.
+	if strings.Contains(env, "postgres://default:default@") {
+		t.Error("DSN still carries the shared literal password")
+	}
+	if !strings.Contains(env, "@cbweb3-bank-itau-postgres") {
+		t.Error("DSN lost its postgres host")
 	}
 
 	// A commercial bank holds no governance key and issues no certificates.

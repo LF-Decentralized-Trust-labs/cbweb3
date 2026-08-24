@@ -1,59 +1,64 @@
 # make/60-scenario-b.mk — Scenario B (Hub-and-Spoke Liquidity Pool) orchestration.
 #
-# Scenario B reuses the transverse infrastructure of Scenario A:
-#   * Keycloak + Postgres + Redis   (deploy.up-infra)
-#   * Hub Besu     (independent network, chain 1337, RPC port 8845)
-#   * Spoke-A Besu  (deploy.up-spoke-a, chain 1338, RPC port 8645)
-#   * Spoke-B Besu  (deploy.up-spoke-b, chain 1339, RPC port 8745)
-#   * Hyperledger Cacti Relayer    (scenario-b.up-relayer)
+# The stack is brought up by the TOOLKIT — `samples/deploy-all.sh`, which runs
+# `cbweb3b apply` per entity. The legacy `deploy/local` bring-up that used to live in
+# make/10-deploy.mk and make/15-dev.mk was removed: it duplicated the toolkit and kept
+# falling behind it (the Besu pin never reached it, credentials and Redis auth only did
+# because one PR touched both trees).
 #
-# The Hub runs on its own Besu network (chain 1337) for AMM contracts, fully
-# isolated from the spokes. Override BESU_HUB_RPC in the env to point at a
-# different Hub endpoint.
+# What remains here are the targets that act ON a running stack rather than create one:
+# contracts, tryouts, performance baselines, evidence capture, tests and Postman. They
+# find the stack through URLs and ports, so they work against whatever provisioned it —
+# but their DEFAULTS still point at the ports the legacy stack published (hub 8845,
+# spokes 8645/8745). Pointing them at the toolkit's ports is tracked in the migration
+# card for this suite; until then, pass the URLs explicitly.
+#
+# The Hub runs on its own Besu network for the AMM contracts, isolated from the spokes —
+# see docs/decisions/ADR-006. Override BESU_HUB_RPC to point at a different Hub.
 
 # ── Feature toggle: MLP Path B ──────────────────────────────────────────────────
-# Loaded from deploy/local/.env (gitignored). Copy from deploy/local/.env.example.
--include deploy/local/.env
 export ENABLE_MLP
 export MLP_ADDRESS
 
-# ── RPC defaults (override via env) ──────────────────────────────────────────
-BESU_HUB_RPC ?= http://localhost:8845
-SPOKE_A_RPC  ?= http://localhost:8645
-SPOKE_B_RPC  ?= http://localhost:8745
-KEYCLOAK_URL    ?= http://localhost:8081
-API_GW_URL      ?= http://localhost:18080
-API_GW_BANK_A_URL         ?= http://localhost:18080
-API_GW_BANK_B_URL         ?= http://localhost:28080
-API_GW_CENTRAL_BANK_A_URL ?= http://localhost:38080
-API_GW_CENTRAL_BANK_B_URL ?= http://localhost:60080
-CACTI_RELAYER_URL ?= http://localhost:4000
-
+# ── Endpoints for the tryouts ────────────────────────────────────────────────
+# The defaults that used to live here were the legacy deploy/local ports
+# (18080/28080/38080/60080, spokes 8645/8745, Keycloak 8081, relay 4000). That
+# bring-up was removed, so they injected addresses nothing answers on — and because
+# they were injected, they OVERRODE whatever the tryout derived for itself.
+#
+# The tryout now sources tests/integration/toolkit-env.sh, which reads the same
+# manifests the toolkit was applied with. Anything set on the command line still wins,
+# so only the values that actually differ have to be named:
+#
+#   make scenario-b.tryout-us1 API_GW_BANK_A_URL=http://localhost:41646
+#
+# SCENARIO_B_ENV forwards only what a caller explicitly set; unset variables are left
+# alone so the deriver can fill them.
 SCENARIO_B_ENV := \
-	BESU_HUB_RPC=$(BESU_HUB_RPC) \
-	SPOKE_A_RPC=$(SPOKE_A_RPC) \
-	SPOKE_B_RPC=$(SPOKE_B_RPC) \
-	KEYCLOAK_URL=$(KEYCLOAK_URL) \
-	API_GW_URL=$(API_GW_URL) \
-	CACTI_RELAYER_URL=$(CACTI_RELAYER_URL)
+	$(if $(BESU_HUB_RPC),BESU_HUB_RPC=$(BESU_HUB_RPC),) \
+	$(if $(SPOKE_A_RPC),SPOKE_A_RPC=$(SPOKE_A_RPC),) \
+	$(if $(SPOKE_B_RPC),SPOKE_B_RPC=$(SPOKE_B_RPC),) \
+	$(if $(API_GW_BANK_A_URL),API_GW_BANK_A_URL=$(API_GW_BANK_A_URL),) \
+	$(if $(API_GW_CENTRAL_BANK_A_URL),API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL),) \
+	$(if $(API_GW_CENTRAL_BANK_B_URL),API_GW_CENTRAL_BANK_B_URL=$(API_GW_CENTRAL_BANK_B_URL),) \
+	$(if $(CACTI_RELAYER_URL),CACTI_RELAYER_URL=$(CACTI_RELAYER_URL),) \
+	$(if $(POOL_PAIR),POOL_PAIR=$(POOL_PAIR),)
 
 # ── Infrastructure (reuses Scenario A infra) ─────────────────────────────────
 
 scenario-b.prepare-pki: pki.gen-all
 	@echo "[scenario-b] PKI prepared (idempotent; use FORCE=1 to regenerate)"
 
-scenario-b.up-infra: deploy.up-infra deploy.up-besu
-	@echo "[scenario-b] shared infra + besu spokes up"
 
-scenario-b.down-infra: deploy.down-besu deploy.down-infra
-	@echo "[scenario-b] shared infra + besu spokes down"
 
 # ── Relayer (Cacti) ──────────────────────────────────────────────────────────
 
-scenario-b.up-relayer: cacti-up
+scenario-b.up-relayer:
+	@bash provisioning/scripts/start-cacti.sh
 	@echo "[scenario-b] Cacti Relayer up at $(CACTI_RELAYER_URL)"
 
-scenario-b.down-relayer: cacti-down
+scenario-b.down-relayer:
+	@docker compose -p cacti down -v --remove-orphans
 	@echo "[scenario-b] Cacti Relayer down"
 
 # ── Contracts (AMM on Hub, SpokeBridge on each Spoke) ────────────────────────
@@ -106,10 +111,8 @@ scenario-b.build-backend-images:
 	@echo "[scenario-b] building backend Docker images (compliance, auth, payment-orchestrator, api-gateway)..."
 	@bash $(CURDIR)/build-backend-images.sh $(or $(TAG),local) $(or $(VERSION),latest)
 
-scenario-b.up-backend: scenario-b.build-backend-images deploy.up-backend-entities
-	@echo "[scenario-b] backend services (api-gateway v2, payment-orchestrator, compliance) up"
 
-scenario-b.down-backend: deploy.down-backend-entities
+
 # ── MLP backend services (opt-in: ENABLE_MLP=true) ───────────────────────────
 
 scenario-b.up-backend-mlp:
@@ -137,7 +140,7 @@ scenario-b.up-fx-feeder:
 	@if [ -f $(FX_FEEDER_PID) ] && kill -0 $$(cat $(FX_FEEDER_PID)) 2>/dev/null; then \
 	  echo "  already running (pid $$(cat $(FX_FEEDER_PID)))"; \
 	else \
-	  DURATION_SECS=0 nohup ./deploy/local/tools/mock-fx-feeder.sh > $(FX_FEEDER_LOG) 2>&1 & \
+	  DURATION_SECS=0 nohup ./tools/mock-fx-feeder.sh > $(FX_FEEDER_LOG) 2>&1 & \
 	  echo $$! > $(FX_FEEDER_PID); \
 	  echo "  started (pid $$(cat $(FX_FEEDER_PID))) — log: $(FX_FEEDER_LOG)"; \
 	fi
@@ -153,20 +156,13 @@ scenario-b.down-fx-feeder:
 # down-fx-feeder runs first: the feeder signs setRate with the admin/deployer key, the
 # same account forge uses in deploy-contracts — a stale feeder from a prior `up` would
 # race the deploy's nonce. up-fx-feeder restarts it fresh at the end.
-scenario-b.up: scenario-b.down-fx-feeder scenario-b.prepare-pki scenario-b.up-infra scenario-b.deploy-contracts scenario-b.up-relayer scenario-b.up-backend scenario-b.up-fx-feeder noc.setup-keycloak noc.up noc.setup-agents
-	@echo "[scenario-b] full stack up — ready for tryout (bash tryouts/tryout-scenario-b-e2e.sh)"
 
 # Perf-lean bring-up: the full settlement stack (infra + contracts + relayer + backend +
 # fx-feeder) WITHOUT the NOC operations portal (noc.setup-keycloak/noc.up/noc.setup-agents).
 # The NOC portal is a monitoring frontend and is not on the perf path; excluding it keeps the
 # R1-12.3 perf harness (scenario-b.perf-all) from depending on the NOC frontend build.
-scenario-b.up-perf: scenario-b.down-fx-feeder scenario-b.prepare-pki scenario-b.up-infra scenario-b.deploy-contracts scenario-b.up-relayer scenario-b.up-backend scenario-b.up-fx-feeder
-	@echo "[scenario-b] perf stack up (no NOC portal) — ready for make scenario-b.perf-all"
 
-scenario-b.down: scenario-b.down-fx-feeder scenario-b.down-backend scenario-b.down-relayer scenario-b.down-infra noc.down
-	@echo "[scenario-b] full stack down"
 
-scenario-b.restart: scenario-b.down scenario-b.up
 
 # ── Full wipe ────────────────────────────────────────────────────────────────
 # scenario-b.nuke — best-effort total teardown for a guaranteed clean slate.
@@ -177,8 +173,6 @@ scenario-b.restart: scenario-b.down scenario-b.up
 # All steps are best-effort (errors ignored) so it always reaches the force-clean.
 scenario-b.nuke:
 	@echo "[scenario-b] NUKE — tearing down the entire stack + volumes..."
-	-@$(MAKE) scenario-b.down
-	-@$(MAKE) noc.down
 	-@$(MAKE) frontend-scenario-b-down
 	@echo "[scenario-b] force-removing any leftover containers..."
 	-@docker rm -f $$(docker ps -aq --filter name=cbweb3 --filter name=backend-) 2>/dev/null || true
@@ -187,8 +181,8 @@ scenario-b.nuke:
 	@echo "[scenario-b] verifying clean state..."
 	@docker ps -a --format '{{.Names}}' | grep -E 'cbweb3|backend-' && echo "  WARN: containers still present (see above)" || echo "  OK: no cbweb3 containers"
 	@docker volume ls --format '{{.Name}}' | grep -E 'local_postgres_data' && echo "  WARN: postgres volume still present" || echo "  OK: no postgres volume"
-	@ls -d deploy/local/*/nodes/*/data 2>/dev/null && echo "  WARN: besu chain data still present" || echo "  OK: no besu chain data"
-	@echo "[scenario-b] nuke complete — run 'make scenario-b.up' for a fresh stack"
+	@docker volume ls --format '{{.Name}}' | grep -E '_besu_data|_genesis' && echo "  WARN: besu volumes still present (toolkit-provisioned state)" || echo "  OK: no besu volumes"
+	@echo "[scenario-b] nuke complete — bring a fresh stack up with: cd samples && ./deploy-all.sh"
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -220,45 +214,65 @@ scenario-b.tryout-us2:
 scenario-b.tryout-us3:
 	@$(SCENARIO_B_ENV) bash tryouts/tryout-scenario-b-e2e.sh us3
 
-# ── Integration test (full happy-path API test) ──────────────────────────────
+# us5 and us6 have always been dispatchable in the script — its own help names them —
+# but no target invoked them, so the PairRegistry and CurrencyRegistry stories were
+# unreachable through make and never ran.
+scenario-b.tryout-us5:
+	@$(SCENARIO_B_ENV) bash tryouts/tryout-scenario-b-e2e.sh us5
 
-SKIP_UP   ?= 1
+scenario-b.tryout-us6:
+	@$(SCENARIO_B_ENV) bash tryouts/tryout-scenario-b-e2e.sh us6
+
+# ── Integration test (full happy-path API test) ──────────────────────────────
+# This target does NOT provision. Bring a stack up first:
+#   cd samples && ./deploy-all.sh
+#
+# Endpoints, Besu RPCs and operator logins are DERIVED from the toolkit manifests by
+# tests/integration/toolkit-env.sh — defaults follow samples/deploy-all.sh (Brazil =
+# spoke-a, Argentina = spoke-b, through the neutral hub). Anything passed on the
+# command line or exported wins over the derived value, e.g.
+#
+#   make scenario-b.test-integration API_GW_BANK_A_URL=http://localhost:41646
+#   CB_B_MANIFEST=/path/to/cb.yaml make scenario-b.test-integration
+#
+# SKIP_UP is gone: the suite can no longer create or destroy a stack.
 SKIP_DOWN ?= 1
 
-scenario-b.test-integration: ## Run full happy-path API integration test against a live stack
-	@echo "[scenario-b] running integration test (full happy path)..."
-ifeq ($(SKIP_UP),0)
-	@echo "[scenario-b] bringing stack up (SKIP_UP=0)..."
-	@$(MAKE) scenario-b.up
-endif
-	@cd tests/integration && \
-	  SKIP_UP=1 \
-	  SKIP_DOWN=$(SKIP_DOWN) \
-	  KEYCLOAK_URL=$(KEYCLOAK_URL) \
-	  API_GW_BANK_A_URL=$(API_GW_BANK_A_URL) \
-	  API_GW_BANK_B_URL=$(API_GW_BANK_B_URL) \
-	  API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL) \
-	  API_GW_CENTRAL_BANK_B_URL=$(API_GW_CENTRAL_BANK_B_URL) \
+TOOLKIT_ENV := tests/integration/toolkit-env.sh
+
+scenario-b.test-integration: ## Run the happy-path test against an ALREADY-RUNNING toolkit stack
+	@echo "[scenario-b] deriving endpoints from the toolkit manifests..."
+	@# The script runs under BASH and its `export …` output is eval'd, rather than
+	@# sourced: recipes run under /bin/sh (dash here), which rejects the script's
+	@# `set -o pipefail`. Values are printf %q-quoted, so the eval is safe.
+	@eval "$$(bash ./$(TOOLKIT_ENV))"; \
+	  if ! curl -sf -o /dev/null --max-time 5 "$$API_GW_BANK_A_URL/healthz"; then \
+	    echo "[scenario-b] no stack answering at $$API_GW_BANK_A_URL."; \
+	    echo "[scenario-b] Bring one up with the toolkit first:  cd samples && ./deploy-all.sh"; \
+	    exit 1; \
+	  fi; \
+	  echo "[scenario-b] stack detected — running the full happy path..."; \
+	  cd tests/integration && \
+	  SKIP_UP=1 SKIP_DOWN=$(SKIP_DOWN) \
 	  $(if $(EVIDENCE_DIR),EVIDENCE_DIR=$(EVIDENCE_DIR),) \
-	  BESU_HUB_RPC=$(BESU_HUB_RPC) \
-	  BESU_SPOKE_B_RPC=$(BESU_SPOKE_B_RPC) \
 	  go test -v -count=1 -tags integration -timeout 30m -run TestFullHappyPath ./...
+
+scenario-b.test-integration-env: ## Print the endpoints/credentials the happy-path test would use
+	@bash $(TOOLKIT_ENV)
 
 # ── On-chain evidence capture (D12 P0-D12-1) ─────────────────────────────────
 # Run the instrumented happy path against a live stack so the harness records each
 # step's tx_hash + block_number + gas_used from the Besu RPC, then regenerate the
 # machine-readable evidence bundle with those populated on-chain fields.
-BESU_HUB_RPC     ?= http://localhost:8845
-BESU_SPOKE_B_RPC ?= http://localhost:8745
 EVIDENCE_DIR     ?= $(CURDIR)/../evidence-bundles/_harness
 
 evidence.e2e-b: ## Capture live on-chain evidence (tx_hash/block/gas) and regenerate the Scenario B bundle
 	@echo "[scenario-b] capturing on-chain evidence to $(EVIDENCE_DIR)..."
 	@mkdir -p "$(EVIDENCE_DIR)"
-	@$(MAKE) scenario-b.test-integration \
-	  EVIDENCE_DIR="$(EVIDENCE_DIR)" \
-	  BESU_HUB_RPC=$(BESU_HUB_RPC) \
-	  BESU_SPOKE_B_RPC=$(BESU_SPOKE_B_RPC)
+	@# The Besu RPCs are no longer forwarded here: toolkit-env.sh derives them from the
+	@# same manifests as the gateways, so a hand-passed value could disagree with the
+	@# topology under test. A command-line override still reaches the sub-make.
+	@$(MAKE) scenario-b.test-integration EVIDENCE_DIR="$(EVIDENCE_DIR)"
 	@echo "[scenario-b] folding capture into the Scenario B evidence bundle..."
 	@python3 ../tools/gen_evidence_bundles.py e2e-scenario-b
 
@@ -325,11 +339,23 @@ scenario-b.perf-soak:
 	 DURATION=$${DURATION:-12h} \
 	 bash tests/performance/run-soak.sh
 
-# ── OpenAPI validation (T108) ────────────────────────────────────────────────
+# ── API artifacts: OpenAPI validation + Postman generation (T108, R1-§8) ─────
+#
+# apis/postman/generate.sh is the supported entry point and the one CI runs —
+# these three targets are thin aliases for its modes, kept because the surrounding
+# make surface still documents them. It pins redocly and the Postman converter to
+# exact versions; the previous target linted an unwired fragment with @latest and,
+# because of a `||` guard, skipped linting entirely whenever redocly was installed.
 
 scenario-b.validate-openapi:
-	@command -v redocly >/dev/null 2>&1 || npx --yes @redocly/cli@latest lint \
-		backend/services/api-gateway/openapi/v2/scenario-b.yaml
+	@bash apis/postman/generate.sh --lint-only
+
+scenario-b.gen-postman:
+	@bash apis/postman/generate.sh
+
+# Fails when the committed collection no longer matches the served spec.
+scenario-b.check-postman:
+	@bash apis/postman/generate.sh --check
 
 .PHONY: \
 	scenario-b.up-infra scenario-b.down-infra \
@@ -342,7 +368,9 @@ scenario-b.validate-openapi:
 	scenario-b.up scenario-b.up-perf scenario-b.down scenario-b.restart scenario-b.nuke \
 	scenario-b.test-contracts scenario-b.test-backend scenario-b.test \
 	scenario-b.tryout scenario-b.tryout-us1 scenario-b.tryout-us2 scenario-b.tryout-us3 \
-	scenario-b.test-integration evidence.e2e-b \
+	scenario-b.tryout-us5 scenario-b.tryout-us6 \
+	scenario-b.test-integration scenario-b.test-integration-env evidence.e2e-b \
 	scenario-b.perf-baseline scenario-b.validate-openapi \
+	scenario-b.gen-postman scenario-b.check-postman \
 	scenario-b.perf-amm-throughput scenario-b.perf-transfer \
 	scenario-b.perf-zeto scenario-b.perf-soak scenario-b.perf-all scenario-b.perf-smoke

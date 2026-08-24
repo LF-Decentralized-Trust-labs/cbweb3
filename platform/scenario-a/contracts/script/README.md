@@ -31,9 +31,9 @@ The script is **idempotent** — it skips addresses that are already registered.
 
 | Command | Path |
 |---|---|
-| `make spoke-all` | `contracts.register-participants-spoke-{a,b}` |
-| `make spoke-a` / `make spoke-b` | per-spoke target after `sync-addresses` |
-| `make dev.up` | via `contracts.deploy-all-with-sync` |
+| `cd samples && ./deploy-all.sh` (the toolkit) | `contracts.register-participants-spoke-{a,b}` |
+| _(no per-spoke bring-up target: retired with `deploy/local`)_ | — |
+| _(the toolkit deploys the contracts as its own step)_ | — |
 
 ### Running manually
 

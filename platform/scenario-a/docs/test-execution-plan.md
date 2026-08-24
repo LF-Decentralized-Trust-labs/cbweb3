@@ -112,13 +112,21 @@ The following are explicitly **out of scope**:
 
 > Total: **~9 weeks** from mobilization to submission. Actual calendar dates are to be agreed with the IDB Technical Committee.
 
+> **What actually happened is recorded elsewhere.** The windows above are the plan. Absolute
+> dates per phase, the deviations from this schedule, and the phases not yet started are in
+> [`docs/deliverables/D12-timeline-actuals.md`](../../docs/deliverables/D12-timeline-actuals.md).
+> Defects found by the executed phases are in
+> [`docs/deliverables/D12-defect-log.md`](../../docs/deliverables/D12-defect-log.md), and the
+> Phase 5 record and sign-off formats are in
+> [`docs/deliverables/D12-uat-records.md`](../../docs/deliverables/D12-uat-records.md).
+
 ### Phase Checklists
 
 #### Phase 0 — Mobilization (Week 1)
 
 **LNET:** deploy test environment · **Banks:** confirm UAT participants and schedule
 
-- [ ] Devnet deployed (`make spoke-all`)
+- [ ] Devnet deployed (`cd samples && ./deploy-all.sh`)
 - [ ] All 6 API gateways healthy (`/healthz` 200 OK)
 - [ ] Test participant accounts provisioned and registered in IdentityRegistry with `Verified` status
 - [ ] tCeBM initial balances seeded per entity
@@ -152,9 +160,7 @@ The following are explicitly **out of scope**:
 - [ ] `tryout-spoke-a-bank-a.sh` — Spoke-A onboarding + lifecycle
 - [ ] `tryout-spoke-b-bank-b.sh` — Spoke-B onboarding + lifecycle
 - [ ] `tryout-fx-agreement-e2e.sh` — Full HTLC cross-spoke settlement (happy path + timeout refund)
-- [ ] `tryout-escrow-flow.sh` — Full deposit → escrow → redeem
 - [ ] `tryout-cacti-interop.sh` — Cacti relay health and event propagation
-- [ ] `tryout-compliance-participants.sh` — Compliance and AML screening
 - [ ] Interoperability resilience scenarios: relay downtime, network partition, duplicate messages
 - [ ] Evidence bundle generated per flow
 
@@ -245,7 +251,7 @@ Validates coordination between components with live local infrastructure.
 
 ### End-to-End (E2E) Testing
 
-Validates complete user journeys via the REST API against a full running stack (`make spoke-all`).
+Validates complete user journeys via the REST API against a full running stack (`cd samples && ./deploy-all.sh`, the toolkit path).
 
 All E2E tests follow the **API-First** approach: no UI interaction; assertions are made against both the API response and direct on-chain state via `eth_getLogs` and contract read functions.
 
@@ -254,15 +260,10 @@ Existing E2E scripts (in `scenario-a/tryouts/`):
 | Script | Flow |
 |--------|------|
 | `tryout-spoke-a-bank-a.sh` | Onboarding + token lifecycle (bank-a, Spoke-A) |
-| `tryout-spoke-a-bank-c.sh` | Onboarding + token lifecycle (bank-c, Spoke-A) |
 | `tryout-spoke-b-bank-b.sh` | Onboarding + token lifecycle (bank-b, Spoke-B) |
-| `tryout-spoke-b-bank-d.sh` | Onboarding + token lifecycle (bank-d, Spoke-B) |
 | `tryout-fx-agreement-e2e.sh` | Full FX Agreement + HTLC cross-spoke settlement |
-| `tryout-escrow-flow.sh` | Full deposit → escrow → redeem lifecycle |
 | `tryout-cacti-interop.sh` | Cacti relay health + PluginLedgerConnectorBesu validation |
-| `tryout-compliance-participants.sh` | Participant compliance screening |
 | `tryout-internal-relay-auth.sh` | Internal relay authentication |
-| `tryout-my-onboarding-status.sh` | Onboarding status polling |
 
 ---
 
@@ -356,9 +357,9 @@ The Hyperledger Cacti relay operates between Spoke-A and Spoke-B, subscribing to
 ### Devnet (Local Docker Compose)
 
 - **Purpose**: CI/CD pipeline execution, unit/integration tests, rapid iteration
-- **Persistence**: Ephemeral — spun up fresh per test run via `make spoke-all`
+- **Persistence**: Ephemeral — spun up fresh per test run via `cd samples && ./deploy-all.sh`
 - **Seeding**: initialization scripts register test participants, mint initial tCeBM balances
-- **Teardown**: `make spoke-all-down` destroys all state; `make deploy.down-infra` removes volumes
+- **Teardown**: `cd samples && ./deploy-all.sh --clean` destroys all state, host-wide (every container and volume on the machine, then the data dirs)
 - **Readiness criteria**: all 6 API gateways return 200 on `/healthz`; Besu RPC reports blocks advancing; Cacti relay health endpoint 200 OK
 
 ### Testnet (Staging)
@@ -528,11 +529,10 @@ To be triggered every night against the persistent Testnet (staging) environment
 
 ```bash
 # Full backend stack
-cd scenario-a && make spoke-all
+cd scenario-a/samples && ./deploy-all.sh
 
 # E2E flows
 ./tryouts/tryout-fx-agreement-e2e.sh
-./tryouts/tryout-escrow-flow.sh
 ./tryouts/tryout-cacti-interop.sh
 ./tryouts/tryout-spoke-a-bank-a.sh
 ./tryouts/tryout-spoke-b-bank-b.sh
@@ -610,6 +610,6 @@ cd scenario-b/contracts && forge test -vv
 cd scenario-b/backend && go test ./...
 
 # Full E2E
-cd scenario-b && make scenario-b.up
+cd scenario-b/samples && ./deploy-all.sh
 bash tryouts/tryout-scenario-b-e2e.sh all
 ```

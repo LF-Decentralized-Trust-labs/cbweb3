@@ -106,8 +106,8 @@ func TestRegisterCBSelfRegistersViaHub(t *testing.T) {
 	if gotPath != "/internal/v1/spokes/register" {
 		t.Fatalf("wrong path: %s", gotPath)
 	}
-	if gotAuth != hubRelayAuthSecret {
-		t.Fatalf("X-Relay-Auth = %q, want %q", gotAuth, hubRelayAuthSecret)
+	if gotAuth != HubRelayAuthSecret {
+		t.Fatalf("X-Relay-Auth = %q, want %q", gotAuth, HubRelayAuthSecret)
 	}
 	if !strings.Contains(gotBody, "ROLE_CENTRAL_BANK") || !strings.Contains(gotBody, "cb_address") {
 		t.Fatalf("payload missing fields: %s", gotBody)
@@ -531,6 +531,9 @@ func TestFoundSpokeOrder(t *testing.T) {
 	}
 	must("consume-hub-bundle", "register-cb")
 	must("register-cb", "register-currency")
+	// The separation needs the W-token to exist and the handover to have made this CB its
+	// administrator, both of which register-currency produces.
+	must("register-currency", "separate-token-admin")
 	must("gen-genesis-spoke", "start-besu-spoke")
 	must("start-besu-spoke", "deploy-spoke-contracts")
 	must("deploy-spoke-contracts", "emit-spoke-bundle")

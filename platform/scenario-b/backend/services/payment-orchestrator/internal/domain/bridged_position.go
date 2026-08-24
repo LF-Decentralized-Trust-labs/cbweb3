@@ -75,7 +75,19 @@ type BridgedAssetPosition struct {
 	// unbacked tCeBM twice against a single Hub burn. Mirror field; the api-gateway owns the
 	// AutoMigrate for the shared bridged_asset_positions table.
 	SpokeMintTxHash string `gorm:"column:spoke_mint_tx_hash;default:''"`
+	// SpokeFundTxHash is the confirmed Spoke-side mint that funded THIS position's sovereign
+	// lock. Before it existed, the relayer decided whether to mint by reading the signer's
+	// balance: a position whose predecessor had left tokens on that address locked those
+	// instead of minting its own, so the CB's tCeBM supply stopped corresponding to positions.
+	// Recorded on broadcast, like the burn/mint hashes above, so a retry reconciles by hash
+	// instead of funding twice.
+	SpokeFundTxHash string `gorm:"column:spoke_fund_tx_hash;default:''"`
 	// CorrelationID links the position to the cross-currency swap operation (009) for tracing.
+	// On an inbound position this is also the replay key: unique per correlation id among
+	// direction=IN rows (partial unique index, owned by the api-gateway migration like the
+	// swap_tx_hash one above). A second IN row for a correlation the gateway already opened
+	// is a duplicate bridge-in — one notification, two tCeBM burns — and the database will
+	// refuse it. Outbound legs of the same swap share the correlation freely.
 	CorrelationID string    `gorm:"column:correlation_id;default:''"`
 	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime"`

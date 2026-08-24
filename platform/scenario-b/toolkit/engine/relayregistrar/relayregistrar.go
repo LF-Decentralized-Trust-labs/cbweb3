@@ -37,6 +37,11 @@ var (
 	ErrUnsupportedURI = errors.New("relayregistrar: unsupported factory URI")
 	ErrInvalidSpoke   = errors.New("relayregistrar: invalid spoke (id/rpc/ws/gateway required)")
 	ErrNotImplemented = errors.New("relayregistrar: production registrar requires a relay endpoint")
+	// ErrMissingSecret is returned when a live registrar has no X-Relay-Auth credential.
+	// The relay guards POST /api/v1/spokes (finding R2-M-10), so posting without the header
+	// would be refused there; failing here names the missing configuration instead of
+	// surfacing as an opaque 401 in the middle of provisioning.
+	ErrMissingSecret = errors.New("relayregistrar: live registrar requires INTERNAL_RELAY_AUTH_SECRET")
 )
 
 func validate(s Spoke) error {

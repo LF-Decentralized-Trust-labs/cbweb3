@@ -10,7 +10,8 @@
 #   KC_DB_URL             jdbc url to the entity's Postgres (e.g. jdbc:postgresql://<prefix>-postgres:5432/<db>)
 #   KC_DB_USERNAME / KC_DB_PASSWORD
 #   KEYCLOAK_IMAGE        Keycloak image (pinned)
-# OPTIONAL: KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD (default admin/admin)
+# OPTIONAL: KC_BOOTSTRAP_ADMIN_USERNAME (default admin), KEYCLOAK_IMAGE
+# REQUIRED (generated per entity, no fallback): KC_DB_PASSWORD, KC_BOOTSTRAP_ADMIN_PASSWORD
 #
 # STORAGE: the rendered realm JSON files are seeded by the engine directly into
 # the ${ENTITY_INFRA_PREFIX}_keycloak_import named volume (engine/dockervolume,
@@ -25,11 +26,17 @@ services:
     command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}
+      # Generated per entity by the engine and readable from
+      # <dataDir>/.infra-secrets.env. admin/admin used to be every entity's console
+      # login, in local labs and on VMs alike.
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?KC_BOOTSTRAP_ADMIN_PASSWORD is required}
       KC_DB: postgres
       KC_DB_URL: ${KC_DB_URL:?KC_DB_URL is required}
       KC_DB_USERNAME: ${KC_DB_USERNAME:-default}
-      KC_DB_PASSWORD: ${KC_DB_PASSWORD:-default}
+      # Must match the password the entity's Postgres was initialised with. A default
+      # here surfaces as a five-minute readiness timeout rather than an auth error, so
+      # it is required instead.
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD:?KC_DB_PASSWORD is required}
       KC_HEALTH_ENABLED: "true"
       KC_HTTP_ENABLED: "true"
     ports:

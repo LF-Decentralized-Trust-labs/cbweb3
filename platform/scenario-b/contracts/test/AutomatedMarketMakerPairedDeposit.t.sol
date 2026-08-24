@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {AutomatedMarketMaker} from "../src/AutomatedMarketMaker.sol";
@@ -282,7 +282,7 @@ contract AutomatedMarketMakerPairedDepositTest is Test {
     // ---------- helpers ----------
 
     function _register(address who, string memory name, IdentityRegistryLibrary.ParticipantRole role) internal {
-        identityRegistry.registerParticipant(who, name, role, bytes32(0));
+        identityRegistry.registerParticipant(who, name, role, bytes32(0), keccak256(abi.encodePacked("inst-", who)));
         identityRegistry.verifyParticipant(who);
     }
 

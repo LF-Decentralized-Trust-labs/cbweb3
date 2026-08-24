@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 import {Script, console} from "forge-std/Script.sol";
 import {IIdentityRegistry} from "../src/interfaces/IIdentityRegistry.sol";
@@ -53,6 +53,14 @@ contract RegisterParticipants is Script {
         address account;
         string name;
         IdentityRegistryLibrary.ParticipantRole role;
+        /// @dev Institution code, NOT a per-wallet value. Every wallet of the same institution must
+        ///      carry the same code, because the AMM resume quorum counts distinct institutions and
+        ///      derives them from keccak256(bankCode) — the same derivation the Go services use
+        ///      (backend/shared/blockchain/registry.InstitutionIDForParticipant, fed from BANK_CODE,
+        ///      which the compose template sets to the manifest entity id). A second wallet of one
+        ///      central bank registered under a different code would count as a second institution
+        ///      and could satisfy the 2-of-N resume on its own.
+        string bankCode;
     }
 
     function run() public {
@@ -70,31 +78,47 @@ contract RegisterParticipants is Script {
         //   hub DEFAULT_ADMIN_ROLE — NOT a sovereign CB identity).
         // Central Bank A key 8f2a5594… → 0xfe3b55… (spoke-a CB + hub identity for CB-A).
         // Central Bank B key ae6ae8e5… → 0xf17f52… (spoke-b CB + hub identity for CB-B).
+        // Institution codes must match the BANK_CODE each entity's services run with (the compose
+        // template sets BANK_CODE to the manifest entity id), so a wallet seeded here and a wallet
+        // onboarded later by that entity's auth service resolve to the SAME institution. Overridable
+        // because the manifest ids differ per deployment; the defaults match samples/.
+        string memory cbACode = vm.envOr("CENTRAL_BANK_A_CODE", string("central-bank-a"));
+        string memory cbBCode = vm.envOr("CENTRAL_BANK_B_CODE", string("central-bank-b"));
+
         Participant[5] memory participants = [
+            // The platform admin is explicitly NOT a sovereign CB (see the key comment above), so it
+            // carries its own institution code rather than borrowing a central bank's.
             Participant(
                 0x627306090abaB3A6e1400e9345bC60c78a8BEf57,
                 "Platform Admin",
-                IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK
+                IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+                "platform-admin"
             ),
             Participant(
                 0xFE3B557E8Fb62b89F4916B721be55cEb828dBd73,
                 "Central Bank A",
-                IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK
+                IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+                cbACode
             ),
             Participant(
                 0xf17f52151EbEF6C7334FAD080c5704D77216b732,
                 "Central Bank B",
-                IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK
+                IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+                cbBCode
             ),
+            // One key serves banks A and B in local dev, so it is one institution here by
+            // construction — the shared key, not the code, is what makes it so.
             Participant(
                 0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef,
                 "Commercial Bank A/B",
-                IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK
+                IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+                "bank-ab"
             ),
             Participant(
                 0xc110089385bad5026E5083443C3b443806DA42Df,
                 "Commercial Bank C/D",
-                IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK
+                IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+                "bank-cd"
             )
         ];
 
@@ -113,7 +137,8 @@ contract RegisterParticipants is Script {
                 participants[i].account,
                 participants[i].name,
                 participants[i].role,
-                keccak256(abi.encodePacked("local_dev_", participants[i].name))
+                keccak256(abi.encodePacked("local_dev_", participants[i].name)),
+                keccak256(abi.encodePacked(participants[i].bankCode))
             );
             registry.verifyParticipant(participants[i].account);
             console.log("Registered and verified:", participants[i].name, participants[i].account);
@@ -141,7 +166,10 @@ contract RegisterParticipants is Script {
                 participants[i].account,
                 participants[i].name,
                 participants[i].role,
-                keccak256(abi.encodePacked("hub_local_dev_", participants[i].name))
+                keccak256(abi.encodePacked("hub_local_dev_", participants[i].name)),
+                // Same institution code as the spoke registration above: the resume quorum lives on
+                // the hub AMM, so the hub registry is the one whose institution keying decides it.
+                keccak256(abi.encodePacked(participants[i].bankCode))
             );
             hubRegistry.verifyParticipant(participants[i].account);
             console.log("[Hub] Registered and verified:", participants[i].name, participants[i].account);

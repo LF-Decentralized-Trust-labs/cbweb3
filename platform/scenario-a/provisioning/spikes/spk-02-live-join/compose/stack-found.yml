@@ -69,7 +69,7 @@ services:
     entrypoint: ["/bin/bash", "/validator-entry.sh"]
 
   paladin-data-init:
-    image: alpine:3.20
+    image: alpine:3.23
     user: "0:0"
     volumes:
       - paladin_cb_data:/data/cb

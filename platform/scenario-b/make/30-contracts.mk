@@ -20,8 +20,16 @@ proto-gen:
 proto-lint:
 	@cd apis/proto && buf lint
 
+# The git input is resolved relative to the CWD, so it must name the REPOSITORY root
+# (three levels up from apis/proto) plus the subdir holding the module — pointing at a
+# bare `.git` from inside apis/proto made buf try to clone apis/proto/.git, which does
+# not exist, and git answered with its generic "correct access rights" message.
+#
+# The baseline is develop, not main: main carries ZERO .proto files (the whole API layer
+# landed on develop and has never been merged), so comparing against it could not detect
+# a break — there was no prior API there to break.
 proto-breaking:
-	@cd apis/proto && buf breaking --against '.git#branch=main'
+	@cd apis/proto && buf breaking --against '../../../.git#branch=develop,subdir=scenario-b/apis/proto'
 
 # ── Solidity contracts ────────────────────────────────────────────────────────
 contracts.setup:
@@ -70,7 +78,7 @@ contracts.deploy-identity-registry-besu:
 contracts.deploy-hub:
 	@test -n "$(CENTRAL_BANK_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_ADDRESS is not set — check contracts/.env"; exit 1)
 	@echo "Deploying Scenario B Hub contracts (IdentityRegistry + Tokens + AMM + HTLC + Oracle) to the independent Hub network (chain 1337)..."
-	@./deploy/local/tools/wait-rpc.sh "$${BESU_HUB_RPC:-http://127.0.0.1:8845}"
+	@./tools/wait-rpc.sh "$${BESU_HUB_RPC:-http://127.0.0.1:8845}"
 	@BESU_HUB_RPC="$${BESU_HUB_RPC:-http://127.0.0.1:8845}" && \
 	 HUB_CHAIN_ID="$${HUB_CHAIN_ID:-1337}" && \
 	 cd contracts && CENTRAL_BANK_ADDRESS=$(CENTRAL_BANK_ADDRESS) FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script \
@@ -80,7 +88,7 @@ contracts.deploy-hub:
 contracts.deploy-spoke-a:
 	@test -n "$(CENTRAL_BANK_A_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_A_ADDRESS is not set — check contracts/.env"; exit 1)
 	@echo "Deploying CBWeb3 spoke-a contracts to chain 1338 (bank-a, central-bank-a)..."
-	@./deploy/local/tools/wait-rpc.sh "${SPOKE_A_RPC_URL}"
+	@./tools/wait-rpc.sh "${SPOKE_A_RPC_URL}"
 	@cd contracts && TOKEN_NAME="Tokenized BRL" TOKEN_SYMBOL="tCeBM_BRL" \
 		FIAT_TOKEN_NAME="Fiat BRL" FIAT_TOKEN_SYMBOL="fCeBM_BRL" \
 		CENTRAL_BANK_ADDRESS=$(CENTRAL_BANK_A_ADDRESS) \
@@ -89,7 +97,7 @@ contracts.deploy-spoke-a:
 contracts.deploy-spoke-b:
 	@test -n "$(CENTRAL_BANK_B_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_B_ADDRESS is not set — check contracts/.env"; exit 1)
 	@echo "Deploying CBWeb3 spoke-b contracts (bank-b, central-bank-b)..."
-	@./deploy/local/tools/wait-rpc.sh "${SPOKE_B_RPC_URL}"
+	@./tools/wait-rpc.sh "${SPOKE_B_RPC_URL}"
 	@cd contracts && TOKEN_NAME="Tokenized ARS" TOKEN_SYMBOL="tCeBM_ARS" \
 		FIAT_TOKEN_NAME="Fiat ARS" FIAT_TOKEN_SYMBOL="fCeBM_ARS" \
 		CENTRAL_BANK_ADDRESS=$(CENTRAL_BANK_B_ADDRESS) \
@@ -221,7 +229,7 @@ contracts.grant-liquidity-providers:
 	 echo "Done — LiquidityProvider roles granted to both CB hub identities."
 
 contracts.sync-addresses:
-	@SOVEREIGN_PAIR_ID="$(SOVEREIGN_PAIR_ID)" ./deploy/local/tools/sync-contracts.sh
+	@SOVEREIGN_PAIR_ID="$(SOVEREIGN_PAIR_ID)" ./tools/sync-contracts.sh
 
 # ── 007-bridge-based-cb-liquidity: Sovereign Pair Seeding ───────────────────
 # Seeds a new sovereign CB liquidity pair on the Hub: deploys W-tCeBM tokens (A + B),

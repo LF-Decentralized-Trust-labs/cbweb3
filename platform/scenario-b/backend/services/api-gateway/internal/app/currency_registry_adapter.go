@@ -43,6 +43,15 @@ const currencyRegistryABI = `[
     {"name":"proposerCB","type":"string"}
   ]}
 ]},
+{"type":"function","name":"getCurrenciesPaged","stateMutability":"view","inputs":[{"name":"offset","type":"uint256"},{"name":"limit","type":"uint256"}],"outputs":[
+  {"name":"page","type":"tuple[]","components":[
+    {"name":"symbol","type":"string"},
+    {"name":"countryName","type":"string"},
+    {"name":"tokenAddress","type":"address"},
+    {"name":"proposerCB","type":"string"}
+  ]},
+  {"name":"total","type":"uint256"}
+]},
 {"type":"function","name":"getAllCurrencies","stateMutability":"view","inputs":[],"outputs":[
   {"name":"","type":"tuple[]","components":[
     {"name":"symbol","type":"string"},
@@ -95,7 +104,7 @@ func NewCurrencyRegistryClient(ctx context.Context, cfg CurrencyRegistryConfig) 
 		timeout:  cfg.Timeout,
 	}
 	if cfg.PrivateKeyHex != "" {
-		signer, sigErr := evm.NewSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
+		signer, sigErr := evm.SharedSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
 		if sigErr != nil {
 			ec.Close()
 			return nil, fmt.Errorf("currency registry: signer: %w", sigErr)
@@ -144,34 +153,67 @@ func (c *CurrencyRegistryClient) RemoveCurrency(ctx context.Context, symbol stri
 	return txHash, nil
 }
 
-// GetAllCurrencies reads all registered currencies from on-chain.
+// currencyPageSize is how many entries one getCurrenciesPaged call asks for. It matches the
+// contract's own MAX_PAGE_SIZE: asking for more is clamped there anyway, and asking for less
+// only adds round trips.
+const currencyPageSize = 100
+
+// GetAllCurrencies reads every registered currency from on-chain, one bounded page at a time.
+//
+// It used to call getAllCurrencies(), which returns the whole set in a single response. That
+// is `external view`, so no gas is at stake — but the response grows with the number of
+// registered currencies and one oversized eth_call is a worse failure than several small ones
+// (finding R2-M-14). The contract keeps that function for compatibility; the platform no
+// longer uses it.
+//
+// The loop stops on a short page, which is also how an offset past the end reads, so a set
+// that shrinks between calls terminates rather than spinning.
 func (c *CurrencyRegistryClient) GetAllCurrencies(ctx context.Context) ([]domain.CurrencyEntry, error) {
-	input, err := c.parsed.Pack("getAllCurrencies")
+	var out []domain.CurrencyEntry
+	for offset := uint64(0); ; offset += currencyPageSize {
+		page, total, err := c.currenciesPage(ctx, offset, currencyPageSize)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, page...)
+		if len(page) < currencyPageSize || uint64(len(out)) >= total {
+			return out, nil
+		}
+	}
+}
+
+// currenciesPage reads one window and reports the total so the caller can stop.
+func (c *CurrencyRegistryClient) currenciesPage(ctx context.Context, offset, limit uint64) ([]domain.CurrencyEntry, uint64, error) {
+	input, err := c.parsed.Pack("getCurrenciesPaged", new(big.Int).SetUint64(offset), new(big.Int).SetUint64(limit))
 	if err != nil {
-		return nil, fmt.Errorf("currency registry getAllCurrencies pack: %w", err)
+		return nil, 0, fmt.Errorf("currency registry getCurrenciesPaged pack: %w", err)
 	}
 	msg := ethereum.CallMsg{To: &c.contract, Data: input}
 	raw, err := c.ec.CallContract(ctx, msg, nil)
 	if err != nil {
-		return nil, fmt.Errorf("currency registry getAllCurrencies call: %w", err)
+		return nil, 0, fmt.Errorf("currency registry getCurrenciesPaged call: %w", err)
 	}
 	if len(raw) == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 
-	method := c.parsed.Methods["getAllCurrencies"]
+	method := c.parsed.Methods["getCurrenciesPaged"]
 	entries, err := method.Outputs.Unpack(raw)
 	if err != nil {
-		return nil, fmt.Errorf("currency registry getAllCurrencies unpack: %w", err)
+		return nil, 0, fmt.Errorf("currency registry getCurrenciesPaged unpack: %w", err)
 	}
-	if len(entries) == 0 {
-		return nil, nil
+	if len(entries) < 2 {
+		return nil, 0, fmt.Errorf("currency registry getCurrenciesPaged: expected (page, total), got %d outputs", len(entries))
+	}
+	total, ok := entries[1].(*big.Int)
+	if !ok {
+		return nil, 0, fmt.Errorf("currency registry getCurrenciesPaged: total has unexpected type %T", entries[1])
 	}
 
 	// go-ethereum unpacks tuple[] as a slice of anonymous structs via reflection.
 	rv := reflect.ValueOf(entries[0])
 	if rv.Kind() != reflect.Slice {
-		return nil, fmt.Errorf("currency registry getAllCurrencies: unexpected output type %T", entries[0])
+		return nil, 0, fmt.Errorf("currency registry getCurrenciesPaged: unexpected output type %T", entries[0])
 	}
 
 	result := make([]domain.CurrencyEntry, 0, rv.Len())
@@ -194,5 +236,5 @@ func (c *CurrencyRegistryClient) GetAllCurrencies(ctx context.Context) ([]domain
 			ProposerCB:   proposer.String(),
 		})
 	}
-	return result, nil
+	return result, total.Uint64(), nil
 }

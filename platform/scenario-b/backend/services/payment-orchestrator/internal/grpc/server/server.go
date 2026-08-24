@@ -75,7 +75,7 @@ func New(cfg Config) (*grpc.Server, error) {
 		logger:          cfg.Logger,
 		fxAgreements:    make(map[string]*domain.FXAgreementRecord),
 	}
-	serverOpts, err := authz.ServerOptionsFromEnv(cfg.Logger, nil)
+	serverOpts, err := authz.ServerOptionsFromEnv(cfg.Logger, serverPolicy())
 	if err != nil {
 		return nil, fmt.Errorf("configure gRPC security: %w", err)
 	}
@@ -392,7 +392,11 @@ func (s *paymentOrchestratorService) ListFXAgreements(ctx context.Context, req *
 	stateFilter := strings.TrimPrefix(req.State, "FX_STATE_")
 
 	if s.fxRepo != nil {
-		f := ports.FXAgreementFilter{Counterparty: req.Counterparty}
+		// Explicit, not left to the repository's clamp: the response is capped at one page
+		// and ListFXAgreementsRequest carries no page size, so a node with more agreements
+		// than this returns only the newest MaxFXAgreementPageSize of them. Naming the bound
+		// here is what keeps that visible to anyone reading this handler (finding R2-M-14).
+		f := ports.FXAgreementFilter{Counterparty: req.Counterparty, Limit: ports.MaxFXAgreementPageSize}
 		if stateFilter != "" {
 			f.State = domain.FXState(stateFilter)
 		}

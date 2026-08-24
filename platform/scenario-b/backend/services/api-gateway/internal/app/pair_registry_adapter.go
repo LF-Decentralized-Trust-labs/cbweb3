@@ -8,8 +8,11 @@ package app
 import (
 	"context"
 	"fmt"
+	"log"
 	"math/big"
+	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,7 +21,6 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/evm"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -36,6 +38,18 @@ const pairRegistryABI = `[
 {"type":"function","name":"confirmPair","stateMutability":"nonpayable","inputs":[
   {"name":"pairId","type":"string"}
 ],"outputs":[]},
+{"type":"function","name":"getActivePairsPaged","stateMutability":"view","inputs":[{"name":"offset","type":"uint256"},{"name":"limit","type":"uint256"}],"outputs":[
+  {"name":"page","type":"tuple[]","components":[
+    {"name":"pairId","type":"string"},
+    {"name":"ammAddress","type":"address"},
+    {"name":"tokenA","type":"address"},
+    {"name":"tokenB","type":"address"},
+    {"name":"status","type":"uint8"},
+    {"name":"proposer","type":"address"},
+    {"name":"confirmer","type":"address"}
+  ]},
+  {"name":"total","type":"uint256"}
+]},
 {"type":"function","name":"getAllActivePairs","stateMutability":"view","inputs":[],"outputs":[
   {"name":"","type":"tuple[]","components":[
     {"name":"pairId","type":"string"},
@@ -130,7 +144,7 @@ func NewPairRegistryClient(ctx context.Context, cfg PairRegistryConfig) (*PairRe
 		c.identityRegistry = common.HexToAddress(cfg.IdentityRegistryAddress)
 	}
 	if cfg.PrivateKeyHex != "" {
-		signer, sigErr := evm.NewSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
+		signer, sigErr := evm.SharedSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
 		if sigErr != nil {
 			ec.Close()
 			return nil, fmt.Errorf("pair registry: signer: %w", sigErr)
@@ -138,6 +152,45 @@ func NewPairRegistryClient(ctx context.Context, cfg PairRegistryConfig) (*PairRe
 		c.signer = signer
 	}
 	return c, nil
+}
+
+// identityCBOfABI is the minimal IdentityRegistry read used to resolve which address may act
+// as the central bank of a token on the hub. PairRegistry gates proposePair on
+// getCentralBankOf(tokenA) and confirmPair on getCentralBankOf(tokenB).
+const identityCBOfABI = `[
+{"type":"function","name":"getCentralBankOf","stateMutability":"view","inputs":[{"name":"token","type":"address"}],"outputs":[{"name":"","type":"address"}]}
+]`
+
+// CentralBankOfToken reads IdentityRegistry.getCentralBankOf(token) on the hub, i.e. which
+// address the registry recognises as that token's issuing central bank.
+func (c *PairRegistryClient) CentralBankOfToken(ctx context.Context, tokenAddress string) (string, error) {
+	if c.identityRegistry == (common.Address{}) {
+		return "", fmt.Errorf("pair registry: HUB_IDENTITY_REGISTRY_ADDRESS not configured")
+	}
+	token := common.HexToAddress(tokenAddress)
+	if token == (common.Address{}) {
+		return "", fmt.Errorf("pair registry: invalid token address %q", tokenAddress)
+	}
+	parsed, err := evm.ParseABI(identityCBOfABI)
+	if err != nil {
+		return "", fmt.Errorf("pair registry: parse identity ABI: %w", err)
+	}
+	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	var cb common.Address
+	if err := evm.Call(callCtx, c.ec, c.identityRegistry, parsed, "getCentralBankOf",
+		[]interface{}{token}, &cb); err != nil {
+		return "", fmt.Errorf("pair registry: getCentralBankOf(%s): %w", token.Hex(), err)
+	}
+	return cb.Hex(), nil
+}
+
+// HubSignerAddress is this gateway's hub signing address, or "" on a read-only client.
+func (c *PairRegistryClient) HubSignerAddress() string {
+	if c.signer == nil {
+		return ""
+	}
+	return c.signer.Address().Hex()
 }
 
 // Close releases the underlying RPC connection.
@@ -188,23 +241,99 @@ func (c *PairRegistryClient) DeployDedicatedAMM(ctx context.Context, tokenA, tok
 	if gasPrice, gerr := c.ec.SuggestGasPrice(ctx); gerr == nil {
 		opts.GasPrice = gasPrice
 	}
-	ammAddr, deployTx, _, err := bindings.DeployAutomatedMarketMaker(
-		opts, c.ec,
-		common.HexToAddress(tokenA),
-		common.HexToAddress(tokenB),
-		c.identityRegistry,
-	)
+	// The deploy goes through the signer's counter like every other submission from this account:
+	// bind would otherwise read PendingNonceAt itself and could claim a nonce another call in this
+	// process has already taken. The deployed address is derived from (sender, nonce), so it stays
+	// correct precisely because the nonce is the one actually broadcast.
+	var ammAddr common.Address
+	deployTx, err := c.signer.WithNonce(ctx, c.ec, func(nonce uint64) (*types.Transaction, error) {
+		opts.Nonce = new(big.Int).SetUint64(nonce)
+		addr, tx, _, derr := bindings.DeployAutomatedMarketMaker(
+			opts, c.ec,
+			common.HexToAddress(tokenA),
+			common.HexToAddress(tokenB),
+			c.identityRegistry,
+		)
+		if derr != nil {
+			return nil, derr
+		}
+		ammAddr = addr
+		return tx, nil
+	})
 	if err != nil {
 		return "", fmt.Errorf("pair registry: deploy AMM: %w", err)
 	}
-	receipt, err := bind.WaitMined(ctx, c.ec, deployTx)
-	if err != nil {
-		return "", fmt.Errorf("pair registry: deploy AMM wait: %w", err)
+	if _, err := evm.WaitForReceipt(ctx, c.ec, deployTx, "deploy AMM"); err != nil {
+		return "", fmt.Errorf("pair registry: %w", err)
 	}
-	if receipt.Status == 0 {
-		return "", fmt.Errorf("pair registry: deploy AMM reverted (tx=%s)", deployTx.Hash().Hex())
-	}
+
+	c.applyDefaultFee(ctx, ammAddr)
 	return ammAddr.Hex(), nil
+}
+
+// defaultAMMFeeBps is the swap fee a freshly deployed corridor AMM is configured with.
+//
+// The contract's constructor leaves feeBps at 0, and the design documents a 30 bps fee
+// distributed to liquidity providers on every swap (docs/runbooks/contract-configuration.md,
+// docs/design/cooperative-liquidity.md). Under the old single static AMM that gap did
+// not show: the pool was configured once, out of band. Now every corridor deploys its
+// own AMM at propose time, and nothing was setting the fee — so a runtime-opened
+// corridor charged nothing and its providers earned nothing.
+const defaultAMMFeeBps = 30
+
+// applyDefaultFee sets the documented swap fee on a just-deployed AMM.
+//
+// Best-effort, and loudly so. The AMM already exists on-chain by the time this runs, so
+// returning an error here would fail the propose and strand a deployed pool. A corridor
+// with no fee still settles payments — it just pays its liquidity providers nothing —
+// which is a condition to shout about, not one to abort on.
+//
+// AMM_DEFAULT_FEE_BPS overrides the default; "0" is honoured as a deliberate choice and
+// skips the call entirely, so an operator wanting a fee-less corridor gets one without a
+// misleading error in the log.
+func (c *PairRegistryClient) applyDefaultFee(ctx context.Context, amm common.Address) {
+	feeBps := defaultAMMFeeBps
+	if raw := strings.TrimSpace(os.Getenv("AMM_DEFAULT_FEE_BPS")); raw != "" {
+		parsed, perr := strconv.Atoi(raw)
+		if perr != nil || parsed < 0 {
+			log.Printf("warning: AMM_DEFAULT_FEE_BPS=%q is not a non-negative integer; using %d", raw, defaultAMMFeeBps)
+		} else {
+			feeBps = parsed
+		}
+	}
+	if feeBps == 0 {
+		log.Printf("AMM %s deployed with feeBps=0 (AMM_DEFAULT_FEE_BPS=0): liquidity providers earn nothing on this corridor", amm.Hex())
+		return
+	}
+
+	transactor, err := bindings.NewAutomatedMarketMakerTransactor(amm, c.ec)
+	if err != nil {
+		log.Printf("warning: AMM %s deployed but its fee could NOT be set (bind: %v) — feeBps stays 0 and liquidity providers earn nothing", amm.Hex(), err)
+		return
+	}
+	opts, err := c.signer.TransactOpts(ctx)
+	if err != nil {
+		log.Printf("warning: AMM %s deployed but its fee could NOT be set (opts: %v) — feeBps stays 0 and liquidity providers earn nothing", amm.Hex(), err)
+		return
+	}
+	if gasPrice, gerr := c.ec.SuggestGasPrice(ctx); gerr == nil {
+		opts.GasPrice = gasPrice
+	}
+	// Same nonce counter as every other submission from this account — the deploy above
+	// took one, and bind would otherwise read PendingNonceAt and race it.
+	tx, err := c.signer.WithNonce(ctx, c.ec, func(nonce uint64) (*types.Transaction, error) {
+		opts.Nonce = new(big.Int).SetUint64(nonce)
+		return transactor.SetFeeBps(opts, big.NewInt(int64(feeBps)))
+	})
+	if err != nil {
+		log.Printf("warning: AMM %s deployed but setFeeBps(%d) failed (%v) — feeBps stays 0 and liquidity providers earn nothing", amm.Hex(), feeBps, err)
+		return
+	}
+	if _, err := evm.WaitForReceipt(ctx, c.ec, tx, "setFeeBps"); err != nil {
+		log.Printf("warning: AMM %s setFeeBps(%d) was submitted but not confirmed (%v) — verify feeBps on-chain", amm.Hex(), feeBps, err)
+		return
+	}
+	log.Printf("AMM %s deployed with feeBps=%d", amm.Hex(), feeBps)
 }
 
 // ConfirmPair submits a confirmPair transaction.
@@ -219,35 +348,66 @@ func (c *PairRegistryClient) ConfirmPair(ctx context.Context, pairID string) (st
 	return txHash, nil
 }
 
-// GetAllActivePairs reads all ACTIVE pairs from on-chain.
+// pairPageSize is how many entries one getActivePairsPaged call asks for; it matches the
+// contract's MAX_PAGE_SIZE, which clamps anything larger anyway.
+const pairPageSize = 100
+
+// GetAllActivePairs reads every ACTIVE pair from on-chain, one bounded page at a time.
+//
+// It used to call getAllActivePairs(), which returns the whole set in one response. That is
+// `external view` so no gas is at stake, but the response grows with the number of corridors
+// and one oversized eth_call fails worse than several small ones (finding R2-M-14). The
+// contract keeps that function for compatibility; the platform no longer uses it.
+//
+// The loop stops on a short page, which is also how an offset past the end reads, so a set
+// that shrinks mid-walk terminates rather than spinning.
 func (c *PairRegistryClient) GetAllActivePairs(ctx context.Context) ([]domain.PairEntry, error) {
-	input, err := c.parsed.Pack("getAllActivePairs")
+	var out []domain.PairEntry
+	for offset := uint64(0); ; offset += pairPageSize {
+		page, total, err := c.activePairsPage(ctx, offset, pairPageSize)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, page...)
+		if len(page) < pairPageSize || uint64(len(out)) >= total {
+			return out, nil
+		}
+	}
+}
+
+// activePairsPage reads one window and reports the total so the caller can stop.
+func (c *PairRegistryClient) activePairsPage(ctx context.Context, offset, limit uint64) ([]domain.PairEntry, uint64, error) {
+	input, err := c.parsed.Pack("getActivePairsPaged", new(big.Int).SetUint64(offset), new(big.Int).SetUint64(limit))
 	if err != nil {
-		return nil, fmt.Errorf("pair registry getAllActivePairs pack: %w", err)
+		return nil, 0, fmt.Errorf("pair registry getActivePairsPaged pack: %w", err)
 	}
 	msg := ethereum.CallMsg{To: &c.contract, Data: input}
 	raw, err := c.ec.CallContract(ctx, msg, nil)
 	if err != nil {
-		return nil, fmt.Errorf("pair registry getAllActivePairs call: %w", err)
+		return nil, 0, fmt.Errorf("pair registry getActivePairsPaged call: %w", err)
 	}
 	if len(raw) == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 
-	method := c.parsed.Methods["getAllActivePairs"]
+	method := c.parsed.Methods["getActivePairsPaged"]
 	entries, err := method.Outputs.Unpack(raw)
 	if err != nil {
-		return nil, fmt.Errorf("pair registry getAllActivePairs unpack: %w", err)
+		return nil, 0, fmt.Errorf("pair registry getActivePairsPaged unpack: %w", err)
 	}
-	if len(entries) == 0 {
-		return nil, nil
+	if len(entries) < 2 {
+		return nil, 0, fmt.Errorf("pair registry getActivePairsPaged: expected (page, total), got %d outputs", len(entries))
+	}
+	total, ok := entries[1].(*big.Int)
+	if !ok {
+		return nil, 0, fmt.Errorf("pair registry getActivePairsPaged: total has unexpected type %T", entries[1])
 	}
 
 	// go-ethereum unpacks tuple[] as a slice of anonymous structs via reflection.
 	// Type-asserting to a named struct always fails; use reflect to extract fields.
 	rv := reflect.ValueOf(entries[0])
 	if rv.Kind() != reflect.Slice {
-		return nil, fmt.Errorf("pair registry getAllActivePairs: unexpected output type %T", entries[0])
+		return nil, 0, fmt.Errorf("pair registry getActivePairsPaged: unexpected output type %T", entries[0])
 	}
 
 	result := make([]domain.PairEntry, 0, rv.Len())
@@ -270,7 +430,7 @@ func (c *PairRegistryClient) GetAllActivePairs(ctx context.Context) ([]domain.Pa
 			TokenB:     strings.ToLower(tokenB.Interface().(common.Address).Hex()),
 		})
 	}
-	return result, nil
+	return result, total.Uint64(), nil
 }
 
 // GetAllPairs reads every registered pair from on-chain, regardless of status

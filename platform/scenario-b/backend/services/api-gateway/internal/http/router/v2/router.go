@@ -41,6 +41,9 @@ type Dependencies struct {
 	PairService services.PairServiceIface
 	// 006-hub-currency-registry — hub currency discovery
 	CurrencyService services.CurrencyServiceIface
+	// SovereignSupplyReader serves this CB's own wrapped-token supply on the hub
+	// (GET /api/v2/hub/token/supply). Nil = route not registered.
+	SovereignSupplyReader handlers.SovereignSupplyReader
 	// 007-bridge-based-cb-liquidity — sovereign CB liquidity
 	SovereignLiquidityService handlers.SovereignLiquidityServiceIface
 	// LCRRegistrar calls registerCommit on the Hub LiquidityCommitRegistry (T010).
@@ -64,6 +67,10 @@ type Dependencies struct {
 	// RelayAuth configures per-CB asymmetric signature verification on internal routes,
 	// with the shared secret as a migration fallback (R2-CR-6).
 	RelayAuth middleware.RelayAuthConfig
+	// RequesterScopeResolver maps the entity id whose signature was verified to the address its
+	// payment records are keyed by, so /internal/v1/payments listings are scoped to the CALLER
+	// rather than to a query parameter no signature covers. Nil makes those listings fail closed.
+	RequesterScopeResolver middleware.RequesterScopeResolver
 	// FiatTokenAddress is the tCeBM contract address on this CB's spoke (TOKEN_ADDRESS).
 	// Used by the cross-currency bridge-out handler so CB-B can enqueue burn without trusting
 	// the relay payload's token address.
@@ -100,8 +107,28 @@ type Dependencies struct {
 	CrossCurrencyBridgePositionReader handlers.BridgePositionDetailReaderIface
 	// CrossCurrencyResidueDuplicateFinder is the residue-leg idempotency lookup.
 	CrossCurrencyResidueDuplicateFinder handlers.ResidueDuplicateFinderIface
+	// CrossCurrencyHubSwapExecutor enables POST /internal/amm/cross-currency-hub-swap: the
+	// issuing CB runs the Step 2 Hub AMM trade with its own signer, so a commercial bank
+	// never needs a Hub key. Set only on CB gateways that hold a signing AMM client.
+	CrossCurrencyHubSwapExecutor handlers.HubSwapExecutorIface
+	// CrossCurrencyHubSwapRecorder is the replay guard for delegated swaps, keyed on the
+	// funding bridge-in position. The endpoint is not registered without it.
+	CrossCurrencyHubSwapRecorder handlers.HubSwapRecorderIface
+	// CrossCurrencyHubSwapDirection resolves the corridor direction for a pool_pair so one
+	// sovereign pair serves both ways. Optional (nil ⇒ A→B orientation).
+	CrossCurrencyHubSwapDirection handlers.SwapDirectionResolverIface
+	// HubReconciler reports what this central bank holds on the Hub for its banks and what part
+	// of it its own records cannot account for. Set only on an issuing CB with Hub access.
+	HubReconciler handlers.HubReconcilerIface
+	// HubSignerAddress is this gateway's own Hub address, derived from SIGNER_PRIVATE_KEY.
+	// A CB returns it on a delegated swap so the bank can tell the beneficiary CB where the
+	// swap output landed. Empty on a gateway with no Hub signing key (a delegating bank).
+	HubSignerAddress string
 	// LPPositionRepo enables GET /api/v2/amm/liquidity/positions (008-fix-cb-liquidity).
 	LPPositionRepo handlers.LPPositionReaderIface
+	// LPPositionWriter records the depositing CB's own position during sovereign
+	// escrow-and-finalize seeding, so the pool it seeds can be withdrawn from.
+	LPPositionWriter handlers.LPPositionWriter
 	// LPBalanceReader enables GET /api/v2/amm/lp-balance — the CB's live on-chain CBW3-LP position (013).
 	LPBalanceReader handlers.LPBalanceReaderIface
 	// PairSideResolver derives the CB's side ("A"/"B") for a pool_pair from the on-chain
@@ -170,6 +197,7 @@ func Register(app *fiber.App, deps Dependencies) {
 	registerUS3Routes(app, deps)
 	registerPairRegistryRoutes(app, deps)
 	registerCurrencyRegistryRoutes(app, deps)
+	registerTokenSupplyRoutes(app, deps)
 	registerSovereignRoutes(app, deps)
 	registerTransferLimitInternalRoutes(app, deps)
 
@@ -185,8 +213,12 @@ func registerTransferLimitInternalRoutes(app *fiber.App, deps Dependencies) {
 	if deps.TransferLimitInternalHandler == nil {
 		return
 	}
+	// Signature-preferred, secret-fallback — the same policy as every other internal route. These two
+	// were the last on the secret alone, and they are not incidental: check-and-deduct is the CB's
+	// authoritative daily-limit gate, and the secret is identical in every entity, so any entity could
+	// forge these calls as any other bank.
 	internal := app.Group("/internal/v2/transfer-limits",
-		middleware.RequireRelayAuth(deps.InternalRelayAuthSecret),
+		middleware.RequireRelayAuthMigrating(deps.RelayAuth),
 	)
 	internal.Post("/check-and-deduct", deps.TransferLimitInternalHandler.HandleCheckAndDeduct)
 	internal.Post("/restore", deps.TransferLimitInternalHandler.HandleRestore)
@@ -332,6 +364,9 @@ func registerUS2Routes(app *fiber.App, deps Dependencies) {
 		// dual-sided /liquidity/add, which let one CB supply both sides (sovereignty breach).
 		if deps.SovereignSeed != nil && deps.TokenPreparer != nil {
 			ssh := handlers.NewSovereignSeedHandler(deps.TokenPreparer, deps.SovereignSeed)
+			if deps.LPPositionWriter != nil {
+				ssh = ssh.WithLPPositions(deps.LPPositionWriter, deps.BankCode)
+			}
 			amm.Post("/liquidity/deposit-side",
 				middleware.RequireCookieAuth(deps.AuthProvider),
 				middleware.RequireLiquidityProviderRole(),
@@ -392,6 +427,18 @@ func registerUS2Routes(app *fiber.App, deps Dependencies) {
 			lh.WithLPBalanceReader(deps.LPBalanceReader)
 			amm.Get("/lp-balance", lh.GetLPBalance)
 		}
+	}
+
+	// Hub reconciliation: the CB's own obligation toward its banks, and the part of the on-chain
+	// balance its records cannot attribute. Treasury-facing, so it is gated on the CB role — the
+	// per-bank exposure it returns is the CB's own book, not a bank's own row.
+	if deps.HubReconciler != nil && deps.AuthProvider != nil {
+		hrh := handlers.NewHubReconciliationHandler(deps.HubReconciler)
+		app.Get("/api/v2/amm/hub-reconciliation",
+			middleware.RequireAnyAuth(deps.AuthProvider),
+			middleware.RequireCentralBankRole(),
+			hrh.GetReconciliation,
+		)
 	}
 
 	if deps.TokenPreparer != nil && deps.AuthProvider != nil {
@@ -498,6 +545,17 @@ func registerCurrencyRegistryRoutes(app *fiber.App, deps Dependencies) {
 	hub.Get("/currencies", ch.ListCurrencies)
 }
 
+// registerTokenSupplyRoutes registers the sovereign wrapped-token supply endpoint.
+// GET /api/v2/hub/token/supply — this CB's own W-tCeBM_<CUR> outstanding on the hub
+// (public, like GET /api/v2/hub/currencies: it aggregates public on-chain state).
+func registerTokenSupplyRoutes(app *fiber.App, deps Dependencies) {
+	if deps.SovereignSupplyReader == nil {
+		return
+	}
+	tsh := handlers.NewTokenSupplyHandler(deps.SovereignSupplyReader)
+	app.Group("/api/v2/hub").Get("/token/supply", tsh.GetSovereignSupply)
+}
+
 // POST /api/v2/amm/pairs/propose — Central Bank of tokenA proposes a new pair (requires CB role + auth).
 // POST /api/v2/amm/pairs/confirm — Central Bank of tokenB confirms a proposed pair (requires CB role + auth).
 // GET  /api/v2/amm/pairs         — List all active pairs (public, served from DB).
@@ -584,9 +642,32 @@ func registerSovereignRoutes(app *fiber.App, deps Dependencies) {
 				deps.CrossCurrencyPayerWalletResolver,
 			)
 		}
+		// Mint target for a delegating bank that names no Hub address (it holds no Hub key):
+		// this CB, which is what spends the W-<source> in the delegated Step 2.
+		ccbih = ccbih.WithHubSignerAddress(deps.HubSignerAddress)
 		app.Post("/internal/amm/cross-currency-bridge-in",
 			middleware.RequireRelayAuthMigrating(deps.RelayAuth),
 			ccbih.HandleBridgeIn,
+		)
+	}
+
+	// Hub AMM swap (Step 2) for the issuing CB: the AMM admits only verified Hub participants
+	// and only CBs hold a Hub identity, so the CB executes the trade for the payer bank with
+	// its own signer. The alternative — the bank signing on the Hub — requires the CB's key to
+	// live in the bank's container, which is the opposite of sovereign concentration.
+	if deps.CrossCurrencyHubSwapExecutor != nil && deps.CrossCurrencyBridgePositionReader != nil &&
+		deps.CrossCurrencyHubSwapRecorder != nil {
+		cchsh := handlers.NewCrossCurrencyHubSwapHandler(
+			deps.CrossCurrencyHubSwapExecutor,
+			deps.CrossCurrencyBridgePositionReader,
+			deps.CrossCurrencyHubSwapRecorder,
+			deps.CrossCurrencyBeneficiaryResolver,
+			deps.WTokenAddress,
+			deps.HubSignerAddress,
+		).WithDirectionResolver(deps.CrossCurrencyHubSwapDirection)
+		app.Post(services.HubSwapPath,
+			middleware.RequireRelayAuthMigrating(deps.RelayAuth),
+			cchsh.HandleHubSwap,
 		)
 	}
 

@@ -53,7 +53,8 @@ frontend/
 
 ## Prerequisites
 
-- Node.js `22.13+` (recommended)
+- Node.js `22` LTS — the platform-wide floor, enforced by the root `.nvmrc` and the
+  `engines` field in `package.json` (see [`docs/TOOLCHAIN.md`](../../docs/TOOLCHAIN.md))
 - npm `10+`
 
 Check versions:

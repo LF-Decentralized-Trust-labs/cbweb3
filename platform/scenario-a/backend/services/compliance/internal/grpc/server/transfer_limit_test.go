@@ -24,9 +24,9 @@ func TestHumanToWei(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		input    string
-		wantWei  string
-		wantErr  bool
+		input   string
+		wantWei string
+		wantErr bool
 	}{
 		{"1", "1000000000000000000", false},
 		{"0.5", "500000000000000000", false},

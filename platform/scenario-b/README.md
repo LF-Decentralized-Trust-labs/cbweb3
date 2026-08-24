@@ -77,17 +77,23 @@ The scenario is organized in layers:
 
 ## Prerequisites
 
-| Tool | Purpose |
-|------|---------|
-| **Docker & Docker Compose** | Container orchestration for all services |
-| **GNU Make** | Build automation (`make` targets) |
-| **Go** (1.26+) | Backend services and Paladin tooling |
-| **Node.js** (22+) & npm | Frontend applications and the Cacti relay |
-| **Foundry** (forge, cast) | Solidity contract compilation, testing, deployment |
-| **jq** | JSON processing in shell scripts |
-| **openssl** | PKI certificate generation |
+Versions are platform-wide, not per scenario — see [`docs/TOOLCHAIN.md`](../docs/TOOLCHAIN.md)
+for the authoritative list and where each floor is enforced.
 
-> **Note:** Ensure Docker has sufficient resources allocated (recommended: 8+ GB RAM, 4+ CPUs) since the full stack runs the hub, two spokes, Paladin nodes, shared infra, and per-entity backend stacks.
+| Tool | Minimum version | Purpose |
+|------|-----------------|---------|
+| **Docker & Docker Compose** | Docker 24.x, Compose v2 | Container orchestration for all services |
+| **GNU Make** | 3.81 | Build automation (`make` targets) |
+| **Go** | 1.26 | Backend services, the `cbweb3b` toolkit, and Paladin tooling |
+| **Node.js** & npm | Node 22 LTS, npm 10 | Frontend applications and the Cacti relay |
+| **Foundry** (forge, cast) | nightly | Solidity contract compilation, testing, deployment |
+| **jq** | 1.6 | JSON processing in shell scripts |
+| **openssl** | 3.x | PKI certificate generation |
+| **k6** | 0.50 | Performance suite only (`make scenario-b.perf-baseline`) |
+
+> **Note:** The full stack runs ~35 containers (hub, two spokes, Paladin nodes, shared infra,
+> per-entity backend stacks). Allocate at least 12 GB RAM and 4 CPUs to Docker; 16 GB and 8
+> CPUs recommended.
 
 All commands below are run from the `scenario-b/` directory.
 
@@ -98,7 +104,7 @@ All commands below are run from the `scenario-b/` directory.
 Bring up the entire Scenario B stack — PKI, shared infrastructure, all three Besu networks, contracts, relay, backend services, the FX rate feeder, and the NOC:
 
 ```bash
-make scenario-b.up
+cd samples && ./deploy-all.sh
 ```
 
 This target runs, in order:
@@ -111,7 +117,7 @@ This target runs, in order:
 6. **FX feeder** — starts the mock BRL/ARS rate feeder that writes into the hub `ManualOracle`.
 7. **NOC** — configures Keycloak, starts the NOC portal/backend, and starts the monitoring agents.
 
-A perf-lean variant without the NOC portal is available as `make scenario-b.up-perf`.
+A perf-lean variant without the NOC portal is available as `cd samples && ./deploy-all.sh`.
 
 Once complete, the four entities (central-bank-a + bank-a on spoke-a, central-bank-b + bank-b on spoke-b) are running with their full service stacks.
 
@@ -119,7 +125,7 @@ Once complete, the four entities (central-bank-a + bank-a on spoke-a, central-ba
 
 ## Running the Scenario B Walkthrough
 
-After `make scenario-b.up` completes, run the end-to-end walkthrough. It covers five user stories; the script accepts `us1`, `us2`, `us3`, `us5`, `us6`, or `all` (the numbering skips `us4` — there is no such story):
+After the sample stack is up, run the end-to-end walkthrough. It covers five user stories; the script accepts `us1`, `us2`, `us3`, `us5`, `us6`, or `all` (the numbering skips `us4` — there is no such story):
 
 ```bash
 bash tryouts/tryout-scenario-b-e2e.sh all      # every story
@@ -146,7 +152,10 @@ The table below is derived from the script dispatcher (`tryouts/tryout-scenario-
 | **US5** | `us5` | Bilateral PairRegistry propose + rejection tests + confirm | Implemented |
 | **US6** | `us6` | CurrencyRegistry register / list / reject duplicates / remove (skipped when `CURRENCY_REGISTRY_CONTRACT_ADDRESS` is unset) | Implemented |
 
-The commercial-bank cross-currency swap is not one of these numbered stories; it has its own script, `tryouts/tryout-commercial-swap-e2e.sh` (see also `tryout-cross-currency-full-lifecycle.sh`). See [`tests/TEST-CATALOG.md`](tests/TEST-CATALOG.md) for the full, per-test status inventory.
+The commercial-bank cross-currency swap is not one of these numbered stories. It is driven
+end to end by `samples/sample-tryout.sh` (bridge-in → sovereign AMM → bridge-out, plus the
+asynchronous residue return), which replaced the separate swap and lifecycle scripts that
+targeted the retired deploy/local topology.
 
 ---
 
@@ -195,9 +204,9 @@ scenario-b/
 │   │   ├── auth/           gRPC auth service (Keycloak OIDC)
 │   │   ├── compliance/     gRPC compliance (KYC/AML)
 │   │   ├── payment-orchestrator/  gRPC payment, bridge, and swap orchestration
-│   │   ├── payments/       Payment domain logic
-│   │   ├── fx/             FX pricing helpers
-│   │   ├── ledger-gateway/ Blockchain RPC/WS client
+│   │   ├── payments/       (reserved name — empty)
+│   │   ├── fx/             (reserved name — empty)
+│   │   ├── ledger-gateway/ (reserved name — empty)
 │   │   ├── noc-agent/      Per-network monitoring agent
 │   │   └── noc-backend/    NOC portal backend
 │   ├── shared/             Shared Go libraries
@@ -233,7 +242,7 @@ scenario-b/
 
 ## Toolkit (Provisioning)
 
-Declarative provisioning toolkit for the Scenario B hub-and-spoke topology, used to stand up and join hub and spoke networks across self-managed hosts. The single-host `make scenario-b.up` stack above remains the local path. The Go toolkit lives in `toolkit/` (`cmd/cbweb3b` + `engine/*`); its compose templates and the `ParticipantDeployment` JSON-Schema live in `provisioning/`.
+Declarative provisioning toolkit for the Scenario B hub-and-spoke topology, used to stand up and join hub and spoke networks across self-managed hosts. The single-host `cd samples && ./deploy-all.sh` stack above remains the local path. The Go toolkit lives in `toolkit/` (`cmd/cbweb3b` + `engine/*`); its compose templates and the `ParticipantDeployment` JSON-Schema live in `provisioning/`.
 
 | Component | Status |
 |-----------|--------|
@@ -244,7 +253,7 @@ Declarative provisioning toolkit for the Scenario B hub-and-spoke topology, used
 | Orchestration engine + `found-hub` steps + hub bundle + `apply` CLI — TK-B6 | Implemented |
 | `found-spoke` mode (register-cb + spoke contracts + Keycloak + register-relay-spoke + soft add-noc-agent) + spoke bundle emitter — TK-B7 | Implemented |
 | `join` mode (non-validating full node: write-genesis + wait-sync + gen-csr; canonical flow, no relay/noc) — TK-B8 | Implemented |
-| Sovereign-pair tail (open-sovereign-pair + commit-liquidity + seed-oracle; soft, driven by `spec.pair`, strict sovereignty) — TK-B9 | Implemented |
+| Sovereign-pair corridors — **not** a provisioning step: opened at runtime as two independent sovereign acts (one CB proposes via the governance portal, the counterparty confirms), after which each CB commits its own liquidity — TK-B9 | Implemented (runtime, not `apply`) |
 | Full-pipeline E2E (swap + breaker + SpokeBridge) + toolkit-native perf baseline + E2E-STATUS — TK-B10 | Implemented |
 | NOC observability integration (`observe` mode) — TK-B11 | Implemented |
 | Production `CertSource`/`KeyProvider` (KMS/CA), auth-per-CB relay, threshold-gated baseline | Planned |
@@ -252,6 +261,16 @@ Declarative provisioning toolkit for the Scenario B hub-and-spoke topology, used
 The manifest model and validation are the toolkit's entry point: parse + validate + report only, no execution. The custody boundaries provide per-entity blockchain keys and the CB-as-CA leaf issuance, with local in-memory implementations and production stubs behind URI factories; no private key material ever enters a manifest, state file, or bundle. See [`toolkit/README.md`](toolkit/README.md) and [`toolkit/E2E-STATUS.md`](toolkit/E2E-STATUS.md) for usage and pipeline status.
 
 **Runtime dependency justification (Technology Stack Constraints):** the toolkit module adds `github.com/ethereum/go-ethereum` (v1.17.1, already standard across the repository). It is required by the `KeyProvider` for **secp256k1** key handling and EVM address derivation — the curve used to sign Besu/QBFT transactions, which is outside the Go standard library's `crypto/ecdsa`.
+
+The **api-gateway** module adds `github.com/redis/go-redis/v9` (v9.18.0, the version the `auth`
+service already depends on). No new infrastructure: every entity already runs a Redis
+(`entity-infra.compose.yaml`), and `auth` already keeps its PKI login nonces there. The gateway uses
+it for one thing — the relay-auth replay guard, which admits each verified signature once. Held in
+process memory alone, that guard is lost on restart and absent across replicas, and the control it
+enforces is a compliance one (a replayed `transfer-limits/restore` credits a bank's daily allowance
+back). `REDIS_ADDR` unset falls back to per-process memory and the gateway says so at boot; an
+unreachable Redis degrades to the same fallback rather than refusing traffic, since every internal
+route rides that middleware.
 
 ---
 
@@ -298,9 +317,9 @@ All backend services are written in **Go** and communicate via **gRPC** internal
 | **auth** | gRPC | OIDC/JWT validation, Keycloak integration, RBAC, nonce management |
 | **compliance** | gRPC | KYC/AML checks, on-chain IdentityRegistry queries, audit logging |
 | **payment-orchestrator** | gRPC | Payment coordination, bridge position tracking (including `RECONCILIATION_REQUIRED`), relayer worker |
-| **payments** | — | Payment domain logic |
-| **fx** | — | FX pricing helpers |
-| **ledger-gateway** | — | Blockchain RPC/WS client |
+| **payments** | — | **Not implemented** — reserved directory, zero Go files |
+| **fx** | — | **Not implemented** — reserved directory, zero Go files |
+| **ledger-gateway** | — | **Not implemented** — reserved directory, zero Go files |
 | **noc-agent** | — | Per-network monitoring agent (hub, spoke-a, spoke-b) |
 | **noc-backend** | REST | NOC portal backend |
 
@@ -310,7 +329,7 @@ Each entity (bank-a, bank-b, central-bank-a, central-bank-b) runs its own isolat
 
 ## Infrastructure
 
-The local deployment uses Docker Compose for all infrastructure components. See [`deploy/local/README.md`](deploy/local/README.md) for the authoritative topology.
+The local deployment uses Docker Compose for all infrastructure components, rendered per entity by the toolkit. See [`provisioning/templates/`](provisioning/templates/) for the compose templates and [`samples/README.md`](samples/README.md) for the topology the samples stand up.
 
 ### Besu Networks
 
@@ -334,7 +353,7 @@ Each spoke runs Paladin nodes providing Zeto ZKP support for privacy-preserving 
 
 ### NOC Stack
 
-The NOC stack (`deploy/local/compose.noc.yml`) runs a dedicated Postgres, the NOC backend, the NOC portal, and one monitoring agent per network (hub, spoke-a, spoke-b).
+The NOC stack (`provisioning/templates/noc-stack.compose.yaml`, with `noc-agent.compose.yaml` per network) runs a dedicated Postgres, the NOC backend, the NOC portal, and one monitoring agent per network (hub, spoke-a, spoke-b).
 
 ---
 
@@ -382,8 +401,6 @@ E2E walkthroughs and per-flow demos live under `tryouts/`, including:
 
 ```bash
 bash tryouts/tryout-scenario-b-e2e.sh all          # US1/US2/US3/US5/US6 walkthrough
-bash tryouts/tryout-commercial-swap-e2e.sh         # commercial-bank swap flow
-bash tryouts/tryout-cross-currency-full-lifecycle.sh
 bash tryouts/tryout-cacti-interop.sh               # relay interop
 ```
 
@@ -411,11 +428,12 @@ make pki.clean                 # Remove generated certificates
 
 ### Infrastructure
 
+The infra-only targets (`make deploy.up-infra`, `deploy.up-hub-besu`, `deploy.up-besu`,
+`scenario-b.up-infra`) were removed with the legacy path. The toolkit provisions infra and
+Besu per entity as steps of `apply`, hub included:
+
 ```bash
-make deploy.up-infra           # Start Keycloak + PostgreSQL + Redis
-make deploy.up-hub-besu        # Start the hub Besu network only (chain 1337)
-make deploy.up-besu            # Start hub + both spoke Besu networks
-make scenario-b.up-infra       # Infrastructure + all Besu networks
+cd samples && ./deploy-all.sh
 ```
 
 ### Relay

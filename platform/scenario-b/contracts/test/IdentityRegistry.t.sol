@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 import {Test, console} from "forge-std/Test.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
@@ -43,7 +43,7 @@ contract IdentityRegistryTest is Test {
         internal
     {
         vm.startPrank(admin);
-        registry.registerParticipant(account, name, role, ZK_POINTER);
+        registry.registerParticipant(account, name, role, ZK_POINTER, keccak256(abi.encodePacked("inst-", account)));
         registry.verifyParticipant(account);
         vm.stopPrank();
     }
@@ -57,7 +57,7 @@ contract IdentityRegistryTest is Test {
     function test_RegisterParticipant_CreatesPending() public {
         vm.prank(admin);
         registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER, bytes32("inst-bankA")
         );
 
         IdentityRegistryLibrary.Participant memory p = registry.getParticipant(bankA);
@@ -72,7 +72,7 @@ contract IdentityRegistryTest is Test {
     function test_VerifyParticipant_MovesPendingToVerified() public {
         vm.prank(admin);
         registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER, bytes32("inst-bankA")
         );
         assertFalse(registry.canTransact(bankA));
 
@@ -89,7 +89,7 @@ contract IdentityRegistryTest is Test {
     function test_VerifyParticipant_EmitsIdentityUpdated() public {
         vm.prank(admin);
         registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER, bytes32("inst-bankA")
         );
 
         vm.expectEmit(true, false, false, true);
@@ -119,7 +119,7 @@ contract IdentityRegistryTest is Test {
     function test_VerifyParticipant_RevertIf_NotVerifier() public {
         vm.prank(admin);
         registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER, bytes32("inst-bankA")
         );
 
         vm.prank(maliciousUser);
@@ -138,7 +138,7 @@ contract IdentityRegistryTest is Test {
         // Registrar can register (Pending) but cannot verify.
         vm.prank(registrar);
         registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER, bytes32("inst-bankA")
         );
         assertFalse(registry.canTransact(bankA));
 
@@ -150,7 +150,11 @@ contract IdentityRegistryTest is Test {
         vm.prank(verifier);
         vm.expectRevert();
         registry.registerParticipant(
-            maliciousUser, "X", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            maliciousUser,
+            "X",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            ZK_POINTER,
+            bytes32("inst-maliciousUser")
         );
 
         // Verifier can move the registrar-created participant to Verified.
@@ -163,7 +167,7 @@ contract IdentityRegistryTest is Test {
     function test_VerifyParticipant_SetsLastUpdateTimestamp() public {
         vm.prank(admin);
         registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER, bytes32("inst-bankA")
         );
 
         uint256 verifyTs = 1_900_000_000;
@@ -199,7 +203,11 @@ contract IdentityRegistryTest is Test {
         // Expecting AccessControl revert from OpenZeppelin
         vm.expectRevert();
         registry.registerParticipant(
-            bankA, "Fake Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA,
+            "Fake Bank",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            ZK_POINTER,
+            bytes32("inst-bankA")
         );
     }
 
@@ -226,13 +234,15 @@ contract IdentityRegistryTest is Test {
         vm.startPrank(admin);
 
         // Register with role NONE and verify: still cannot transact (role gate).
-        registry.registerParticipant(bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.NONE, ZK_POINTER);
+        registry.registerParticipant(
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.NONE, ZK_POINTER, bytes32("inst-bankA")
+        );
         registry.verifyParticipant(bankA);
         assertFalse(registry.canTransact(bankA));
 
         // Re-register as Commercial Bank (resets to Pending) then verify.
         registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER, bytes32("inst-bankA")
         );
         registry.verifyParticipant(bankA);
         assertTrue(registry.canTransact(bankA));
@@ -244,7 +254,11 @@ contract IdentityRegistryTest is Test {
         vm.prank(admin);
         vm.expectRevert(IIdentityRegistry.InvalidIdentityData.selector);
         registry.registerParticipant(
-            address(0), "Zero Address Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            address(0),
+            "Zero Address Bank",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            ZK_POINTER,
+            bytes32("inst-participant")
         );
     }
 
@@ -284,7 +298,7 @@ contract IdentityRegistryTest is Test {
         // registrar (GOVERNANCE_ROLE only) can register (-> Pending) but cannot promote to Verified.
         vm.prank(registrar);
         registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER, bytes32("inst-bankA")
         );
 
         vm.prank(registrar);
@@ -304,7 +318,7 @@ contract IdentityRegistryTest is Test {
     function test_CanTransact_PendingStatus() public {
         vm.prank(admin);
         registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER, bytes32("inst-bankA")
         );
 
         assertFalse(registry.isWhitelisted(bankA));
@@ -355,7 +369,7 @@ contract IdentityRegistryTest is Test {
         vm.expectEmit(true, true, false, true);
         emit ParticipantRegistered(bankA, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, BANK_NAME);
         registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER, bytes32("inst-bankA")
         );
     }
 
@@ -380,7 +394,11 @@ contract IdentityRegistryTest is Test {
         bytes32 newPointer = keccak256("new_proof");
         vm.prank(admin);
         registry.registerParticipant(
-            bankA, "Updated Bank Name", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, newPointer
+            bankA,
+            "Updated Bank Name",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            newPointer,
+            bytes32("inst-bankA")
         );
 
         IdentityRegistryLibrary.Participant memory p = registry.getParticipant(bankA);
@@ -398,7 +416,7 @@ contract IdentityRegistryTest is Test {
 
         vm.prank(admin);
         registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER, bytes32("inst-bankA")
         );
 
         IdentityRegistryLibrary.Participant memory p = registry.getParticipant(bankA);
@@ -409,7 +427,7 @@ contract IdentityRegistryTest is Test {
     function test_UpdateStatus_RefreshesLastUpdateTimestamp() public {
         vm.prank(admin);
         registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER, bytes32("inst-bankA")
         );
 
         uint256 laterTs = 1_800_000_000;
@@ -461,5 +479,61 @@ contract IdentityRegistryTest is Test {
         assertTrue(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), admin));
         assertTrue(registry.hasRole(registry.GOVERNANCE_ROLE(), admin));
         assertTrue(registry.hasRole(registry.VERIFIER_ROLE(), admin));
+    }
+
+    // ---------- Institution id (R2-H-4) ----------
+
+    /// @dev The registry is where the institution invariant has to hold: the AMM resume quorum counts
+    ///      distinct institutions, so a participant stored with a zero id would share that id with
+    ///      every other such participant and collapse the count.
+    function test_Revert_RegisterParticipant_ZeroInstitutionId() public {
+        address bank = makeAddr("zeroInstitutionBank");
+        vm.prank(admin);
+        vm.expectRevert(IIdentityRegistry.InvalidIdentityData.selector);
+        registry.registerParticipant(
+            bank, "No Institution Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0), bytes32(0)
+        );
+    }
+
+    function test_GetInstitutionId_ReturnsTheStoredValue() public {
+        address bank = makeAddr("institutionBank");
+        vm.prank(admin);
+        registry.registerParticipant(
+            bank,
+            "Institution Bank",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            keccak256(abi.encodePacked("bank-itau"))
+        );
+        assertEq(registry.getInstitutionId(bank), keccak256(abi.encodePacked("bank-itau")));
+    }
+
+    /// @dev Two wallets of one institution must report the SAME id — that sharing is the whole point,
+    ///      and it is what a quorum over institutions relies on.
+    function test_GetInstitutionId_SiblingWalletsShareOneId() public {
+        address walletOne = makeAddr("cbWalletOne");
+        address walletTwo = makeAddr("cbWalletTwo");
+        bytes32 institutionId = keccak256(abi.encodePacked("central-bank-brazil"));
+        vm.startPrank(admin);
+        registry.registerParticipant(
+            walletOne,
+            "CB Brazil key 1",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            institutionId
+        );
+        registry.registerParticipant(
+            walletTwo,
+            "CB Brazil key 2",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            institutionId
+        );
+        vm.stopPrank();
+        assertEq(registry.getInstitutionId(walletOne), registry.getInstitutionId(walletTwo));
+    }
+
+    function test_GetInstitutionId_UnregisteredIsZero() public {
+        assertEq(registry.getInstitutionId(makeAddr("neverRegistered")), bytes32(0));
     }
 }

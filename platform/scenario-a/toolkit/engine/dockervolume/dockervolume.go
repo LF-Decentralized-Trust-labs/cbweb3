@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path"
 	"strings"
@@ -26,7 +27,12 @@ import (
 // HelperImage is the throwaway image used to read/write files inside a named
 // Docker volume. Pinned and small; already pulled by besu-data-init /
 // paladin-data-init in the compose templates, so this adds no new image.
-const HelperImage = "alpine:3.20"
+//
+// This is the single source of truth for the helper image across this toolkit —
+// every other reference derives from it rather than repeating the literal, so a
+// version bump is one edit here. The version itself is pinned in
+// docs/TOOLCHAIN.md and gated by tools/check-alpine-version.sh.
+const HelperImage = "alpine:3.23"
 
 // ErrNotFound is returned by ReadFile when path does not exist inside the volume.
 var ErrNotFound = errors.New("dockervolume: file not found in volume")
@@ -43,7 +49,20 @@ func WriteFile(ctx context.Context, volume, filePath string, content []byte, mod
 		mode = "0644"
 	}
 	target := path.Join("/target", filePath)
-	script := fmt.Sprintf("mkdir -p %q && cat > %q && chmod %s %q", path.Dir(target), target, mode, target)
+	// The helper runs as root — a freshly created named volume is root-owned, so it has
+	// to. Everything it seeds is therefore root-owned too, which was harmless while every
+	// consumer ran as root and stopped being harmless when the backend service images
+	// became non-root (finding R2-M-12): a 0600 key owned by root is unreadable to the
+	// service that needs it, and a root-owned directory is unwritable. Both surfaced as a
+	// logged warning rather than a hard failure, which is worse. The invoking user is the
+	// right owner because that is the uid those containers are given (ENTITY_RUN_UID, the
+	// pattern ADR-001 established); containers still running as root are unaffected,
+	// since root ignores ownership.
+	owner := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+	// Not recursive: callers seed at the volume root too, and -R would walk whatever else
+	// that volume holds. Each seeded file is chowned by its own call, covering the same set.
+	script := fmt.Sprintf("mkdir -p %q && cat > %q && chmod %s %q && chown %s %q %q",
+		path.Dir(target), target, mode, target, owner, path.Dir(target), target)
 
 	cmd := exec.CommandContext(ctx, "docker", "run", "--rm", "-i",
 		"-v", volume+":/target",

@@ -14,6 +14,13 @@ services:
   compliance:
     image: "${COMPLIANCE_IMAGE:-cbweb3b/compliance:local}"
     container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-compliance"
+    # Runs as the host user, not the image default (uid 10001), because this service reads
+    # and writes the PKI material on a host-owned bind mount — the toolkit creates
+    # <dataDir>/pki with mode 0700 owned by the invoking user, so any other uid can
+    # neither read the CA nor persist an issued certificate. Same reasoning and same
+    # pattern as the Besu containers (ADR-001 / T028). Falls back to the image uid when
+    # the variables are absent, so a hand-run compose still gets a non-root process.
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
     environment:
       COMPLIANCE_GRPC_PORT: "9093"
       BLOCKCHAIN_CLIENT: "besu"
@@ -23,8 +30,14 @@ services:
       PARTICIPANT_REGISTRY_ADDRESS: "${SPOKE_IDENTITY_REGISTRY_ADDRESS:-}"
       CURRENCY_REGISTRY_ADDRESS: "${CURRENCY_REGISTRY_CONTRACT_ADDRESS:-}"
       CB_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
-      POSTGRES_DSN: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:-cbweb3}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
+      POSTGRES_DSN: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:?}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
       BANK_CODE: "${ENTITY}"
+      # Institution identity for on-chain participant registration: institutionId =
+      # keccak256(INSTITUTION_CODE). Deliberately NOT BANK_CODE — that is the entity ROLE, so
+      # every central bank carries "central-bank" and hashing it would make all of them ONE
+      # institution. The AMM resume quorum needs two DISTINCT institutions, so a paused AMM
+      # would then never be resumable. The toolkit renders this per entity.
+      INSTITUTION_CODE: "${INSTITUTION_CODE:-}"
       # CA (scenario-a standard): the CB seeds central-bank.crt/.key into cb_tls;
       # compliance signs participant CSRs with it. Empty on a bank → dev mode
       # (certificate issuance disabled), which the swap/approve-kyc path does not need.
@@ -72,6 +85,7 @@ services:
       # keep the default in sync with orchestrator.keycloakBackendAudience.
       KEYCLOAK_AUDIENCE: "${KEYCLOAK_AUDIENCE:-cbweb3-backend}"
       REDIS_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-redis:6379"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?}"
       BLOCKCHAIN_CLIENT: "besu"
       BESU_RPC_URL: "http://host.docker.internal:${ENTITY_RPC_PORT:?}"
       BESU_CHAIN_ID: "${SPOKE_CHAIN_ID:-1337}"
@@ -103,11 +117,44 @@ services:
   api-gateway:
     image: "${BACKEND_IMAGE:-cbweb3b/api-gateway:local}"
     container_name: "${CONTAINER_PREFIX}-${ENTITY}-api-gateway"
+    # Runs as the host user, not the image default (uid 10001), because this service reads
+    # and writes the PKI material on a host-owned bind mount — the toolkit creates
+    # <dataDir>/pki with mode 0700 owned by the invoking user, so any other uid can
+    # neither read the CA nor persist an issued certificate. Same reasoning and same
+    # pattern as the Besu containers (ADR-001 / T028). Falls back to the image uid when
+    # the variables are absent, so a hand-run compose still gets a non-root process.
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
     environment:
       APP_PORT: "8080"
       REQUEST_TIMEOUT_SEC: "30"
       ENTITY: "${ENTITY}"
       BANK_CODE: "${ENTITY}"
+      # Institution identity for on-chain participant registration: institutionId =
+      # keccak256(INSTITUTION_CODE). Deliberately NOT BANK_CODE — that is the entity ROLE, so
+      # every central bank carries "central-bank" and hashing it would make all of them ONE
+      # institution. The AMM resume quorum needs two DISTINCT institutions, so a paused AMM
+      # would then never be resumable. The toolkit renders this per entity.
+      INSTITUTION_CODE: "${INSTITUTION_CODE:-}"
+      # Service-to-service authentication id (X-Relay-Key-Id): the receiver pins one public key per
+      # id, so it must be unique across the deployment. BANK_CODE cannot serve: it is the entity
+      # ROLE, so every central bank carries "central-bank" and only one of them could authenticate —
+      # and "signed by central-bank" would not say which one. Empty on a bank, whose BANK_CODE is
+      # already unique and is what the gateway falls back to.
+      RELAY_KEY_ID: "${RELAY_KEY_ID:-}"
+      # Enforcement of per-entity signatures on the internal routes. Default OFF, and deliberately
+      # not flipped by the toolkit: every caller must sign and every peer must be pinned first, and a
+      # gateway with this set and no pinned peer REFUSES TO START rather than answer 401 to every
+      # internal request. Turning it on is an operator decision per entity, after the checks in the
+      # runbook's "service authentication" section.
+      RELAY_REQUIRE_SIGNATURE: "${RELAY_REQUIRE_SIGNATURE:-}"
+      # Where the relay-auth replay guard remembers the signatures it has already admitted. In
+      # memory it protects ONE process, so a gateway scaled to more than one replica would let a
+      # captured request through on the replica that has never seen it — including a transfer-limit
+      # restore, which credits a bank's daily allowance back. This is the entity's existing Redis
+      # (entity-infra), the same one the auth service keeps its login nonces in; no new service.
+      # Unset it to fall back to per-process memory — the gateway then says so at boot.
+      REDIS_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-redis:6379"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?}"
       COOKIE_SECURE: "false"
       AUTH_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-auth:9091"
       COMPLIANCE_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-compliance:9093"
@@ -133,7 +180,27 @@ services:
       # reaches the hub cross-VM; falls back to the single-host host.docker.internal
       # published port when the toolkit did not provide a routable URL.
       HUB_BESU_RPC_URL: "${HUB_BESU_RPC_URL:-http://host.docker.internal:${HUB_RPC_PORT}}"
-      SIGNER_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
+      # Hub signing key — set ONLY on a central bank. A commercial bank leaves it empty:
+      # the Hub AMM admits only verified Hub participants (onlyVerified(msg.sender)) and a
+      # bank has no Hub identity, so it delegates every Hub act to its CB over
+      # /internal/amm/cross-currency-{bridge-in,hub-swap,residue-return}. Giving the bank the
+      # CB's key so it could sign on the Hub itself is the sovereign key leaving the
+      # sovereign — the opposite of concentrating the corridor in the CB. Quotes and reserve
+      # reads need no key, so the AMM client still boots read-only.
+      SIGNER_PRIVATE_KEY: "${HUB_SIGNER_PRIVATE_KEY:-}"
+      # Hub chain id for signing hub transactions. Set by the toolkit from the hub bundle;
+      # the fallback matches the local hub, but a wrong chain id makes every hub tx fail
+      # with "Wrong chainId", so the real value is passed whenever it is known.
+      HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
+      # This CB's hub identity as an address (same key as SIGNER_PRIVATE_KEY above). The
+      # gateway grants it LiquidityProvider on the hub IdentityRegistry at boot (idempotent)
+      # and uses it for hub balance reads. Empty on a bank, which holds no hub identity.
+      LOCAL_CB_HUB_SIGNER: "${LOCAL_CB_HUB_SIGNER:-}"
+      # The CB's bridge relayer runs on its own hub identity (separate nonce space). It needs
+      # CENTRAL_BANK_ROLE on this CB's W-token to mint and burn; this gateway grants it at boot,
+      # idempotently, using the token administration the currency handover moved to the CB.
+      # Empty on a bank, which runs no relayer and holds no hub identity.
+      HUB_RELAYER_ADDRESS: "${HUB_RELAYER_ADDRESS:-}"
       PAIR_REGISTRY_CONTRACT_ADDRESS: "${PAIR_REGISTRY_CONTRACT_ADDRESS:-}"
       CURRENCY_REGISTRY_CONTRACT_ADDRESS: "${CURRENCY_REGISTRY_CONTRACT_ADDRESS:-}"
       HUB_TOKEN_A_ADDRESS: "${HUB_TOKEN_A_ADDRESS:-}"
@@ -147,7 +214,7 @@ services:
       # Hub-wide LCR → enables SovereignLiquidityService (sovereign-add +
       # cross-currency bridge-in/out endpoints).
       LIQUIDITY_COMMIT_REGISTRY_ADDRESS: "${LIQUIDITY_COMMIT_REGISTRY_ADDRESS:-}"
-      DATABASE_URL: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:-cbweb3}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:?}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
       # Commercial banks resolve the sovereign AMM from their CB (empty on a CB).
       CENTRAL_BANK_API_URL: "${CENTRAL_BANK_API_URL:-}"
       INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:-}"
@@ -156,6 +223,14 @@ services:
       # beneficiary's CB (CB-B) by spoke_out. Without it, Step 3 falls back to a
       # local enqueue that no bank-side relayer can process. Empty disables it.
       CACTI_API_URL: "${CACTI_API_URL:-}"
+      # Background sweeps, both with in-code defaults — passed through so an operator can
+      # slow them down or switch them off without rebuilding the image. 0 disables.
+      #   residue retry: re-enqueues a slippage-buffer return whose enqueue failed, so the
+      #     payer's unspent reserves are not left with the CB.
+      #   hub reconciliation: reports W-token on this CB's Hub address that its own records
+      #     cannot attribute to a bank payment. Report-only; it never moves value.
+      RESIDUE_RETRY_INTERVAL_SEC: "${RESIDUE_RETRY_INTERVAL_SEC:-}"
+      HUB_RECONCILIATION_INTERVAL_SEC: "${HUB_RECONCILIATION_INTERVAL_SEC:-}"
       # Bridge lock-mint / burn-unlock derivation: the entity's own spoke network id
       # (spoke-brl, spoke-ars) and native tCeBM symbol. Required on a CB that receives
       # a cross-currency bridge-out (it enqueues the W-<target> burn for its spoke).

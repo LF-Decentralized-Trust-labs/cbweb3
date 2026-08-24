@@ -24,8 +24,9 @@
 
 | Document | Description |
 |----------|-------------|
-| [runbooks/deployment-runbook.md](runbooks/deployment-runbook.md) | Complete deployment guide: `make spoke-all`, phase-by-phase walkthrough, health checks, HTLC smoke test, and teardown procedure |
+| [runbooks/deployment-runbook.md](runbooks/deployment-runbook.md) | Complete deployment guide: `cd samples && ./deploy-all.sh`, phase-by-phase walkthrough, health checks, HTLC smoke test, and teardown procedure |
 | [runbooks/environment-setup.md](runbooks/environment-setup.md) | Prerequisites, tool installation (Go, Foundry, Docker, k6), and full port reference for all 6 entities across both spokes |
+| [`docs/TOOLCHAIN.md`](../../docs/TOOLCHAIN.md) | **Authoritative** tool versions for the whole platform (Go 1.26, Node 22 LTS, …) and where each floor is enforced |
 
 **Quick start:**
 
@@ -34,7 +35,7 @@
 # See: runbooks/environment-setup.md
 
 # 2. Deploy full stack
-cd scenario-a && make spoke-all
+cd scenario-a/samples && ./deploy-all.sh
 
 # 3. Verify
 curl http://localhost:18080/healthz   # bank-a
@@ -50,7 +51,7 @@ curl http://localhost:58080/healthz   # central-bank-a
 |----------|-------------|
 | [runbooks/configuration-reference.md](runbooks/configuration-reference.md) | Complete environment variable reference by component: infra, api-gateway, auth, compliance, payment-orchestrator, contracts, frontend, NOC, Paladin — across all 6 entities |
 | [runbooks/contract-configuration.md](runbooks/contract-configuration.md) | Smart contract deployment parameters, on-chain RBAC roles (IdentityRegistry, tCeBM, HTLC), Keycloak realm/client/role setup, PKI certificate structure, and post-deployment checklist |
-| [../apis/openapi/api-gateway.yaml](../apis/openapi/api-gateway.yaml) | OpenAPI 3.0 specification — v2.3.0, 75 operations, all public and internal api-gateway endpoints |
+| [../apis/openapi/api-gateway.yaml](../apis/openapi/api-gateway.yaml) | OpenAPI 3.0 specification — v2.3.0, 83 operations, all public and internal api-gateway endpoints |
 | [../apis/README.md](../apis/README.md) | API index with endpoint summary table and usage guide |
 
 ---
@@ -80,6 +81,9 @@ curl http://localhost:58080/healthz   # central-bank-a
 | Document | Description |
 |----------|-------------|
 | [test-execution-plan.md](test-execution-plan.md) | Test execution plan: strategy, scope, 9-phase timeline with LNET/Banks RACI matrix, API-First E2E flows, performance thresholds, security controls, CI/CD quality gates (pending), and evidence bundle format |
+| [../../docs/deliverables/D12-timeline-actuals.md](../../docs/deliverables/D12-timeline-actuals.md) | Execution record: planned vs actual phase dates and the recorded deviations (both scenarios) |
+| [../../docs/deliverables/D12-defect-log.md](../../docs/deliverables/D12-defect-log.md) | Defect register: format, severity/SLA, lifecycle, and the defects the executed phases produced (both scenarios) |
+| [../../docs/deliverables/D12-uat-records.md](../../docs/deliverables/D12-uat-records.md) | UAT record and sign-off formats, participant coverage, and the preconditions blocking Phase 5 (both scenarios) |
 | [../tests/TEST-CATALOG.md](../tests/TEST-CATALOG.md) | Test case catalog: 159 cases (120 implemented, 39 planned) across smart contract (Foundry), API unit (Go), integration, and E2E levels — mapped to existing tryout scripts |
 
 **Run tests manually:**
@@ -93,7 +97,6 @@ cd scenario-a/backend && go test ./...
 
 # E2E flows
 ./tryouts/tryout-fx-agreement-e2e.sh
-./tryouts/tryout-escrow-flow.sh
 ./tryouts/tryout-cacti-interop.sh
 ```
 

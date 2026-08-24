@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 /// @title IAutomatedMarketMaker
 /// @dev Interface for the Constant Product AMM with ERC20 LP-share accounting and an asymmetric
@@ -56,6 +56,12 @@ interface IAutomatedMarketMaker {
     error AMM__AlreadyPaused();
     error AMM__ProposalNotFound(bytes32 proposalId);
     error AMM__AlreadySigned(bytes32 proposalId, address signer);
+    /// @notice A resume proposal raised under an earlier pause is being signed after a later pause.
+    error AMM__ProposalExpired(bytes32 proposalId, uint256 proposalEpoch, uint256 currentEpoch);
+    /// @notice A second wallet of an institution that already signed this proposal tried to sign.
+    error AMM__InstitutionAlreadySigned(bytes32 proposalId, bytes32 institutionId);
+    /// @notice The signer carries no institution id in the registry, so its vote cannot be attributed.
+    error AMM__InvalidInstitutionId(address account);
     error AMM__ProposalQuorumIncomplete(bytes32 proposalId, uint256 signatures, uint256 required);
     /// @dev New fee value (swap or withdrawal) exceeds the allowed maximum (1000 = 10%).
     error AMM__FeeBpsTooHigh(uint256 provided, uint256 max);

@@ -500,7 +500,9 @@ func TestTokenEndpoints(t *testing.T) {
 	if resp := postJSON(t, app, "/mint", map[string]any{"to": "x", "amount": "1"}); resp.StatusCode != http.StatusCreated {
 		t.Errorf("mint: want 201, got %d", resp.StatusCode)
 	}
-	if resp := postJSON(t, app, "/burn", map[string]any{"from": "x", "amount": "1"}); resp.StatusCode != http.StatusCreated {
+	// A burn now carries the operator's justification: it used to be demanded by
+	// the screen and then dropped in the browser (R2-M-8). See token_audit_test.go.
+	if resp := postJSON(t, app, "/burn", map[string]any{"from": "x", "amount": "1", "reason": "redemption"}); resp.StatusCode != http.StatusCreated {
 		t.Errorf("burn: want 201, got %d", resp.StatusCode)
 	}
 	if resp := postJSON(t, app, "/transfer", map[string]any{"to": "x", "amount": "1"}); resp.StatusCode != http.StatusOK {

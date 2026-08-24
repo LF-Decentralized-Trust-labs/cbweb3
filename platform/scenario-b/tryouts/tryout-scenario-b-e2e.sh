@@ -30,16 +30,36 @@ esac
 
 SKIP_UP="${SKIP_UP:-1}"
 
-# Per-entity API Gateway URLs (actual docker-compose port mappings)
-API_GW_BANK_A_URL="${API_GW_BANK_A_URL:-http://localhost:18080}"
-API_GW_CENTRAL_BANK_A_URL="${API_GW_CENTRAL_BANK_A_URL:-http://localhost:38080}"
-API_GW_CENTRAL_BANK_B_URL="${API_GW_CENTRAL_BANK_B_URL:-http://localhost:60080}"
+# ── Endpoints ────────────────────────────────────────────────────────────────
+# Derived from the toolkit manifests, not hardcoded. The defaults here used to be
+# the legacy deploy/local ports (18080/38080/60080, hub 8845, relay 4000); nothing
+# answers on them since that bring-up was removed, so every call in this script
+# addressed a stack that does not exist.
+#
+# tests/integration/toolkit-env.sh reads the same manifests the toolkit was applied
+# with and only fills in what the caller left unset, so an explicit override still
+# wins. Sourced when present; the script still runs without it if you pass the URLs.
+_tryout_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+_toolkit_env="${_tryout_dir}/../tests/integration/toolkit-env.sh"
+if [[ -f "$_toolkit_env" ]]; then
+  # shellcheck source=/dev/null
+  source "$_toolkit_env" >/dev/null
+fi
 
-BESU_HUB_RPC="${BESU_HUB_RPC:-http://localhost:8845}"
-SPOKE_A_RPC="${SPOKE_A_RPC:-http://localhost:8645}"
-SPOKE_B_RPC="${SPOKE_B_RPC:-http://localhost:8745}"
-KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8081}"
-CACTI_RELAYER_URL="${CACTI_RELAYER_URL:-http://localhost:4000}"
+API_GW_BANK_A_URL="${API_GW_BANK_A_URL:?derive it with tests/integration/toolkit-env.sh or pass it explicitly}"
+API_GW_CENTRAL_BANK_A_URL="${API_GW_CENTRAL_BANK_A_URL:?see API_GW_BANK_A_URL}"
+API_GW_CENTRAL_BANK_B_URL="${API_GW_CENTRAL_BANK_B_URL:?see API_GW_BANK_A_URL}"
+# The beneficiary bank. Its own gateway is needed because onboarding is initiated by the
+# bank itself — the payer's gateway cannot onboard someone else.
+API_GW_BANK_B_URL="${API_GW_BANK_B_URL:?see API_GW_BANK_A_URL}"
+
+BESU_HUB_RPC="${BESU_HUB_RPC:?see API_GW_BANK_A_URL}"
+# toolkit-env.sh names the spoke RPCs BESU_SPOKE_*; this script has always called
+# them SPOKE_*. Map rather than rename, so an operator passing either one is served.
+SPOKE_A_RPC="${SPOKE_A_RPC:-${BESU_SPOKE_A_RPC:-}}"
+SPOKE_B_RPC="${SPOKE_B_RPC:-${BESU_SPOKE_B_RPC:-}}"
+# Scenario B's relay listens on 7000 (Scenario A's is the one on 4000).
+CACTI_RELAYER_URL="${CACTI_RELAYER_URL:-http://localhost:7000}"
 
 # Hub contract addresses (read from CB-A infra env file if not set externally)
 HUB_TOKEN_A_ADDRESS="${HUB_TOKEN_A_ADDRESS:-$(grep -s '^HUB_TOKEN_A_ADDRESS=' backend/config/.env.infra.central-bank-a 2>/dev/null | cut -d= -f2 || echo '')}"
@@ -48,6 +68,45 @@ HUB_IDENTITY_REGISTRY_ADDRESS="${HUB_IDENTITY_REGISTRY_ADDRESS:-$(grep -s '^HUB_
 CURRENCY_REGISTRY_CONTRACT_ADDRESS="${CURRENCY_REGISTRY_CONTRACT_ADDRESS:-$(grep -s '^CURRENCY_REGISTRY_CONTRACT_ADDRESS=' backend/config/.env.infra.central-bank-a 2>/dev/null | cut -d= -f2 || echo '')}"
 
 # Keycloak client credentials (read from the generated .env files)
+# ── Sovereign corridor under test ────────────────────────────────────────────
+# The hub wraps each sovereign currency with a "W-" prefix and names a pool by BOTH
+# wrapped sides: "W-BRL-W-ARS". This script used to hardcode "BRL-USD" in 28 places —
+# a pair from an earlier corridor that no toolkit stack has, so every pool read,
+# quote, swap, commit and breaker call addressed something that does not exist.
+#
+# Defaults follow samples/deploy-all.sh (BRL<->ARS). tests/integration/toolkit-env.sh
+# exports these three, so sourcing it points the tryout at whatever corridor is live.
+SOURCE_CURRENCY="${SOURCE_CURRENCY:-BRL}"
+TARGET_CURRENCY="${TARGET_CURRENCY:-ARS}"
+POOL_PAIR="${POOL_PAIR:-W-${SOURCE_CURRENCY}-W-${TARGET_CURRENCY}}"
+
+# Seed amounts, one per side. They are NOT equal: the pool is priced at the national
+# exchange rate, so side B carries the counter-currency multiple of side A. The first
+# deposit sets the pool's price, which every later quote in this run is measured against.
+SEED_AMOUNT_A="${SEED_AMOUNT_A:-1000000000000000000000}"    # 1e21 W-<SOURCE>
+SEED_AMOUNT_B="${SEED_AMOUNT_B:-287000000000000000000000}"  # 287e21 W-<TARGET>
+
+# Payer funding. The bank must hold tCeBM on its own spoke before it can bridge in;
+# there are no static hub tokens to mint from. Topped up only when short.
+PAYER_MIN_BALANCE="${PAYER_MIN_BALANCE:-10000000000000000000}"  # 10e18
+PAYER_TOPUP="${PAYER_TOPUP:-20000000000000000000}"              # 20e18
+
+# The payment itself. max_amount_in is kept above the expected cost on purpose: the
+# unspent buffer comes back on a separate asynchronous leg (the residue return).
+SWAP_AMOUNT_OUT="${SWAP_AMOUNT_OUT:-1000000000000000000}"       # 1e18
+SWAP_MAX_AMOUNT_IN="${SWAP_MAX_AMOUNT_IN:-3000000000000000000}" # 3e18
+
+# Bridged by the US2 lock-mint / burn-unlock story.
+BRIDGE_AMOUNT="${BRIDGE_AMOUNT:-1000000000000000000}"           # 1e18
+
+# Bank codes come from the manifests (spec.bankId) via toolkit-env.sh. The literals
+# "bank-a"/"bank-b" name nothing in a toolkit topology.
+BANK_A_CODE="${BANK_A_CODE:-bank-itau}"
+BANK_B_CODE="${BANK_B_CODE:-bank-galicia}"
+
+KC_BANK_B_CLIENT="${KC_BANK_B_CLIENT:-}"
+KC_BANK_B_SECRET="${KC_BANK_B_SECRET:-}"
+
 KC_BANK_A_REALM="${KC_BANK_A_REALM:-bank-a}"
 KC_BANK_A_CLIENT="${KC_BANK_A_CLIENT:-bank-a-client}"
 KC_BANK_A_SECRET="${KC_BANK_A_SECRET:-$(grep -s '^KC_CLIENT_SECRET=' backend/config/.env.infra.bank-a 2>/dev/null | cut -d= -f2 || echo '')}"
@@ -109,13 +168,22 @@ log "CACTI_RELAYER_URL=${CACTI_RELAYER_URL}"
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-login_keycloak() {
-  local realm="$1" client_id="$2" client_secret="$3"
-  curl -sS -X POST "${KEYCLOAK_URL}/realms/${realm}/protocol/openid-connect/token" \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "grant_type=client_credentials" \
-    -d "client_id=${client_id}" \
-    -d "client_secret=${client_secret}" | jq -r '.access_token // empty'
+# gateway_login <gateway_url> <username> <password>
+#
+# Logs in through the ENTITY'S OWN gateway, which routes to that entity's Keycloak.
+# This replaces a direct grant_type=client_credentials call against a single shared
+# Keycloak, which was wrong twice over: the auth service accepts only the OIDC
+# password grant (a realm client id/secret is refused on purpose), and the toolkit
+# gives every entity its OWN Keycloak rather than one instance with per-entity realms.
+#
+# The clientId/clientSecret JSON fields are the wire contract's names, not the
+# credential type — a username and that user's password is what belongs in them.
+gateway_login() {
+  local gw="$1" user="$2" pass="$3"
+  curl -sS -X POST "${gw%/}/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "$(jq -cn --arg u "$user" --arg p "$pass" '{clientId:$u, clientSecret:$p}')" \
+    | jq -r '.accessToken // empty'
 }
 
 # api_get  <base_url> <path> [token]
@@ -174,67 +242,79 @@ step0_up() {
 # ─────────────────────────────────────────────────────────────────────────────
 step1_infrastructure() {
   step "1. Verify infrastructure readiness"
-  wait_for "${API_GW_BANK_A_URL}/healthz" 60 3 || true
-  wait_for "${API_GW_CENTRAL_BANK_A_URL}/healthz" 60 3 || true
-  # AMM-capable Hub (Besu RPC)
-  curl -sS -X POST -H "Content-Type: application/json" \
-    --data '{"jsonrpc":"2.0","method":"net_version","id":1}' \
-    "${BESU_HUB_RPC}" | jq -e '.result' >/dev/null \
-    && log "Hub Besu RPC OK" || log "(warn) Hub Besu RPC not responding"
-  curl -sS -X POST -H "Content-Type: application/json" \
-    --data '{"jsonrpc":"2.0","method":"net_version","id":1}' \
-    "${SPOKE_B_RPC}" | jq -e '.result' >/dev/null || log "(warn) Spoke-B Besu RPC not responding"
-  log "Infrastructure ready"
+
+  # This step is a GATE. It used to swallow every failure — `|| true` on the health
+  # waits, "(warn)" on the RPC probes — and then print "Infrastructure ready"
+  # unconditionally. A run against a stack that answered NOTHING sailed through to
+  # step 4a and reported the defect there, three steps from its cause and blaming the
+  # wrong thing. Whatever is unreachable, say so here and stop.
+  local unreachable=()
+
+  wait_for "${API_GW_BANK_A_URL}/healthz" 60 3         || unreachable+=("bank-a gateway ${API_GW_BANK_A_URL}")
+  wait_for "${API_GW_CENTRAL_BANK_A_URL}/healthz" 60 3 || unreachable+=("central-bank-a gateway ${API_GW_CENTRAL_BANK_A_URL}")
+  wait_for "${API_GW_CENTRAL_BANK_B_URL}/healthz" 60 3 || unreachable+=("central-bank-b gateway ${API_GW_CENTRAL_BANK_B_URL}")
+
+  rpc_alive() {
+    curl -sS -X POST -H "Content-Type: application/json" \
+      --data '{"jsonrpc":"2.0","method":"net_version","id":1}' "$1" 2>/dev/null \
+      | jq -e '.result' >/dev/null 2>&1
+  }
+  rpc_alive "${BESU_HUB_RPC}" || unreachable+=("hub Besu RPC ${BESU_HUB_RPC}")
+  [ -n "${SPOKE_A_RPC:-}" ] && { rpc_alive "${SPOKE_A_RPC}" || unreachable+=("spoke-A Besu RPC ${SPOKE_A_RPC}"); }
+  [ -n "${SPOKE_B_RPC:-}" ] && { rpc_alive "${SPOKE_B_RPC}" || unreachable+=("spoke-B Besu RPC ${SPOKE_B_RPC}"); }
+
+  if [ ${#unreachable[@]} -gt 0 ]; then
+    local what
+    for what in "${unreachable[@]}"; do echo "  ✗ unreachable: ${what}" >&2; done
+    fail "step1: ${#unreachable[@]} endpoint(s) unreachable. Bring a stack up with the single provisioning path (cd samples && ./deploy-all.sh), or pass the URLs explicitly."
+  fi
+  log "Infrastructure ready — all gateways and RPCs answering"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 2: Verify contracts (scenario-b.up already deploys them)
 # ─────────────────────────────────────────────────────────────────────────────
+# Step 2: Contracts.
+#
+# What used to live here was a `cast send setCentralBankOf(...)` pair, signing with a
+# key read from backend/config/.env.infra.central-bank-a — a file the legacy bring-up
+# wrote and the toolkit deliberately does not. The key came back empty on every run,
+# so both calls warned and nothing was configured; the warnings were noise pointing at
+# an "admin role" that was never the problem.
+#
+# It is also the wrong layer: the toolkit registers each spoke's currency and its
+# central bank on the hub during found-spoke. A tryout signing raw transactions with a
+# CB's private key is exactly what the sovereignty model exists to avoid — every step
+# below goes through the CB's own gateway, authenticated, holding no keys.
+# ─────────────────────────────────────────────────────────────────────────────
 step2_contracts() {
-  step "2. Verify contracts deployed + ensure IdentityRegistry is configured"
-  log "Contracts deployed by scenario-b.up — skipping separate deploy"
-
-  # ── Ensure setCentralBankOf is configured in IdentityRegistry ──
-  # This is idempotent and safe to run on every startup.
-  # Uses CB-A's signer key (= IdentityRegistry DEFAULT_ADMIN_ROLE) to register
-  # CB-A as central bank of tokenA (BRL) and CB-B as central bank of tokenB (EUR).
-  local admin_key id_reg token_a token_b cb_a_key cb_b_key cb_a_addr cb_b_addr
-  admin_key="$(grep -s '^SIGNER_PRIVATE_KEY=' backend/config/.env.infra.central-bank-a 2>/dev/null | cut -d= -f2 || echo '')"
-  cb_b_key="$(grep -s '^SIGNER_PRIVATE_KEY=' backend/config/.env.infra.central-bank-b 2>/dev/null | cut -d= -f2 || echo '')"
-  id_reg="${HUB_IDENTITY_REGISTRY_ADDRESS:-$(grep -s '^HUB_IDENTITY_REGISTRY_ADDRESS=' backend/config/.env.infra.central-bank-a 2>/dev/null | cut -d= -f2 || echo '')}"
-  token_a="${HUB_TOKEN_A_ADDRESS:-}"
-  token_b="${HUB_TOKEN_B_ADDRESS:-}"
-  if [ -z "$admin_key" ] || [ -z "$id_reg" ] || [ -z "$token_a" ] || [ -z "$token_b" ]; then
-    log "WARN: missing admin_key/id_reg/token addresses — skipping setCentralBankOf"
-  else
-    cb_a_addr="$(cast wallet address --private-key "0x${admin_key#0x}" 2>/dev/null || echo '')"
-    cb_b_addr="$(cast wallet address --private-key "0x${cb_b_key#0x}" 2>/dev/null || echo '')"
-    if [ -n "$cb_a_addr" ] && [ -n "$cb_b_addr" ]; then
-      cast send "$id_reg" "setCentralBankOf(address,address)" "$token_a" "$cb_a_addr" \
-        --private-key "0x${admin_key#0x}" --rpc-url "${BESU_HUB_RPC}" >/dev/null 2>&1 && \
-        log "setCentralBankOf(tokenBRL, CB-A=${cb_a_addr}) OK" || \
-        log "WARN: setCentralBankOf(tokenBRL, CB-A) failed — check admin role"
-      cast send "$id_reg" "setCentralBankOf(address,address)" "$token_b" "$cb_b_addr" \
-        --private-key "0x${admin_key#0x}" --rpc-url "${BESU_HUB_RPC}" >/dev/null 2>&1 && \
-        log "setCentralBankOf(tokenEUR, CB-B=${cb_b_addr}) OK" || \
-        log "WARN: setCentralBankOf(tokenEUR, CB-B) failed — check admin role"
-    else
-      log "WARN: could not derive CB addresses from private keys — skipping setCentralBankOf"
-    fi
-  fi
+  step "2. Verify the sovereign currencies are registered on the hub"
+  local currencies sym_a sym_b
+  currencies="$(api_get "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/hub/currencies" "$CENTRAL_BANK_A_TOKEN" || true)"
+  sym_a="W-tCeBM_${SOURCE_CURRENCY}"
+  sym_b="W-tCeBM_${TARGET_CURRENCY}"
+  for sym in "$sym_a" "$sym_b"; do
+    echo "$currencies" | jq -e --arg s "$sym" '[.currencies[]? | select(.symbol==$s)] | length > 0' >/dev/null 2>&1 \
+      || fail "step2: ${sym} is not registered on the hub — found-spoke registers it, so the spoke for that currency did not complete"
+  done
+  log "both sovereign currencies registered: ${sym_a}, ${sym_b}"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 3: Acquire OIDC tokens for each role
-# ─────────────────────────────────────────────────────────────────────────────
 step3_participants() {
   step "3. Acquire OIDC tokens (bank-a, central-bank-a, central-bank-b)"
-  BANK_A_TOKEN="$(login_keycloak "$KC_BANK_A_REALM" "$KC_BANK_A_CLIENT" "$KC_BANK_A_SECRET" || true)"
-  CENTRAL_BANK_A_TOKEN="$(login_keycloak "$KC_CENTRAL_BANK_A_REALM" "$KC_CENTRAL_BANK_A_CLIENT" "$KC_CENTRAL_BANK_A_SECRET" || true)"
-  CENTRAL_BANK_B_TOKEN="$(login_keycloak "$KC_CENTRAL_BANK_B_REALM" "$KC_CENTRAL_BANK_B_CLIENT" "$KC_CENTRAL_BANK_B_SECRET" || true)"
-  [ -n "$BANK_A_TOKEN" ]         && log "bank-a token acquired"         || log "(warn) no bank-a token — check KC_BANK_A_SECRET"
-  [ -n "$CENTRAL_BANK_A_TOKEN" ] && log "central-bank-a token acquired" || log "(warn) no central-bank-a token — check KC_CENTRAL_BANK_A_SECRET"
-  [ -n "$CENTRAL_BANK_B_TOKEN" ] && log "central-bank-b token acquired" || log "(warn) no central-bank-b token — check KC_CENTRAL_BANK_B_SECRET"
+  BANK_A_TOKEN="$(gateway_login "$API_GW_BANK_A_URL" "$KC_BANK_A_CLIENT" "$KC_BANK_A_SECRET" || true)"
+  BANK_B_TOKEN="$(gateway_login "$API_GW_BANK_B_URL" "$KC_BANK_B_CLIENT" "$KC_BANK_B_SECRET" || true)"
+  CENTRAL_BANK_A_TOKEN="$(gateway_login "$API_GW_CENTRAL_BANK_A_URL" "$KC_CENTRAL_BANK_A_CLIENT" "$KC_CENTRAL_BANK_A_SECRET" || true)"
+  CENTRAL_BANK_B_TOKEN="$(gateway_login "$API_GW_CENTRAL_BANK_B_URL" "$KC_CENTRAL_BANK_B_CLIENT" "$KC_CENTRAL_BANK_B_SECRET" || true)"
+  # A missing token is fatal, not a warning: every step below authenticates with one,
+  # and letting the run continue reports the first API call's 401 as the defect
+  # instead of the login that never happened.
+  [ -n "$BANK_A_TOKEN" ]         || fail "step3: no ${BANK_A_CODE} token from $API_GW_BANK_A_URL (user $KC_BANK_A_CLIENT)"
+  [ -n "$BANK_B_TOKEN" ]         || fail "step3: no ${BANK_B_CODE} token from $API_GW_BANK_B_URL (user $KC_BANK_B_CLIENT)"
+  [ -n "$CENTRAL_BANK_A_TOKEN" ] || fail "step3: no central-bank-a token from $API_GW_CENTRAL_BANK_A_URL (user $KC_CENTRAL_BANK_A_CLIENT)"
+  [ -n "$CENTRAL_BANK_B_TOKEN" ] || fail "step3: no central-bank-b token from $API_GW_CENTRAL_BANK_B_URL (user $KC_CENTRAL_BANK_B_CLIENT)"
+  log "tokens acquired for bank-a, central-bank-a and central-bank-b"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -243,7 +323,7 @@ step3_participants() {
 step4_pool() {
   step "4. Verify AMM pool status (seed initial liquidity if empty)"
   local resp reserve_a reserve_b pool_status
-  resp="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/BRL-USD/status" "$BANK_A_TOKEN" || true)"
+  resp="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/${POOL_PAIR}/status" "$BANK_A_TOKEN" || true)"
   log "Pool status: $(echo "$resp" | jq -c '.' 2>/dev/null || echo "$resp")"
   if echo "$resp" | jq -e '.reserve_a' >/dev/null 2>&1; then
     reserve_a="$(echo "$resp" | jq -r '.reserve_a // "0"')"
@@ -266,255 +346,258 @@ step4_pool() {
 #          mint tokens to its own signer address and approve the AMM before the pool
 #          can be seeded. This must run once after every fresh environment reset.
 # ─────────────────────────────────────────────────────────────────────────────
-step4a_mint_and_approve() {
-  step "4a. Mint Hub tCeBM tokens + approve AMM (central-bank-a, central-bank-b, bank-a)"
-  local body resp
+# Step 4a: Open the sovereign FX corridor.
+#
+# This step did not exist, and its absence is why the prelude failed. It used to be
+# unnecessary: provisioning created ONE static AMM plus two hub tokens, so a pool was
+# already there when the stack came up, and PairRegistry (step 8) was a feature test
+# rather than a prerequisite.
+#
+# That model is gone. The toolkit states it plainly — "the sovereign FX corridor is
+# NOT part of provisioning: it is opened at runtime by each central bank through its
+# governance portal" (toolkit/engine/orchestrator/step_found_spoke.go) — and
+# TestApplyFoundSpokeHasNoSovereignTail keeps it that way. An AMM is now resolved PER
+# PAIR, so with no pair open there is nothing for the steps below to address.
+#
+# Two sovereign acts, one per central bank. amm_address is omitted deliberately: the
+# proposing CB then deploys the pair's own AMM in the same signed call.
+# ─────────────────────────────────────────────────────────────────────────────
+step4a_open_corridor() {
+  step "4a. Open the ${SOURCE_CURRENCY}<->${TARGET_CURRENCY} corridor (${SOURCE_CURRENCY} CB proposes, ${TARGET_CURRENCY} CB confirms)"
 
-  # central-bank-a mints TOKEN_A (BRL) to its own signer and approves AMM.
-  # FR-018: gateway detects CENTRAL_BANK_ROLE on TOKEN_A automatically — no amount_b needed.
-  body='{"amount":"200000"}'
-  resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/token/mint-and-approve" "$body" "$CENTRAL_BANK_A_TOKEN" || true)"
-  log "Mint+Approve central-bank-a: $(echo "$resp" | jq -c '.' || echo "$resp")"
-  if echo "$resp" | jq -e '.status == "ok"' >/dev/null 2>&1; then
-    log "central-bank-a: tokens minted and AMM approved"
-  else
-    fail "step4a: central-bank-a mint-and-approve failed — check HUB_TOKEN_A_ADDRESS / HUB_TOKEN_B_ADDRESS"
+  local pairs_resp existing
+  pairs_resp="$(api_get "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/pairs" "$CENTRAL_BANK_A_TOKEN" || true)"
+  existing="$(echo "$pairs_resp" | jq -r --arg p "$POOL_PAIR" \
+    '[.pairs[]? | select(.pair_id==$p and .status=="ACTIVE")] | length' 2>/dev/null || echo 0)"
+  if [ "${existing:-0}" -ge 1 ]; then
+    log "Corridor ${POOL_PAIR} already ACTIVE — skipping open"
+    return 0
   fi
 
-  # G5: central-bank-b mints TOKEN_B to its own signer and approves AMM (CB-B's gateway).
-  # Also mints TOKEN_B to CB-A's signer address so CB-A's gateway can execute
-  # AddSingleSidedLiquidity(TOKEN_B) when commit B auto-matches on CB-A's gateway.
-  # Architecture: commit B is routed to CB-A's gateway (shared DB) for matching;
-  # CB-A's signer therefore needs TOKEN_B balance + AMM approval for TOKEN_B. (FR-018)
-  local mint_cb_b_resp cb_a_key cb_a_addr
-  mint_cb_b_resp="$(api_post "$API_GW_CENTRAL_BANK_B_URL" "/api/v2/amm/token/mint-and-approve" \
-    '{"amount":"200000"}' \
+  # Resolve each spoke's WRAPPED token on the hub. The hub lists it as W-tCeBM_<CUR>;
+  # the pair is keyed by these two addresses.
+  local currencies token_a token_b
+  currencies="$(api_get "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/hub/currencies" "$CENTRAL_BANK_A_TOKEN" || true)"
+  token_a="$(echo "$currencies" | jq -r --arg s "W-tCeBM_${SOURCE_CURRENCY}" \
+    '[.currencies[]? | select(.symbol==$s) | .token_address][0] // empty')"
+  token_b="$(echo "$currencies" | jq -r --arg s "W-tCeBM_${TARGET_CURRENCY}" \
+    '[.currencies[]? | select(.symbol==$s) | .token_address][0] // empty')"
+  [ -n "$token_a" ] && [ -n "$token_b" ] || \
+    fail "step4a: hub has no wrapped tokens for ${SOURCE_CURRENCY}/${TARGET_CURRENCY} — are both spokes registered? response: $(echo "$currencies" | jq -c '.' 2>/dev/null || echo "$currencies")"
+  log "tokenA=${token_a} tokenB=${token_b}"
+
+  local propose_body propose_resp propose_status propose_code amm
+  propose_body="$(jq -cn --arg p "$POOL_PAIR" --arg tA "$token_a" --arg tB "$token_b" --arg cb "$SOURCE_CURRENCY" \
+    '{pair_id:$p, token_a_address:$tA, token_b_address:$tB, proposer_cb:$cb}')"
+  propose_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/pairs/propose" "$propose_body" "$CENTRAL_BANK_A_TOKEN" || true)"
+  propose_status="$(echo "$propose_resp" | jq -r '.status // "ERROR"')"
+  propose_code="$(echo "$propose_resp" | jq -r '.code // empty')"
+  if [ "$propose_status" != "PROPOSED" ] && [ "$propose_code" != "PAIR_ALREADY_EXISTS" ]; then
+    fail "step4a: propose ${POOL_PAIR} failed: $(echo "$propose_resp" | jq -c '.' 2>/dev/null || echo "$propose_resp")"
+  fi
+  amm="$(echo "$propose_resp" | jq -r '.amm_address // empty')"
+  log "${SOURCE_CURRENCY} CB proposed ${POOL_PAIR}${amm:+ (amm=${amm})}"
+
+  local confirm_resp confirm_code
+  confirm_resp="$(api_post "$API_GW_CENTRAL_BANK_B_URL" "/api/v2/amm/pairs/confirm" \
+    "$(jq -cn --arg p "$POOL_PAIR" --arg cb "$TARGET_CURRENCY" '{pair_id:$p, confirmer_cb:$cb}')" \
     "$CENTRAL_BANK_B_TOKEN" || true)"
-  log "Mint+Approve central-bank-b: $(echo "$mint_cb_b_resp" | jq -c '.' || echo "$mint_cb_b_resp")"
-  if echo "$mint_cb_b_resp" | jq -e '.status == "ok"' >/dev/null 2>&1; then
-    log "central-bank-b: TOKEN_B minted and AMM approved"
+  confirm_code="$(echo "$confirm_resp" | jq -r '.code // empty')"
+  if echo "$confirm_resp" | jq -e '.status // empty' >/dev/null 2>&1 || [ "$confirm_code" = "PAIR_ALREADY_ACTIVE" ]; then
+    log "${TARGET_CURRENCY} CB confirmed ${POOL_PAIR} — corridor ACTIVE"
   else
-    log "WARN: central-bank-b mint-and-approve returned non-ok — commit-reveal TOKEN_B transfer may fail if signer lacks balance"
-  fi
-
-# G5-cross (ANTI-PATTERN — DEPRECATED: spec-005 architectural violation / spec-007 FR-004).
-  # With anti-G5-cross guard (spec-007 T016), CB-B can no longer
-  # mint TOKEN_B to CB-A signer. Esta chamada DEVE retornar HTTP 403
-  # CROSS_CB_MINT_PROHIBITED — this is EXPECTED behavior, not a failure.
-  # Para seeding de novos pools: use ./tryouts/tryout-sovereign-cb-liquidity.sh.
-  cb_a_key="$(grep -s '^SIGNER_PRIVATE_KEY=' backend/config/.env.infra.central-bank-a 2>/dev/null | cut -d= -f2 || echo '')"
-  cb_a_addr="$(cast wallet address --private-key "0x${cb_a_key#0x}" 2>/dev/null || echo '')"
-  if [ -n "$cb_a_addr" ]; then
-    local mint_tokenb_cba_resp mint_tokenb_code
-    mint_tokenb_cba_resp="$(api_post "$API_GW_CENTRAL_BANK_B_URL" "/api/v2/amm/token/mint-and-approve" \
-      "{\"amount\":\"200000\",\"recipient\":\"${cb_a_addr}\"}" \
-      "$CENTRAL_BANK_B_TOKEN" || true)"
-    mint_tokenb_code="$(echo "$mint_tokenb_cba_resp" | jq -r '.code // empty')"
-    if [ "$mint_tokenb_code" = "CROSS_CB_MINT_PROHIBITED" ]; then
-      log "PASS: G5-cross bloqueado — HTTP 403 CROSS_CB_MINT_PROHIBITED (spec-007 FR-004 anti-G5-cross guard ativo)"
-      log "INFO: CB-A will not have TOKEN_B; seeding do pool via G5-cross is no longer possible."
-      log "      For new pool: make contracts.seed-sovereign-pair && ./tryouts/tryout-sovereign-cb-liquidity.sh"
-    else
-      log "WARN: G5-cross attempt — esperado HTTP 403 CROSS_CB_MINT_PROHIBITED, obtido: ${mint_tokenb_code:-no code}"
-      log "      ($(echo "$mint_tokenb_cba_resp" | jq -c '.' || echo "$mint_tokenb_cba_resp"))"
-      if echo "$mint_tokenb_cba_resp" | jq -e '.status == "ok"' >/dev/null 2>&1; then
-        log "      (anti-G5-cross guard may not be active — check deploy de spec-007)"
-        approve_tokenb_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/token/approve-amm" \
-          '{"amount":"200000","side":"B"}' \
-          "$CENTRAL_BANK_A_TOKEN" || true)"
-        log "CB-A approve AMM for TOKEN_B (side=B): $(echo "$approve_tokenb_resp" | jq -c '.' || echo "$approve_tokenb_resp")"
-      fi
-    fi
-  else
-    log "INFO: CB-A signer address not derivable — G5-cross check skipped"
-  fi
-
-  # Mint TOKEN_A to bank-a signer so it has BRL balance before swap (central bank mints to recipient).
-  # FR-018: CB-A mints only TOKEN_A (its emitted token); bank-a receives TOKEN_B from CB-B if needed.
-  local mint_to_resp
-  mint_to_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/token/mint-and-approve" \
-    '{"amount":"50000","recipient":"0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef"}' \
-    "$CENTRAL_BANK_A_TOKEN" || true)"
-  log "Mint to bank-a signer: $(echo "$mint_to_resp" | jq -c '.' || echo "$mint_to_resp")"
-  if ! echo "$mint_to_resp" | jq -e '.status == "ok"' >/dev/null 2>&1; then
-    fail "step4a: mint-to bank-a failed"
-  fi
-
-  # bank-a approves AMM to spend its TOKEN_A (BRL) before swap.
-  # FR-018: side="A" required for non-CB callers to indicate which token to approve.
-  local approve_resp
-  approve_resp="$(api_post "$API_GW_BANK_A_URL" "/api/v2/amm/token/approve-amm" \
-    '{"amount":"50000","side":"A"}' \
-    "$BANK_A_TOKEN" || true)"
-  log "Bank-a approve AMM: $(echo "$approve_resp" | jq -c '.' || echo "$approve_resp")"
-  if ! echo "$approve_resp" | jq -e '.status == "ok"' >/dev/null 2>&1; then
-    fail "step4a: bank-a approve-amm failed"
+    fail "step4a: confirm ${POOL_PAIR} failed: $(echo "$confirm_resp" | jq -c '.' 2>/dev/null || echo "$confirm_resp")"
   fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 4b: Seed initial liquidity via cooperative commit-reveal (005-cooperative-liquidity)
-#          Central Bank A provides TOKEN_A and Central Bank B provides TOKEN_B.
-#          Both commits must match before the pool becomes ACTIVE.
+# Step 4b: Seed the pool — sovereign escrow-and-finalize.
+#
+# Each central bank deposits ONLY its own side; one finalize funds both reserves
+# atomically. This replaces the commit-reveal flow this step used to drive
+# (/liquidity/commit per side, then poll until the relay fired CommitMatched): the
+# route still answers, but the LiquidityCommitRegistry behind it went with the legacy
+# sovereign tail, so the commits sat PENDING until the poll gave up.
+#
+# deposit-side mints and approves the caller's own W-token internally and resolves the
+# side on-chain from pool_pair, so the separate mint-and-approve this prelude used to
+# run is gone with it.
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 3b: Onboard the commercial bank through its central bank.
+#
+# This phase did not exist. Under the legacy bring-up commercial banks were
+# pre-registered by provisioning, so the tryout could transact immediately. The
+# toolkit does NOT pre-register them: onboarding is what verifies a bank, and an
+# unverified bank has no on-chain wallet for anything below to move value to.
+#
+# Three acts, mirroring the governance portal: the bank initiates, its central bank
+# approves KYC, the bank completes (PoP → CB-signed certificate → on-chain
+# participant). Idempotent: a bank already ACTIVE is skipped.
+# ─────────────────────────────────────────────────────────────────────────────
+# onboard_bank LABEL BANK_GW BANK_TOKEN_VAR CB_GW CB_TOKEN COUNTRY
+#
+# Governance-portal onboarding: the bank initiates, its central bank approves KYC, the
+# bank completes (PoP → CB-signed certificate → on-chain participant). Idempotent — a
+# bank already ACTIVE is skipped.
+#
+# The token is refreshed through the name in BANK_TOKEN_VAR: the one used to initiate
+# carries the pre-onboarding identity, and later calls must act as the verified
+# participant.
+onboard_bank() {
+  local label=$1 bank_gw=$2 tok_var=$3 cb_gw=$4 cb_tok=$5 country=$6
+  local bank_tok="${!tok_var}" status subject resp init_body
+
+  status="$(api_get "$bank_gw" "/api/v1/onboarding/my-status" "$bank_tok" | jq -r '.status // empty')"
+  if [ "$status" = "ACTIVE" ]; then
+    log "${label} already ACTIVE — onboarding skipped"
+    return 0
+  fi
+
+  init_body="$(jq -cn --arg n "$label" --arg c "$country" --arg u "${label}-user" --arg e "ops@${label}.local" \
+    '{institution_name:$n, country:$c, role:"ROLE_COMMERCIAL_BANK", email:$e, username:$u}')"
+  resp="$(api_post "$bank_gw" "/api/v1/onboarding/initiate" "$init_body" "$bank_tok" || true)"
+  subject="$(echo "$resp" | jq -r '.user_id // empty')"
+  if [ -z "$subject" ]; then
+    # A partial earlier run can leave the Keycloak user behind; recover its subject.
+    subject="$(api_get "$bank_gw" "/api/v1/onboarding/my-status" "$bank_tok" | jq -r '.user_id // empty')"
+    [ -n "$subject" ] || fail "step3b: ${label} initiate returned no user_id: $(echo "$resp" | jq -c '.' 2>/dev/null || echo "$resp")"
+    log "${label}: initiate returned no subject — resuming with ${subject}"
+  fi
+
+  api_post "$cb_gw" "/api/v1/compliance/approve-kyc" \
+    "$(jq -cn --arg s "$subject" '{subject:$s, reason:"tryout onboarding approval"}')" "$cb_tok" >/dev/null || true
+  api_post "$bank_gw" "/api/v1/onboarding/complete" \
+    "$(jq -cn --arg s "$subject" '{request_id:$s, user_id:$s}')" "$bank_tok" >/dev/null || true
+
+  status="$(api_get "$bank_gw" "/api/v1/onboarding/my-status" "$bank_tok" | jq -r '.status // empty')"
+  [ "$status" = "ACTIVE" ] || fail "step3b: ${label} is ${status:-unknown} after onboarding, expected ACTIVE"
+  printf -v "$tok_var" '%s' "$(gateway_login "$bank_gw" "$([ "$tok_var" = BANK_A_TOKEN ] && echo "$KC_BANK_A_CLIENT" || echo "$KC_BANK_B_CLIENT")" "$([ "$tok_var" = BANK_A_TOKEN ] && echo "$KC_BANK_A_SECRET" || echo "$KC_BANK_B_SECRET")" || true)"
+  log "${label} ACTIVE — on-chain participant with its own wallet"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 3b: Onboard BOTH commercial banks — the payer and the beneficiary.
+#
+# This phase did not exist. Under the legacy bring-up commercial banks were
+# pre-registered by provisioning, so the tryout could transact immediately. The
+# toolkit does NOT pre-register them: onboarding is what verifies a bank, and an
+# unverified bank has no on-chain wallet.
+#
+# The BENEFICIARY needs it as much as the payer: a cross-currency payment's bridge-out
+# leg resolves the beneficiary on the DESTINATION spoke, and an unonboarded one fails
+# the whole payment with BENEFICIARY_NOT_FOUND after the swap has already executed.
+# ─────────────────────────────────────────────────────────────────────────────
+step3b_onboard() {
+  step "3b. Onboard ${BANK_A_CODE} (payer) and ${BANK_B_CODE} (beneficiary)"
+  onboard_bank "$BANK_A_CODE" "$API_GW_BANK_A_URL" BANK_A_TOKEN \
+    "$API_GW_CENTRAL_BANK_A_URL" "$CENTRAL_BANK_A_TOKEN" "$(echo "$SOURCE_CURRENCY" | cut -c1-2)"
+  onboard_bank "$BANK_B_CODE" "$API_GW_BANK_B_URL" BANK_B_TOKEN \
+    "$API_GW_CENTRAL_BANK_B_URL" "$CENTRAL_BANK_B_TOKEN" "$(echo "$TARGET_CURRENCY" | cut -c1-2)"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 3c: Tokenise reserves so the payer can actually pay.
+#
+# Also new. There are no static hub tokens a CB can mint from any more: a bank holds
+# tCeBM on its OWN spoke, and gets it by putting fiat in. The full reserve path is
+# four calls in two approvals — deposit fiat (bank) → CB approves, minting fCeBM;
+# request escrow (bank) → CB approves, burning fCeBM and minting tCeBM. 1:1 in wei.
+#
+# Idempotent by measurement rather than by flag: it tops up only what is missing.
+# ─────────────────────────────────────────────────────────────────────────────
+step3c_fund_payer() {
+  step "3c. Ensure ${BANK_A_CODE} holds at least ${PAYER_MIN_BALANCE} tCeBM"
+
+  local balance
+  balance="$(api_get "$API_GW_BANK_A_URL" "/api/v1/token/balance" "$BANK_A_TOKEN" | jq -r '.balance // "0"')"
+  if python3 -c "import sys; sys.exit(0 if int('${balance:-0}') >= int('$PAYER_MIN_BALANCE') else 1)"; then
+    log "${BANK_A_CODE} already holds ${balance} tCeBM — no tokenisation needed"
+    return 0
+  fi
+  log "${BANK_A_CODE} holds ${balance} — tokenising ${PAYER_TOPUP} of fiat"
+
+  local deposit_id escrow_id resp
+  resp="$(api_post "$API_GW_BANK_A_URL" "/api/v1/payments/deposits" \
+    "$(jq -cn --arg a "$PAYER_TOPUP" '{amount:$a}')" "$BANK_A_TOKEN" || true)"
+  deposit_id="$(echo "$resp" | jq -r '.deposit_id // empty')"
+  [ -n "$deposit_id" ] || fail "step3c: no deposit_id: $(echo "$resp" | jq -c '.' 2>/dev/null || echo "$resp")"
+
+  resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v1/payments/deposits/approve" \
+    "$(jq -cn --arg d "$deposit_id" '{deposit_id:$d}')" "$CENTRAL_BANK_A_TOKEN" || true)"
+  echo "$resp" | jq -e '.error // empty' >/dev/null 2>&1 && \
+    fail "step3c: deposit approve failed: $(echo "$resp" | jq -c '.')"
+
+  resp="$(api_post "$API_GW_BANK_A_URL" "/api/v1/payments/escrows" \
+    "$(jq -cn --arg d "$deposit_id" --arg a "$PAYER_TOPUP" '{deposit_id:$d, amount:$a}')" "$BANK_A_TOKEN" || true)"
+  escrow_id="$(echo "$resp" | jq -r '.escrow_id // empty')"
+  [ -n "$escrow_id" ] || fail "step3c: no escrow_id: $(echo "$resp" | jq -c '.' 2>/dev/null || echo "$resp")"
+
+  resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v1/payments/escrows/approve" \
+    "$(jq -cn --arg e "$escrow_id" '{escrow_id:$e}')" "$CENTRAL_BANK_A_TOKEN" || true)"
+  echo "$resp" | jq -e '.error // empty' >/dev/null 2>&1 && \
+    fail "step3c: escrow approve failed: $(echo "$resp" | jq -c '.')"
+
+  balance="$(api_get "$API_GW_BANK_A_URL" "/api/v1/token/balance" "$BANK_A_TOKEN" | jq -r '.balance // "0"')"
+  log "tokenised (deposit=${deposit_id} escrow=${escrow_id}) — balance now ${balance}"
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 step4b_seed_liquidity() {
-  step "4b. Seed initial liquidity via cooperative commit-reveal (central-bank-a + central-bank-b)"
-  local commit_a_body commit_b_body commit_a_resp commit_b_resp commit_a_id commit_b_id
-  local pool_resp pool_status reserve_a reserve_b fee_rate
-  local swap_reject_resp swap_reject_err
+  step "4b. Seed ${POOL_PAIR} — each CB deposits its own side, then finalize"
 
-  # --- Idempotency guard: skip commit-reveal if pool already has bilateral liquidity ---
-  # FR-001: commit-reveal is only required for initial pool formation (state EMPTY).
-  # If pool already has bilateral reserves (e.g. re-run of tryout), skip to avoid
-  # COMMIT_ALREADY_EXISTS errors. LP_ID_BCB will remain empty → step6 uses LEGACY fallback.
-  pool_resp="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/BRL-USD/status" "$BANK_A_TOKEN" || true)"
+  local pool_resp reserve_a reserve_b
+  pool_resp="$(api_get "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/pool/${POOL_PAIR}/status" "$CENTRAL_BANK_A_TOKEN" || true)"
   reserve_a="$(echo "$pool_resp" | jq -r '.reserve_a // "0"')"
   reserve_b="$(echo "$pool_resp" | jq -r '.reserve_b // "0"')"
   if [ "$reserve_a" != "0" ] && [ "$reserve_b" != "0" ]; then
-    log "Pool already has bilateral liquidity (reserve_a=${reserve_a}, reserve_b=${reserve_b}) — skipping commit-reveal (FR-001)"
+    log "Pool already funded (reserve_a=${reserve_a} reserve_b=${reserve_b}) — skipping seed"
     return 0
   fi
 
-  # --- Pre-cleanup: cancel any stale PENDING commits from previous runs (idempotency) ---
-  # Both commit A and commit B are now routed to CB-A's gateway (same DB), so we only
-  # need to clean up CB-A's DB. CB-B's DB may have a stale commit B from a prior run
-  # (before routing was fixed) but it is isolated and will not affect this flow.
-  local stale_commits stale_count stale_id stale_provider
-  stale_commits="$(curl -sf -X GET \
-    "$API_GW_CENTRAL_BANK_A_URL/api/v2/amm/liquidity/commits?pool_pair=BRL-USD&status=PENDING" \
-    -b "access_token=$CENTRAL_BANK_A_TOKEN" 2>/dev/null || echo '{}')"
-  stale_count="$(echo "$stale_commits" | jq -r '.count // 0')"
-  if [ "$stale_count" -gt 0 ] 2>/dev/null; then
-    log "Cancelling $stale_count stale PENDING commit(s) from previous run..."
-    echo "$stale_commits" | jq -r '.commits[] | "\(.commit_id) \(.provider_id)"' | \
-    while read -r stale_id stale_provider; do
-      cancel_resp="$(curl -sf -X DELETE \
-        "$API_GW_CENTRAL_BANK_A_URL/api/v2/amm/liquidity/commits/${stale_id}?provider_id=${stale_provider}" \
-        -b "access_token=$CENTRAL_BANK_A_TOKEN" 2>/dev/null || true)"
-      log "  Cancelled commit ${stale_id} (provider=${stale_provider}): $(echo "$cancel_resp" | jq -r '.message // .error // empty')"
-    done
-  fi
+  local dep_a dep_b side_a side_b
+  dep_a="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/liquidity/deposit-side" \
+    "$(jq -cn --arg p "$POOL_PAIR" --arg a "$SEED_AMOUNT_A" '{pool_pair:$p, amount:$a}')" "$CENTRAL_BANK_A_TOKEN" || true)"
+  side_a="$(echo "$dep_a" | jq -r '.side // empty')"
+  [ -n "$side_a" ] || fail "step4b: ${SOURCE_CURRENCY} CB deposit-side failed: $(echo "$dep_a" | jq -c '.' 2>/dev/null || echo "$dep_a")"
+  log "${SOURCE_CURRENCY} CB deposited side ${side_a} (${SEED_AMOUNT_A})"
 
-  # --- Commit side A (TOKEN_A / BRL) from central-bank-a ---
-  commit_a_body='{"pool_pair":"BRL-USD","provider_id":"central_bank_a","side":"A","amount":"100000"}'
-  commit_a_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/liquidity/commit" "$commit_a_body" "$CENTRAL_BANK_A_TOKEN" || true)"
-  log "Commit A response: $(echo "$commit_a_resp" | jq -c '.' || echo "$commit_a_resp")"
-  commit_a_id="$(echo "$commit_a_resp" | jq -r '.commit_id // empty')"
-  [ -n "$commit_a_id" ] || fail "step4b: commit A did not return commit_id — check liquidity/commit handler"
-  log "Commit A ID: $commit_a_id"
+  dep_b="$(api_post "$API_GW_CENTRAL_BANK_B_URL" "/api/v2/amm/liquidity/deposit-side" \
+    "$(jq -cn --arg p "$POOL_PAIR" --arg a "$SEED_AMOUNT_B" '{pool_pair:$p, amount:$a}')" "$CENTRAL_BANK_B_TOKEN" || true)"
+  side_b="$(echo "$dep_b" | jq -r '.side // empty')"
+  [ -n "$side_b" ] || fail "step4b: ${TARGET_CURRENCY} CB deposit-side failed: $(echo "$dep_b" | jq -c '.' 2>/dev/null || echo "$dep_b")"
+  log "${TARGET_CURRENCY} CB deposited side ${side_b} (${SEED_AMOUNT_B})"
 
-  # --- C2: Verify pool is PENDING_COUNTERPART after commit A, before commit B ---
-  # I3 fix: query CB-A gateway (port 38080) where commit A is stored — pending_commits[] is DB-local.
-  # Bank A gateway (cbweb3_bank_a DB) has no commits, so it always returns EMPTY for this check.
-  pool_resp="$(api_get "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/pool/BRL-USD/status" "$CENTRAL_BANK_A_TOKEN" || true)"
-  pool_status="$(echo "$pool_resp" | jq -r '.pool_status // "UNKNOWN"')"
-  reserve_a="$(echo "$pool_resp" | jq -r '.reserve_a // "0"')"
-  reserve_b="$(echo "$pool_resp" | jq -r '.reserve_b // "0"')"
-  log "Pool status after commit A: ${pool_status} (reserve_a=${reserve_a}, reserve_b=${reserve_b})"
-  if [ "$pool_status" = "PENDING_COUNTERPART" ]; then
-    log "PASS: pool is PENDING_COUNTERPART as expected (FR-001 / US1-Scenario 4)"
-  elif [ "$reserve_a" != "0" ] && [ "$reserve_b" = "0" ]; then
-    log "INFO: pool has reserve_a>${reserve_a} / reserve_b=0 — consistent with PENDING_COUNTERPART even if field absent (T018)"
-  else
-    log "WARN: pool_status=${pool_status} after commit A (expected PENDING_COUNTERPART)"
-  fi
+  # Distinct sides are the point of sovereign seeding: the same side twice means one
+  # CB funded both, which is the breach escrow-and-finalize exists to prevent.
+  [ "$side_a" != "$side_b" ] || fail "step4b: both central banks deposited side ${side_a} — the pool would be one-sided"
 
-  # --- C1: Verify swap is blocked with POOL_NOT_ACTIVE while pool is PENDING_COUNTERPART ---
-  # Uses same field names as step5_us1 (pair, amount_out, payer_id, beneficiary_id)
-  swap_reject_resp="$(api_post "$API_GW_BANK_A_URL" "/api/v2/amm/swap/exact-output" \
-    '{"pair":"BRL-USD","amount_out":"100","max_amount_in":"110","payer_id":"bank_a","beneficiary_id":"bank_c"}' \
-    "$BANK_A_TOKEN" || true)"
-  swap_reject_err="$(echo "$swap_reject_resp" | jq -r '.error // .error_code // empty')"
-  if [ "$swap_reject_err" = "POOL_NOT_ACTIVE" ]; then
-    log "PASS: swap correctly blocked with POOL_NOT_ACTIVE before pool activation (FR-011 / US1-Scenario 4)"
-  else
-    log "WARN: expected POOL_NOT_ACTIVE error but got: ${swap_reject_err:-no error field} (response: $(echo "$swap_reject_resp" | jq -c '.' || echo "$swap_reject_resp"))"
-  fi
+  local fin_resp
+  fin_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/liquidity/finalize" \
+    "$(jq -cn --arg p "$POOL_PAIR" '{pool_pair:$p}')" "$CENTRAL_BANK_A_TOKEN" || true)"
+  echo "$fin_resp" | jq -e '.shares_a // empty' >/dev/null 2>&1 || \
+    fail "step4b: finalize failed: $(echo "$fin_resp" | jq -c '.' 2>/dev/null || echo "$fin_resp")"
+  log "finalized (shares_a=$(echo "$fin_resp" | jq -r '.shares_a') shares_b=$(echo "$fin_resp" | jq -r '.shares_b'))"
 
-  # --- C5: Verify SAME_PROVIDER_BOTH_SIDES rejection (FR-002 / 005-cooperative-liquidity Q3) ---
-  # central-bank-a already has commit A (side A) → trying commit B with same provider must be rejected.
-  local same_prov_resp same_prov_err
-  same_prov_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/liquidity/commit" \
-    '{"pool_pair":"BRL-USD","provider_id":"central_bank_a","side":"B","amount":"100000"}' \
-    "$CENTRAL_BANK_A_TOKEN" || true)"
-  same_prov_err="$(echo "$same_prov_resp" | jq -r '.error_code // .error // empty')"
-  if [ "$same_prov_err" = "SAME_PROVIDER_BOTH_SIDES" ]; then
-    log "PASS: SAME_PROVIDER_BOTH_SIDES correctly rejected (HTTP 409, FR-002)"
-  else
-    log "WARN: expected SAME_PROVIDER_BOTH_SIDES but got: ${same_prov_err:-no error_code} (response: $(echo "$same_prov_resp" | jq -c '.' || echo "$same_prov_resp"))"
-  fi
-
-  # --- Commit side B (TOKEN_B / USD) via CB-A's gateway (same DB → auto-match works) ---
-  # NOTE (spec-007): G5-cross pattern was DEPRECATED. CB-A's signer no longer holds
-  # TOKEN_B after step 4a (mint blocked by anti-G5-cross guard). In environments
-  # com spec-007 deployado, o executeMatchedCommits will fail due to lack of balance TOKEN_B.
-  # BRL-USD pool (HUB_TOKEN_A/B) is deprecated for new deposits via G5-cross
-  # (spec-007 FR-002). Para pools soberanos: ./tryouts/tryout-sovereign-cb-liquidity.sh
-  # provider_id=central_bank_b is metadata only; execution uses CB-A signer (legacy).
-  commit_b_body='{"pool_pair":"BRL-USD","provider_id":"central_bank_b","side":"B","amount":"100000"}'
-  commit_b_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/liquidity/commit" "$commit_b_body" "$CENTRAL_BANK_A_TOKEN" || true)"
-  log "Commit B response: $(echo "$commit_b_resp" | jq -c '.' || echo "$commit_b_resp")"
-  commit_b_id="$(echo "$commit_b_resp" | jq -r '.commit_id // empty')"
-  if [ -z "$commit_b_id" ]; then
-    # Graceful degradation expected with spec-007 deployed:
-    # CB-A has no TOKEN_B (blocked by anti-G5-cross guard in step 4a),
-    # so addSingleSidedLiquidity(TOKEN_B) reverts on-chain. BRL-USD pool
-    # via G5-cross is deprecated (spec-007 FR-002 / Out of Scope).
-    # Step 6 will use legacy path de addLiquidity dual-sided como fallback.
-    log "WARN: step4b: commit B bloqueado pelo anti-G5-cross guard (spec-007 FR-002) — degradando graciosamente"
-    log "      For sovereign liquidity provisioning: ./tryouts/tryout-sovereign-cb-liquidity.sh"
-    return 0
-  fi
-  log "Commit B ID: $commit_b_id — expecting auto-match + execution"
-
-  # --- C3: Capture lp_ids returned by commit B (populated when status = MATCHED) ---
-  LP_ID_BCB="$(echo "$commit_b_resp" | jq -r '.lp_ids[0] // empty')"
-  LP_ID_FED="$(echo "$commit_b_resp" | jq -r '.lp_ids[1] // empty')"
-  [ -n "$LP_ID_BCB" ] && log "LP_ID_BCB (central-bank-a): $LP_ID_BCB" || log "WARN: lp_ids[0] not in commit B response — T018 field may be pending"
-  [ -n "$LP_ID_FED" ] && log "LP_ID_FED (central-bank-b): $LP_ID_FED" || log "WARN: lp_ids[1] not in commit B response"
-
-  # --- Verify pool status is now ACTIVE ---
-  pool_resp="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/BRL-USD/status" "$BANK_A_TOKEN" || true)"
-  reserve_a="$(echo "$pool_resp" | jq -r '.reserve_a // "0"')"
-  reserve_b="$(echo "$pool_resp" | jq -r '.reserve_b // "0"')"
-  pool_status="$(echo "$pool_resp" | jq -r '.pool_status // "UNKNOWN"')"
-  fee_rate="$(echo "$pool_resp" | jq -r '.fee_rate_bps // "?"')"
-  log "Pool after cooperative seed: reserve_a=${reserve_a}, reserve_b=${reserve_b}, status=${pool_status}, fee_rate_bps=${fee_rate}"
-  if [ "$reserve_a" = "0" ] || [ "$reserve_b" = "0" ]; then
-    log "WARN: step4b: pool still empty after commit-reveal (reserve_a=${reserve_a}, reserve_b=${reserve_b})"
-    log "      Likely cause: G5-cross blocked by spec-007 FR-004 — CB-A has no TOKEN_B balance."
-    log "      This is EXPECTED in environments with spec-007 deployed."
-    log "      Para US1/US2: certifique-se de que o pool BRL-USD foi pre-semeado antes de rodar este tryout."
-    log "      Para o novo fluxo soberano: use ./tryouts/tryout-sovereign-cb-liquidity.sh"
-    return 0
-  fi
-  if [ "$pool_status" = "ACTIVE" ]; then
-    log "PASS: pool is ACTIVE after cooperative commit-reveal (SC-001)"
-  else
-    log "INFO: pool_status=${pool_status} — field may not be exposed yet (T018); reserves confirmed bilateral"
-  fi
-  # --- C4: Verify total_lp_count = 2 from CB-A gateway (I4 / FR-009) ---
-  # total_lp_count is DB-local: LP positions live in cbweb3_central_bank_a (CB-A's DB).
-  # Querying from Bank A gateway (cbweb3_bank_a) always returns 0 for cooperative positions.
-  pool_lp_resp="$(api_get "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/pool/BRL-USD/status" "$CENTRAL_BANK_A_TOKEN" || true)"
-  total_lp_count="$(echo "$pool_lp_resp" | jq -r '.total_lp_count // 0')"
-  if [ "$(echo "$total_lp_count >= 2" | bc 2>/dev/null || echo 0)" = "1" ] || [ "$total_lp_count" -ge 2 ] 2>/dev/null; then
-    log "PASS: total_lp_count=$total_lp_count (expected ≥2 after cooperative commit-reveal, FR-009 / I4)"
-  else
-    log "WARN: total_lp_count=$total_lp_count after cooperative commit-reveal (expected 2; I4 — CB-A gateway)"
-  fi
-  log "Pool seeded successfully via cooperative commit-reveal"
+  local waited status
+  status=""
+  for waited in 0 3 6 9 12 15; do
+    pool_resp="$(api_get "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/pool/${POOL_PAIR}/status" "$CENTRAL_BANK_A_TOKEN" || true)"
+    status="$(echo "$pool_resp" | jq -r '.pool_status // empty')"
+    [ "$status" = "ACTIVE" ] && break
+    log "  pool_status=${status:-unknown} after ${waited}s — retrying"
+    sleep 3
+  done
+  [ "$status" = "ACTIVE" ] || fail "step4b: pool ${POOL_PAIR} not ACTIVE after finalize (status=${status:-unknown})"
+  log "pool ${POOL_PAIR} ACTIVE: reserve_a=$(echo "$pool_resp" | jq -r '.reserve_a') reserve_b=$(echo "$pool_resp" | jq -r '.reserve_b')"
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Step 5 — US1: Quote + Swap + Pool Status
 # ─────────────────────────────────────────────────────────────────────────────
 step5_us1() {
   step "5/US1. Quote + Swap + Pool Status"
 
   # --- C6: Assert pool is ACTIVE and fee_rate_bps = 30 before swap (SC-001 / T018) ---
   local pool_pre pool_status_pre fee_rate_pre reserve_a_pre reserve_b_pre
-  pool_pre="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/BRL-USD/status" "$BANK_A_TOKEN")"
+  pool_pre="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/${POOL_PAIR}/status" "$BANK_A_TOKEN")"
   pool_status_pre="$(echo "$pool_pre" | jq -r '.pool_status // "UNKNOWN"')"
   fee_rate_pre="$(echo "$pool_pre" | jq -r '.fee_rate_bps // "?"')"
   reserve_a_pre="$(echo "$pool_pre" | jq -r '.reserve_a // "0"')"
@@ -522,7 +605,7 @@ step5_us1() {
   if [ "$pool_status_pre" = "ACTIVE" ]; then
     log "PASS: pool_status=ACTIVE (SC-001 / T018)"
   elif [ "$reserve_a_pre" = "0" ] || [ "$reserve_b_pre" = "0" ]; then
-    # Graceful degradation expected in spec-007: BRL-USD pool cannot be seeded
+    # Graceful degradation expected in spec-007: ${POOL_PAIR} pool cannot be seeded
     # bilaterally with G5-cross pattern blocked. Use tryout-sovereign-cb-liquidity.sh
     # to validate US1 with the sovereign pair (W-tCeBM).
     log "WARN: step5: pool without bilateral liquidity (reserve_a=${reserve_a_pre}, reserve_b=${reserve_b_pre}) — swap skipped (spec-007: use tryout-sovereign-cb-liquidity.sh for US1)"
@@ -530,32 +613,53 @@ step5_us1() {
   else
     log "WARN: pool_status=${pool_status_pre} — expected ACTIVE; reserves present (${reserve_a_pre}/${reserve_b_pre}) but status field unexpected"
   fi
+  # The design is documented as 30 bps distributed to LPs on every swap
+  # (docs/runbooks/contract-configuration.md, docs/design/cooperative-liquidity.md).
+  # A pair's AMM is deployed by the proposing CB with feeBps = 0 (AutomatedMarketMaker
+  # constructor) and setFeeBps — which exists — is called by nothing: not the toolkit,
+  # not this script, not the backend at startup. So a runtime-opened corridor charges
+  # no fee and its liquidity providers earn nothing.
   if [ "$fee_rate_pre" = "30" ]; then
     log "PASS: fee_rate_bps=30 (FR-005 / T024)"
+  elif [ "$fee_rate_pre" = "0" ]; then
+    log "WARN: fee_rate_bps=0 — the AMM deploys with no fee and nothing calls setFeeBps, so LPs earn nothing on this corridor (docs specify 30 bps)"
   else
     log "WARN: fee_rate_bps=${fee_rate_pre} — expected 30 (T018/T024)"
   fi
 
-  local quote
-  quote="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/quote/exact-output?pair=BRL-USD&amount_out=1000" "$BANK_A_TOKEN")"
-  log "Quote: $(echo "$quote" | jq -c '.')"
+  # The payment goes through the CROSS-CURRENCY path: bridge-in (the issuing CB mints
+  # the wrapped token on the hub, backed by locked reserves) → AMM swap on the
+  # sovereign pool → bridge-out via the relay to the counterparty CB, which burns the
+  # wrapped token for the beneficiary.
+  #
+  # It used to call /api/v2/amm/swap/exact-output, which is unreachable by design on
+  # this topology: that endpoint requires the commercial_bank role AND a hub signing
+  # key, and a bank gateway has none — SIGNER_PRIVATE_KEY is empty for banks because a
+  # commercial bank must not sign on the hub. Every hub act is delegated to the CB.
+  # Calling it produced "amm: swap requires a signing key; configure PrivateKeyHex",
+  # surfaced here only as "Swap state=no state".
+  local quote amount_in
+  quote="$(api_get "$API_GW_BANK_A_URL" \
+    "/api/v2/amm/quote/cross-currency?source_currency=${SOURCE_CURRENCY}&target_currency=${TARGET_CURRENCY}&amount_out=${SWAP_AMOUNT_OUT}&pool_pair=${POOL_PAIR}" \
+    "$BANK_A_TOKEN")"
+  amount_in="$(echo "$quote" | jq -r '.amount_in // empty')"
+  [ -n "$amount_in" ] || fail "step5: no quote for ${SOURCE_CURRENCY}→${TARGET_CURRENCY}: $(echo "$quote" | jq -c '.' 2>/dev/null || echo "$quote")"
+  log "Quote: pay ${amount_in} for ${SWAP_AMOUNT_OUT} (rate=$(echo "$quote" | jq -r '.effective_rate // "?"'))"
 
-  local max_in
-  max_in="$(echo "$quote" | jq -r '.required_input // "0"')"
-  local swap_body
-  swap_body="$(jq -cn --arg pair "BRL-USD" --arg amount_out "1000" --arg max_in "$max_in" \
-    --arg payer "bank-a" --arg beneficiary "bank-c" \
-    '{pair:$pair, amount_out:$amount_out, max_amount_in:$max_in, payer_id:$payer, beneficiary_id:$beneficiary}')"
-  local swap
-  swap="$(api_post "$API_GW_BANK_A_URL" "/api/v2/amm/swap/exact-output" "$swap_body" "$BANK_A_TOKEN")"
-  log "Swap: $(echo "$swap" | jq -c '.')"
-  local swap_state
-  swap_state="$(echo "$swap" | jq -r '.state // empty')"
-  [ "$swap_state" = "COMPLETED" ] && log "PASS: Swap BRL-USD executed — state=COMPLETED (FR-028)" || \
-    log "WARN: Swap state=${swap_state:-no state} — expected COMPLETED"
+  local swap_body swap swap_state
+  swap_body="$(jq -cn --arg sc "$SOURCE_CURRENCY" --arg tc "$TARGET_CURRENCY" --arg p "$POOL_PAIR" \
+    --arg out "$SWAP_AMOUNT_OUT" --arg cap "$SWAP_MAX_AMOUNT_IN" --arg b "$BANK_B_CODE" \
+    '{source_currency:$sc, target_currency:$tc, pool_pair:$p, amount_out:$out, max_amount_in:$cap, beneficiary_bank_id:$b}')"
+  swap="$(api_post "$API_GW_BANK_A_URL" "/api/v2/amm/swap/cross-currency" "$swap_body" "$BANK_A_TOKEN")"
+  swap_state="$(echo "$swap" | jq -r '.status // empty')"
+  if [ "$swap_state" = "COMPLETED" ]; then
+    log "PASS: cross-currency payment settled — in=$(echo "$swap" | jq -r '.amount_in') out=$(echo "$swap" | jq -r '.amount_out') tx=$(echo "$swap" | jq -r '.swap_tx_hash // "?"')"
+  else
+    fail "step5: cross-currency payment status=${swap_state:-none}: $(echo "$swap" | jq -c '.' 2>/dev/null || echo "$swap")"
+  fi
 
   local pool pool_cba
-  pool="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/BRL-USD/status" "$BANK_A_TOKEN")"
+  pool="$(api_get "$API_GW_BANK_A_URL" "/api/v2/amm/pool/${POOL_PAIR}/status" "$BANK_A_TOKEN")"
   log "Pool after swap (bank-a view): $(echo "$pool" | jq -c '.')"
   # I4 / Session 2026-05-20: total_lp_count is gateway-scoped (local DB only).
   # bank-a gateway has no LP positions in its DB -> total_lp_count=0 is EXPECTED, not a bug.
@@ -563,7 +667,7 @@ step5_us1() {
   bank_a_lp_count="$(echo "$pool" | jq -r '.total_lp_count // 0')"
   log "INFO: bank-a total_lp_count=$bank_a_lp_count (expected 0 — LP positions live in CB-A/CB-B gateways, not bank-a gateway)"
   # I4: also log total_lp_count from CB-A gateway (authoritative for cooperative LPs)
-  pool_cba="$(api_get "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/pool/BRL-USD/status" "$CENTRAL_BANK_A_TOKEN" || true)"
+  pool_cba="$(api_get "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/pool/${POOL_PAIR}/status" "$CENTRAL_BANK_A_TOKEN" || true)"
   log "Pool after swap (central-bank-a view, total_lp_count): $(echo "$pool_cba" | jq -r '.total_lp_count // 0')"
 }
 
@@ -578,28 +682,31 @@ step6_us2() {
 
   # Use LP_ID_BCB from cooperative commit-reveal (step4b) if available;
   # fall back to adding dual-sided liquidity (MLP / legacy path) otherwise.
-  local LP_ID
-  if [ -n "$LP_ID_BCB" ]; then
-    LP_ID="$LP_ID_BCB"
-    log "Using cooperative LP position (LP_ID_BCB): $LP_ID"
+  # The LP position to withdraw from comes from /liquidity/positions, which the CB's
+  # own sovereign deposit records. The fallback that used to sit here posted to
+  # /api/v2/amm/liquidity/add — a route that no longer exists: dual-sided add let ONE
+  # central bank supply both sides, which is the sovereignty breach escrow-and-finalize
+  # replaced. Calling it returned "Cannot POST" and killed the run.
+  local LP_ID positions
+  positions="$(api_get "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/liquidity/positions?pool_pair=${POOL_PAIR}" "$CENTRAL_BANK_A_TOKEN" || true)"
+  LP_ID="$(echo "$positions" | jq -r '[.positions[]? | select(.status=="ACTIVE")][0].lp_id // empty' 2>/dev/null || echo '')"
+  if [ -n "$LP_ID" ]; then
+    log "Using the ${SOURCE_CURRENCY} CB's own sovereign LP position: $LP_ID"
   else
-    local add_body add_resp
-    add_body='{"pool_pair":"BRL-USD","token_a_amount":"10000","token_b_amount":"10000","provider_bank_id":"central_bank_a"}'
-    add_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/liquidity/add" "$add_body" "$CENTRAL_BANK_A_TOKEN" || true)"
-    log "Add liquidity (fallback dual-sided): $(echo "$add_resp" | jq -c '.' || echo "$add_resp")"
-    LP_ID="$(echo "$add_resp" | jq -r '.lp_id // empty')"
-    if [ -z "$LP_ID" ]; then
-      log "WARN: step6: addLiquidity dual-sided failed (no TOKEN_B for CB-A in spec-007) — remove liquidity skipped"
-      log "      Bridge Lock&Mint + Burn&Unlock continuam sendo testados abaixo."
-    else
-      log "Captured lp_id (fallback): $LP_ID"
-    fi
+    log "WARN: step6: no ACTIVE LP position for ${POOL_PAIR} — remove-liquidity skipped"
+    log "      Bridge Lock&Mint + Burn&Unlock still exercised below."
   fi
 
   # Lock&Mint — initiate bridging
   local lock_resp
+  # Amount only. The payload used to name the owner, the spoke and both assets
+  # ("bank_a", "spoke-a", "BRL-CBDC", "mBRL-CBDC") — every one of them from the legacy
+  # topology. The gateway derives all of it: the owner from the authenticated bank, the
+  # spoke and its assets from the entity's own configuration. Naming them by hand
+  # produced a position the relayer could not act on, so it sat in LOCKING until the
+  # 120s wait gave up.
   lock_resp="$(api_post "$API_GW_BANK_A_URL" "/api/v2/bridge/lock-mint" \
-    '{"owner_bank_id":"bank_a","spoke_network":"spoke-a","native_asset":"BRL-CBDC","mirrored_asset":"mBRL-CBDC","amount":"5000"}' \
+    "$(jq -cn --arg a "$BRIDGE_AMOUNT" '{amount:$a}')" \
     "$BANK_A_TOKEN" || true)"
   log "Lock&Mint: $(echo "$lock_resp" | jq -c '.' || echo "$lock_resp")"
 
@@ -623,10 +730,10 @@ step6_us2() {
 
   # Remove liquidity — use lp_id — expect PROPORTIONAL withdrawal_mode for cooperative positions
   if [ -z "$LP_ID" ]; then
-    log "SKIP: step6: remove liquidity — no LP_ID available (pool BRL-USD without bilateral liquidity in spec-007)"
+    log "SKIP: step6: remove liquidity — no LP_ID available (pool ${POOL_PAIR} without bilateral liquidity in spec-007)"
   else
   local remove_body remove_resp withdrawal_mode fee_claim_paid returned_a returned_b
-  remove_body="$(jq -cn --arg id "$LP_ID" --arg bank "central_bank_a" '{lp_id:$id, pool_pair:"BRL-USD", provider_bank_id:$bank}')"
+  remove_body="$(jq -cn --arg id "$LP_ID" --arg bank "central_bank_a" --arg pair "$POOL_PAIR" '{lp_id:$id, pool_pair:$pair, provider_bank_id:$bank}')"
   remove_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/amm/liquidity/remove" "$remove_body" "$CENTRAL_BANK_A_TOKEN" || true)"
   log "Remove liquidity: $(echo "$remove_resp" | jq -c '.' || echo "$remove_resp")"
 
@@ -669,7 +776,7 @@ step7_us3() {
   log "CB status (pre): $(echo "$status" | jq -c '.')"
 
   local pause_body pause_resp pause_state
-  pause_body='{"pair":"BRL-USD","bank_id":"central_bank_1","reason_code":"E2E_TRYOUT_INCIDENT","signature":"AA=="}'
+  pause_body='{"pair":"'"$POOL_PAIR"'","bank_id":"central_bank_1","reason_code":"E2E_TRYOUT_INCIDENT","signature":"AA=="}'
   pause_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/governance/circuit-breaker/pause" "$pause_body" "$CENTRAL_BANK_A_TOKEN" | jq -c '.' || true)"
   log "Pause CB: ${pause_resp}"
   pause_state="$(echo "$pause_resp" | jq -r '.state // empty')"
@@ -677,7 +784,7 @@ step7_us3() {
     log "WARN: expected HALTED after pause, got: ${pause_state:-no state}"
 
   local resume_req
-  resume_req='{"pair":"BRL-USD","bank_id":"central_bank_1","signature":"AA=="}'
+  resume_req='{"pair":"'"$POOL_PAIR"'","bank_id":"central_bank_1","signature":"AA=="}'
   local req_resp
   req_resp="$(api_post "$API_GW_CENTRAL_BANK_A_URL" "/api/v2/governance/circuit-breaker/resume-request" "$resume_req" "$CENTRAL_BANK_A_TOKEN")"
   log "Resume proposal: $(echo "$req_resp" | jq -c '.')"
@@ -686,7 +793,7 @@ step7_us3() {
 
   if [ -n "$request_id" ]; then
     local sign_body resume_sign_resp resume_state
-    sign_body="$(jq -cn --arg id "$request_id" --arg bank "central_bank_2" '{pair:"BRL-USD", request_id:$id, bank_id:$bank, signature:"AA=="}')"
+    sign_body="$(jq -cn --arg id "$request_id" --arg bank "central_bank_2" --arg pair "$POOL_PAIR" '{pair:$pair, request_id:$id, bank_id:$bank, signature:"AA=="}')"
     resume_sign_resp="$(api_post "$API_GW_CENTRAL_BANK_B_URL" "/api/v2/governance/circuit-breaker/resume-sign" "$sign_body" "$CENTRAL_BANK_B_TOKEN" | jq -c '.' || true)"
     log "Resume sign#2: ${resume_sign_resp}"
     resume_state="$(echo "$resume_sign_resp" | jq -r '.state // empty')"
@@ -728,7 +835,9 @@ step_mlp_us2() {
   step "MLP/US2. MLP deposits dual-sided liquidity (ENABLE_MLP=true) and removes"
 
   # ── 1. Acquire MLP token ──
-  MLP_TOKEN="$(login_keycloak "$KC_MLP_REALM" "$KC_MLP_CLIENT" "$KC_MLP_SECRET" || true)"
+  # login_keycloak is gone (it used the client-credentials grant the auth service
+  # refuses); the MLP authenticates through its own gateway like every other entity.
+  MLP_TOKEN="$(gateway_login "$API_GW_MLP_URL" "$KC_MLP_CLIENT" "$KC_MLP_SECRET" || true)"
   if [ -z "$MLP_TOKEN" ]; then
     log "WARN: MLP token not acquired — check KC_MLP_SECRET and mlp realm in Keycloak"
     log "Skipping step_mlp_us2 (ENABLE_MLP=true but token unavailable)"
@@ -738,8 +847,8 @@ step_mlp_us2() {
 
   # ── 2. POST /api/v2/amm/liquidity/add (dual-sided) ──
   local add_body add_resp lp_id deposit_side
-  add_body="$(jq -cn \
-    '{pool_pair:"BRL-USD",token_a_amount:"10000",token_b_amount:"10000",provider_bank_id:"mlp"}')"
+  add_body="$(jq -cn --arg pair "$POOL_PAIR" \
+    '{pool_pair:$pair,token_a_amount:"10000",token_b_amount:"10000",provider_bank_id:"mlp"}')"
   add_resp="$(api_post "$API_GW_MLP_URL" "/api/v2/amm/liquidity/add" \
     "$add_body" "$MLP_TOKEN" || true)"
   log "MLP addLiquidity response: $(echo "$add_resp" | jq -c '.')"
@@ -830,7 +939,7 @@ step8_pair_registry() {
   # ── 4. Rejection: NOT_CENTRAL_BANK_OF_TOKEN_A — commercial bank cannot propose ──
   local unauth_body unauth_resp unauth_code
   unauth_body="$(jq -cn \
-    --arg pair "BRL-USD" \
+    --arg pair "$POOL_PAIR" \
     --arg tA   "${HUB_TOKEN_A_ADDRESS:-}" \
     --arg tB   "${HUB_TOKEN_B_ADDRESS:-}" \
     --arg amm  "${AMM_CONTRACT_ADDRESS:-0x0000000000000000000000000000000000000001}" \
@@ -1102,9 +1211,23 @@ print_report() {
     for msg in "${fail_[@]}"; do printf '      ✗  %s\n' "$msg" >&2; done
   fi
 
+  # A green verdict must mean "checks ran and passed", not "no check recorded a
+  # failure". Without the first line below, a run that connected to nothing printed
+  # `RESULT: ✅ OK ( PASS=0 FAIL=0 )` — measured on 2026-08-21 against a healthy
+  # toolkit stack, where every call failed on the retired deploy/local port and the
+  # verdict still read OK. The EXIT trap makes it worse: an aborted or timed-out run
+  # reaches this function too, so the banner appeared for runs that barely started.
+  # Anyone using that banner as evidence was reading a default, not a result.
   local overall='✅ OK'
-  [[ ${#warn[@]} -gt 0 && ${#fail_[@]} -eq 0 ]] && overall='⚠️  OK WITH WARNINGS'
+  [[ ${#pass[@]} -eq 0 ]] && overall='❌ NOTHING VERIFIED (no check ran)'
+  [[ ${#warn[@]} -gt 0 && ${#fail_[@]} -eq 0 && ${#pass[@]} -gt 0 ]] && overall='⚠️  OK WITH WARNINGS'
   [[ ${#fail_[@]} -gt 0 ]] && overall='❌ FAILED'
+  # A run that DIED mid-way is not a pass, however many checks it managed first. The
+  # trap fires on any exit, so without this a story that aborted — an removed endpoint,
+  # a curl that blew up, Ctrl-C — printed the verdict of the checks it happened to reach
+  # and called it OK. Observed on us3: it died on `Cannot POST /liquidity/add` and
+  # reported "✅ OK (PASS=3)".
+  [[ ${RUN_COMPLETED:-0} -eq 1 ]] || overall='❌ ABORTED (the run did not reach the end)'
 
   printf '\n' >&2
   printf '  RESULT: %s   ( PASS=%d  WARN=%d  SKIP=%d  FAIL=%d )\n' \
@@ -1124,8 +1247,10 @@ step0_up
 step1_infrastructure
 step2_contracts
 step3_participants
+step3b_onboard
+step3c_fund_payer
 step4_pool
-step4a_mint_and_approve
+step4a_open_corridor
 step4b_seed_liquidity
 
 case "$STORY" in
@@ -1137,5 +1262,8 @@ case "$STORY" in
   all) step5_us1; step6_us2; step7_us3; step8_pair_registry; step9_currency_registry; if [[ "${ENABLE_MLP:-false}" == "true" ]]; then step_mlp_us2; fi ;;
   *)   fail "Unknown story: $STORY. Use us1|us2|us3|us5|us6|all" ;;
 esac
+
+# Reached only when the dispatch above ran to completion; print_report checks it.
+RUN_COMPLETED=1
 
 echo "[tryout] Done."

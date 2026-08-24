@@ -11,7 +11,7 @@ The **apis** directory centralizes all API contracts for the platform: REST Open
 ```
 apis/
 ├── openapi/               REST API specifications (OpenAPI 3.x YAML)
-│   └── api-gateway.yaml   Canonical spec — all REST endpoints (v2.3.0)
+│   └── api-gateway.yaml   Read-only copy of the served spec (v2.3.0)
 ├── proto/                 gRPC service definitions (Protocol Buffers)
 │   ├── auth/              Auth service RPCs and message types
 │   ├── compliance/        Compliance service RPCs and message types
@@ -27,9 +27,9 @@ apis/
 
 ## OpenAPI (REST)
 
-**Canonical spec:** [`openapi/api-gateway.yaml`](openapi/api-gateway.yaml) — OpenAPI 3.0.3, v2.3.0
+**Served spec (source of truth):** [`../backend/services/api-gateway/docs/openapi.yaml`](../backend/services/api-gateway/docs/openapi.yaml) — OpenAPI 3.0.3, v2.3.0, embedded in the gateway binary and served at `GET /openapi.yaml`.
 
-This file is the single source of truth for all REST endpoints exposed by the API Gateway. It covers:
+[`openapi/api-gateway.yaml`](openapi/api-gateway.yaml) is a byte-identical copy kept for consumers that read the spec from this directory; edit the served file, never this one. Between them they cover:
 
 | Tag | Endpoints | Auth |
 |-----|-----------|------|
@@ -49,7 +49,7 @@ This file is the single source of truth for all REST endpoints exposed by the AP
 The spec is also **served at runtime** by the api-gateway and auto-synced from the source:
 
 ```bash
-# Spec em runtime (após make spoke-all)
+# Spec em runtime (após cd samples && ./deploy-all.sh)
 curl http://localhost:18080/openapi.yaml        # bank-a
 curl http://localhost:38080/openapi.yaml        # central-bank-a
 

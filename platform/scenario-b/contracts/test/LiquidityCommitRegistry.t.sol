@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {LiquidityCommitRegistry} from "../src/LiquidityCommitRegistry.sol";
@@ -53,10 +53,10 @@ contract LiquidityCommitRegistryTest is Test {
         identityRegistry = new IdentityRegistry(admin);
         vm.startPrank(admin);
         identityRegistry.registerParticipant(
-            cbA, "Central Bank A", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            cbA, "Central Bank A", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0), bytes32("inst-cbA")
         );
         identityRegistry.registerParticipant(
-            cbB, "Central Bank B", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            cbB, "Central Bank B", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0), bytes32("inst-cbB")
         );
 
         // Deploy W-tCeBM tokens with respective CBs as CENTRAL_BANK_ROLE holders.

@@ -90,7 +90,7 @@ commits are revealed (2-of-N commit-reveal).
 | A3 | Relay | (automatic) | The relay observes both bridge locks and matches the commits | Both commits move to EXECUTED |
 | A4 | CB-A / CB-B treasury | Treasury → [Liquidity Management](./treasury.md#45-liquidity-management) | Refresh the pool | Pool status is **ACTIVE**, with non-zero reserves on both sides |
 
-<!-- SCREENSHOT-NEW: ../img/scenario-b/end-to-end-walkthrough/01-pool-active.png — Treasury Liquidity Management showing the corridor pool ACTIVE with reserves on both sides -->
+![Treasury Liquidity Management with the corridor pool ACTIVE and reserves on both sides](../img/scenario-b/end-to-end-walkthrough/01-pool-active.png)
 
 ### 3.2 Stage B — Onboard the commercial banks
 
@@ -141,7 +141,7 @@ selected pool's sovereignty — the payer does not choose currencies freely.
 | E3 | Bank A operator | Bank → [Bridge](./bank.md#42-bridge-bridge) | Wait for the progress indicator to complete | Bridge Completed card: status **COMPLETED**, with amounts, tx hash, and correlation ID |
 | E4 | Bank A operator | Bank → [Bridge History](./bank.md#43-bridge-history-bridgehistory) | Open the history | The operation appears with its route, amounts, rate, and COMPLETED status |
 
-<!-- SCREENSHOT-NEW: ../img/scenario-b/end-to-end-walkthrough/02-swap-completed.png — Bank Bridge page showing the Bridge Completed card with status COMPLETED, amounts, tx hash, and correlation ID -->
+![Bank Bridge History showing the cross-currency operation with its route, amounts, transaction hash and COMPLETED status](../img/scenario-b/end-to-end-walkthrough/02-swap-completed.png)
 
 ### 3.6 Stage F — Beneficiary receipt at Bank B
 
@@ -155,7 +155,7 @@ bank's bridge delivers tCeBM to Bank B.
 | F2 | Bank B operator | Bank → [Dashboard](./bank.md#41-dashboard) | Refresh | tCeBM balance is non-zero — the payment is received |
 | F3 | CB governance | Governance → [Swap Monitor](./governance.md#54-swap-monitor) | Review | The swap shows as completed end-to-end |
 
-<!-- SCREENSHOT-NEW: ../img/scenario-b/end-to-end-walkthrough/03-bank-b-receipt.png — Bank B Dashboard showing the received tCeBM balance after the cross-currency payment settles -->
+![Bank B Dashboard showing the received tCeBM balance after the cross-currency payment settles](../img/scenario-b/end-to-end-walkthrough/03-bank-b-receipt.png)
 
 ### 3.7 Stage G — Central Bank withdraws liquidity
 

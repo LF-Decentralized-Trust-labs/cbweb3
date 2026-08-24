@@ -38,6 +38,7 @@
 |----------|--------|-------------|
 | [runbooks/deployment-runbook.md](runbooks/deployment-runbook.md) | **[FORTHCOMING]** | Complete deployment guide: hub and spoke bring-up, phase-by-phase walkthrough, health checks, AMM smoke test, and teardown procedure |
 | [runbooks/environment-setup.md](runbooks/environment-setup.md) | **[FORTHCOMING]** | Prerequisites, tool installation (Go, Foundry, Docker, k6), and full port reference for all 7 entities (6 core + MLP opt-in) |
+| [`docs/TOOLCHAIN.md`](../../docs/TOOLCHAIN.md) | | **Authoritative** tool versions for the whole platform (Go 1.26, Node 22 LTS, …) and where each floor is enforced |
 
 **Quick start (when runbook is available):**
 
@@ -47,7 +48,7 @@
 
 # 2. Deploy hub and spokes
 make hub-all
-make spoke-all
+cd samples && ./deploy-all.sh
 
 # 3. Verify
 curl http://localhost:18080/healthz   # bank-a (Spoke-A)
@@ -94,6 +95,9 @@ curl http://localhost:4000/api/v1/health  # Cacti relay (scenario-b-liquidity mo
 | Document | Status | Description |
 |----------|--------|-------------|
 | [test-execution-plan.md](test-execution-plan.md) | **[FORTHCOMING]** | Test execution plan: strategy, scope, phase timeline with LNET/Banks RACI matrix, AMM E2E flows, circuit breaker and bridge tests, performance thresholds, security controls, CI/CD quality gates, and evidence bundle format |
+| [../../docs/deliverables/D12-timeline-actuals.md](../../docs/deliverables/D12-timeline-actuals.md) | Available | Execution record: planned vs actual phase dates and the recorded deviations (both scenarios) |
+| [../../docs/deliverables/D12-defect-log.md](../../docs/deliverables/D12-defect-log.md) | Available | Defect register: format, severity/SLA, lifecycle, and the defects the executed phases produced (both scenarios) |
+| [../../docs/deliverables/D12-uat-records.md](../../docs/deliverables/D12-uat-records.md) | Available | UAT record and sign-off formats, participant coverage, and the preconditions blocking Phase 5 (both scenarios) |
 | [../tests/TEST-CATALOG.md](../tests/TEST-CATALOG.md) | **[FORTHCOMING]** | Test case catalog — smart contract tests (Foundry), API unit tests (Go), integration tests, and E2E tests mapped to Scenario B tryout scripts |
 
 **Run tests manually (when available):**

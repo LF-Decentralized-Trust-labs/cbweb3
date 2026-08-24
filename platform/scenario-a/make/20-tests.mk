@@ -19,64 +19,66 @@ test.all: test.compliance test.auth test.api-gateway
 # integration_lite lane; gated behind the `integration` build tag so the two
 # never compile together.
 #
-#   make scenario-a.test-integration              # auto-detect: brings the stack up only if it isn't already running
-#   SKIP_UP=0 make scenario-a.test-integration    # force a fresh bring-up first (WIPES the chain)
-#   SKIP_UP=1 make scenario-a.test-integration    # never bring up; fail fast if the stack is down
+#   make scenario-a.test-integration              # run against a live toolkit stack
 #   SKIP_DOWN=0 make scenario-a.test-integration  # tear the stack down afterwards
 #
-# SKIP_UP unset → auto: a healthz probe decides whether to run `spoke-all` first.
-SKIP_UP   ?= auto
+# This target does NOT provision. It used to call `spoke-all`, the legacy deploy/local
+# bring-up, which was removed in favour of the toolkit as the single provisioning path.
+# Bring a stack up first:  cd samples && ./deploy-all.sh
+#
+# Endpoints, operator logins and Paladin identities are DERIVED from the toolkit
+# manifests by tests/integration/toolkit-env.sh — defaults follow samples/deploy-all.sh
+# (Brazil = spoke-a, Colombia = spoke-b). Any value passed on the command line or
+# exported wins over the derived one, so a different topology only has to name what
+# differs, e.g.
+#
+#   make scenario-a.test-integration API_GW_BANK_A_URL=http://localhost:18646
+#   CB_A_MANIFEST=/path/to/cb.yaml make scenario-a.test-integration
+#
+# SKIP_UP is gone: the suite can no longer create or destroy a stack.
 SKIP_DOWN ?= 1
 
-API_GW_BANK_A_URL         ?= http://localhost:18080
-API_GW_BANK_B_URL         ?= http://localhost:28080
-API_GW_BANK_D_URL         ?= http://localhost:58080
-API_GW_CENTRAL_BANK_A_URL ?= http://localhost:38080
-API_GW_CENTRAL_BANK_B_URL ?= http://localhost:60080
+TOOLKIT_ENV := tests/integration/toolkit-env.sh
 
-scenario-a.test-integration: ## Run the happy-path test; brings the stack up automatically if it isn't already running
-	@echo "[scenario-a] running integration test (full happy path)..."
-	@if [ "$(SKIP_UP)" = "0" ]; then \
-	  echo "[scenario-a] SKIP_UP=0 — forcing a fresh bring-up (regenerates genesis, WIPES the chain)..."; \
-	  $(MAKE) spoke-all; \
-	elif [ "$(SKIP_UP)" = "auto" ] && ! curl -sf -o /dev/null --max-time 5 "$(API_GW_BANK_A_URL)/healthz"; then \
-	  echo "[scenario-a] stack not detected at $(API_GW_BANK_A_URL) — bringing it up via spoke-all..."; \
-	  $(MAKE) spoke-all; \
-	else \
-	  echo "[scenario-a] stack detected — running against the live stack..."; \
-	fi
-	@cd tests/integration && \
-	  SKIP_UP=1 \
-	  SKIP_DOWN=$(SKIP_DOWN) \
-	  API_GW_BANK_A_URL=$(API_GW_BANK_A_URL) \
-	  API_GW_BANK_B_URL=$(API_GW_BANK_B_URL) \
-	  API_GW_BANK_D_URL=$(API_GW_BANK_D_URL) \
-	  API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL) \
-	  API_GW_CENTRAL_BANK_B_URL=$(API_GW_CENTRAL_BANK_B_URL) \
+scenario-a.test-integration: ## Run the happy-path test against an ALREADY-RUNNING toolkit stack
+	@echo "[scenario-a] deriving endpoints from the toolkit manifests..."
+	@# The script is run under BASH and its `export …` output eval'd, rather than
+	@# sourced: recipes run under /bin/sh (dash here), which rejects the script's
+	@# `set -o pipefail`. Values are printf %q-quoted, so the eval is safe.
+	@#
+	@# Caller-supplied make variables become environment FIRST, so the script keeps
+	@# them (it only fills in what is unset). evidence.e2e-a relies on this.
+	@$(if $(BESU_SPOKE_A_RPC),export BESU_SPOKE_A_RPC="$(BESU_SPOKE_A_RPC)";) \
+	 $(if $(BESU_SPOKE_B_RPC),export BESU_SPOKE_B_RPC="$(BESU_SPOKE_B_RPC)";) \
+	 eval "$$(bash ./$(TOOLKIT_ENV))"; \
+	  if ! curl -sf -o /dev/null --max-time 5 "$$API_GW_BANK_A_URL/healthz"; then \
+	    echo "[scenario-a] no stack answering at $$API_GW_BANK_A_URL."; \
+	    echo "[scenario-a] Bring one up with the toolkit first:  cd samples && ./deploy-all.sh"; \
+	    exit 1; \
+	  fi; \
+	  echo "[scenario-a] stack detected — running the full happy path..."; \
+	  cd tests/integration && \
+	  SKIP_UP=1 SKIP_DOWN=$(SKIP_DOWN) \
 	  $(if $(EVIDENCE_DIR),EVIDENCE_DIR=$(EVIDENCE_DIR),) \
 	  $(if $(ONBOARD),ONBOARD=$(ONBOARD),) \
-	  BESU_SPOKE_A_RPC=$(BESU_SPOKE_A_RPC) \
-	  BESU_SPOKE_B_RPC=$(BESU_SPOKE_B_RPC) \
 	  go test -v -count=1 -tags integration -timeout 30m -run TestFullHappyPath ./...
 
-scenario-a.test-integration-up: ## Bring the full stack up via `make spoke-all`, then run the happy-path test
-	@$(MAKE) scenario-a.test-integration SKIP_UP=0 SKIP_DOWN=$(SKIP_DOWN)
+scenario-a.test-integration-env: ## Print the endpoints/credentials the happy-path test would use
+	@bash $(TOOLKIT_ENV)
 
 # ── On-chain evidence capture (D12 P0-D12-1) ─────────────────────────────────
 # Run the instrumented happy path against a live stack so the harness records each
 # step's tx_hash + block_number + gas_used from the Besu RPC, then regenerate the
 # machine-readable evidence bundle with those populated on-chain fields.
-BESU_SPOKE_A_RPC ?= http://localhost:8645
-BESU_SPOKE_B_RPC ?= http://localhost:8745
 EVIDENCE_DIR     ?= $(CURDIR)/../evidence-bundles/_harness
 
 evidence.e2e-a: ## Capture live on-chain evidence (tx_hash/block/gas) and regenerate the Scenario A bundle
 	@echo "[scenario-a] capturing on-chain evidence to $(EVIDENCE_DIR)..."
 	@mkdir -p "$(EVIDENCE_DIR)"
-	@$(MAKE) scenario-a.test-integration \
-	  EVIDENCE_DIR="$(EVIDENCE_DIR)" \
-	  BESU_SPOKE_A_RPC=$(BESU_SPOKE_A_RPC) \
-	  BESU_SPOKE_B_RPC=$(BESU_SPOKE_B_RPC)
+	@# The Besu RPCs are no longer forwarded here: toolkit-env.sh derives them from
+	@# the same manifests as the gateways, so a hand-passed pair could disagree with
+	@# the topology under test. A command-line override still reaches the sub-make.
+	@$(MAKE) scenario-a.test-integration EVIDENCE_DIR="$(EVIDENCE_DIR)"
 	@echo "[scenario-a] folding capture into the Scenario A evidence bundle..."
 	@python3 ../tools/gen_evidence_bundles.py e2e-scenario-a
 
@@ -104,7 +106,9 @@ scenario-a.test-backend-coverage:
 # Fill measured numbers into docs/performance/RESULTS-TEMPLATE.md after a real run.
 # Do NOT run the soak in CI.
 
-# Default to the real bank-a API gateway host port (deploy/local/README.md).
+# Default to the bank-a API gateway host port of the removed legacy stack. These
+# defaults are kept only so an override still has something to override; the
+# toolkit publishes different ports (see the migration card for this suite).
 API_GW_URL ?= http://localhost:18080
 
 scenario-a.perf-baseline:
@@ -171,6 +175,6 @@ scenario-a.perf-soak-all:
 	@echo "[scenario-a] R1-12.3 12-hour SOAK (opt-in, dedicated infra only)..."
 	@PERF_SOAK=1 bash tests/performance/run-all.sh
 
-.PHONY: test.api-gateway test.auth test.compliance test.all scenario-a.test-integration scenario-a.test-integration-up evidence.e2e-a scenario-a.test-backend-coverage \
+.PHONY: test.api-gateway test.auth test.compliance test.all scenario-a.test-integration scenario-a.test-integration-env evidence.e2e-a scenario-a.test-backend-coverage \
 	scenario-a.perf-baseline scenario-a.perf-transfer scenario-a.perf-zeto scenario-a.perf-soak \
 	scenario-a.perf-happy-path scenario-a.perf-all scenario-a.perf-all-dry scenario-a.perf-soak-all

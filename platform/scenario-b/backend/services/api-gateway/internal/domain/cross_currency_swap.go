@@ -33,9 +33,16 @@ const (
 	// ResidueReturnEnqueued means the return leg was accepted and is being driven by the
 	// relayer; its terminal state lives on the bridge position, not here.
 	ResidueReturnEnqueued ResidueReturnStatus = "RETURN_ENQUEUED"
-	// ResidueReturnFailed means the return could not be enqueued. The value is not lost —
-	// it sits on the Hub swap signer — but it needs reconciliation.
+	// ResidueReturnFailed means the return could not be enqueued. The value is not lost — it
+	// sits on the issuing CB's Hub address — but the payer stays over-debited until it is
+	// returned. Retryable: nothing about the request is caller-supplied, the amount is derived
+	// from the bridge-in position plus the on-chain LogSwap, and the endpoint is idempotent on
+	// (swap_tx_hash, RESIDUE). This is the state the retry worker picks up.
 	ResidueReturnFailed ResidueReturnStatus = "RETURN_FAILED"
+	// ResidueReturnEscalated means the retries were exhausted. Terminal for automation: the
+	// value is still on the CB's Hub address and now needs a human. Mirrors the relayer's
+	// RELAYER_EXHAUSTED escalation rather than retrying forever.
+	ResidueReturnEscalated ResidueReturnStatus = "RETURN_ESCALATED"
 )
 
 // CrossCurrencySwapOperation tracks end-to-end cross-currency swap, linking
@@ -63,10 +70,25 @@ type CrossCurrencySwapOperation struct {
 	ResidueAmount string `gorm:"column:residue_amount;default:''"`
 	// ResiduePositionID is the bridge position returning ResidueAmount to the payer.
 	ResiduePositionID *string `gorm:"column:residue_position_id"`
-	// ResidueStatus tracks whether that return was enqueued. Empty on legacy rows.
-	ResidueStatus ResidueReturnStatus `gorm:"column:residue_status;default:''"`
-	CreatedAt     time.Time           `gorm:"column:created_at;autoCreateTime;index"`
-	CompletedAt   *time.Time          `gorm:"column:completed_at"`
+	// ResidueStatus tracks whether that return was enqueued. Empty on legacy rows. Leads the
+	// composite retry index (see ResidueNextAttemptAt) because it is the selective term.
+	ResidueStatus ResidueReturnStatus `gorm:"column:residue_status;default:'';index:idx_swap_residue_retry,priority:1"`
+	// ResidueAttempts counts how many times the return has been attempted, and
+	// ResidueNextAttemptAt is when the next attempt becomes due (exponential backoff).
+	//
+	// A failed enqueue creates no bridge position, so the relayer queue — which retries the
+	// legs that DID get enqueued — has nothing to pick up. Without these two fields a bank's
+	// unspent reserve sits on the CB's Hub address indefinitely, and the bank cannot even see
+	// it.
+	//
+	// The index is COMPOSITE, status first: the retry query filters on residue_status and only
+	// then on the schedule. Indexing the schedule alone would be useless — it is NULL for
+	// essentially every row (NONE, RETURN_ENQUEUED, legacy), so the planner would fall back to
+	// scanning the table on every sweep, at a cost that grows with payment volume.
+	ResidueAttempts      int        `gorm:"column:residue_attempts;not null;default:0"`
+	ResidueNextAttemptAt *time.Time `gorm:"column:residue_next_attempt_at;index:idx_swap_residue_retry,priority:2"`
+	CreatedAt            time.Time  `gorm:"column:created_at;autoCreateTime;index"`
+	CompletedAt          *time.Time `gorm:"column:completed_at"`
 }
 
 // TableName overrides GORM's default table name.

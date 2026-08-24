@@ -244,7 +244,7 @@ sample manifests already point `spec.relay.endpoint` at `http://localhost:4000`.
 
 `found` is **CB-only**: it creates the country network (central bank) from the
 manifest — without bringing up Besu manually and **without** fixed bank nodes. The
-engine runs the idempotent sequence of **9 steps**:
+engine runs the idempotent sequence of **17 steps**:
 
 1. `start-besu` — brings up the Besu bootnode and **generates the genesis** on the first run (idempotent; never regenerated)
 2. `deploy-contracts` — Paladin node registry, ZetoFactory, PenteFactory
@@ -254,7 +254,20 @@ engine runs the idempotent sequence of **9 steps**:
 6. `start-paladin` — brings up the CB's Paladin + health-check
 7. `create-zeto-token`
 8. `onboard-registry` — deploys `IdentityRegistry.sol` (participant whitelist) and registers the CB via the governance key
-9. `register-relay` — registers the spoke on the Cacti relay (hard: fails if the relay does not respond)
+9. `deploy-fiat-token` — deploys `FiatCentralBankMoney` (fCeBM) on the spoke's Besu chain
+10. `deploy-htlc` — deploys `HashTimeLockedContract`; its constructor takes the `IdentityRegistry` from step 8
+11. `render-cb-env` — renders the CB operational stack's env file
+12. `start-cb-infra` — dedicated Postgres + Redis for this entity
+13. `provision-keycloak` — central-bank and `cbweb3`/NOC realms
+14. `start-cb-backend` — the backend services, in central-bank mode
+15. `start-cb-frontend` — governance, treasury, supervisor and NOC portals
+16. `register-relay` — registers the spoke on the Cacti relay (hard: fails if the relay does not respond)
+17. `start-launcher` — the per-entity A/B entry point (soft: a missing image does not fail the apply)
+
+> `register-relay` runs **after** the frontend, not right after the contract
+> deploys: the relay is handed this CB's coordinator endpoints (gRPC + gateway), so
+> those services must be up first. A manifest with `proxy: enable` appends an 18th
+> step, `start-proxy` (soft).
 
 > The **Pente** context and the **FXAgreement** (bilateral) are **not** created in
 > `found` — they are created in `join`, in the CB↔bank relationship (pairwise).
@@ -285,29 +298,40 @@ With the `spoke-brl` bundle emitted, provision the two banks:
 "$CBWEB3" apply -f ../samples/brazil/bank-bradesco.yaml --output yaml
 ```
 
-The join engine runs **15 steps**, in three blocks:
+The join engine runs **16 steps**, in four blocks:
 
-- **Entering the Besu network (1–8):** writes the bundle's genesis, brings up Besu
-  syncing via the bootnode enode, waits for sync, votes the QBFT validator,
-  generates a key pair + CSR (via `keyProvider`), sends the CSR to the CB (via
-  `cbEndpoint`), receives the signed cert, and performs proof-of-possession +
-  registration in the IdentityRegistry.
-- **Bank Paladin, dynamic (9–12):** `gen-tls-join` (cert for the bank's Paladin
+- **Entering the Besu network (1–3):** `write-genesis` (copies the bundle's genesis,
+  non-destructive, guarded by a sha256 comparison), `start-besu-join` (brings up
+  Besu syncing via the bootnode enode), `wait-sync` (blocks on `eth_syncing`).
+  The bank joins as a **non-validating full node** — the central bank is the
+  spoke's sole QBFT validator, so there is no validator vote here.
+- **Bank Paladin, dynamic (4–7):** `gen-tls-join` (cert for the bank's Paladin
   node, derived from `bankId`), `render-config-join`, `start-paladin-join`
   (brings up the bank's Paladin), `register-paladin-node` (registers the node
   identity on-chain — native logic, no fixed bank name).
-- **Private CB↔bank relationship (13–15):** `create-pente-context` (bilateral
-  CB↔bank Pente group), `deploy-fxa-pente` (FXAgreement inside the group),
-  `start-backend`.
+- **Bank operational stack (8–12):** `render-bank-env`, `start-bank-infra`
+  (dedicated Postgres + Redis), `provision-bank-keycloak` (bank realm),
+  `start-backend` (the backend services in commercial-bank mode),
+  `start-bank-frontend` (the bank portal).
+- **Deferred tail (13–16):** `create-pente-context` (bilateral CB↔bank Pente
+  group) and `deploy-fxa-pente` (FXAgreement inside the group), both non-fatal —
+  a failure is recorded as `pending` and the join still reports success; then
+  `gen-csr` and `start-launcher` (soft).
 
-> **Join prerequisites:**
-> 1. The `request-cert` step POSTs the CSR to `cbEndpoint`. The **central bank's
->    backend (api-gateway)** must be up, otherwise the join fails (`ErrCBUnreachable`).
-> 2. The Pente steps require **both Paladin nodes (CB and bank) to see each other**
->    via mTLS transport on the spoke network.
->
-> The toolkit's ability to bring up the CB and bank backend stacks automatically is
-> a future increment (today the backend is an external prerequisite).
+> `proxy: enable` appends a 17th step, `start-proxy` (soft).
+
+> **Onboarding is not a join step.** The join produces the CSR (`gen-csr`) and
+> stops there. The bank completes onboarding at **runtime** through the CB's
+> Governance Portal: on KYC approval the CB compliance service both issues the
+> CB-signed certificate and whitelists the bank's wallet in the on-chain
+> `IdentityRegistry` (`registerParticipant`, `onlyRole(GOVERNANCE_ROLE)`, signed
+> with `CB_PRIVATE_KEY`). The toolkit deliberately does not submit the CSR itself —
+> that would register the toolkit's `KeyProvider` wallet instead of the bank's
+> runtime wallet and collide with the portal's record.
+
+> **Join prerequisite:** the Pente steps require **both Paladin nodes (CB and bank)
+> to see each other** via mTLS transport on the spoke network. `create-pente-context`
+> gates on peer readiness before creating the group.
 
 ---
 

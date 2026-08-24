@@ -215,7 +215,10 @@ func (s *paymentOrchestratorService) ApproveEscrow(ctx context.Context, req *pb.
 	}
 
 	// Step 2: Mint tCeBM to the commercial bank's Paladin identity via Zeto.
-	s.logger.Info("minting tCeBM via Zeto", "to", record.RequesterPaladinIdentity, "amount", record.Amount)
+	// The amount is deliberately absent: it lives in the private Zeto state, and the
+	// public HTLC event carries zetoLockRef rather than a value for the same reason.
+	// escrow_id is enough to look it up when authorised.
+	s.logger.Info("minting tCeBM via Zeto", "to", record.RequesterPaladinIdentity, "escrow_id", record.ID)
 	mintTxHash, err := s.zeto.Mint(ctx, record.RequesterPaladinIdentity, record.Amount)
 	if err != nil {
 		// fCeBM was already burned — log critical error. In production, a compensation
@@ -373,7 +376,7 @@ func (s *paymentOrchestratorService) RejectRedeem(ctx context.Context, req *pb.R
 
 	// Return Zeto tokens to the commercial bank's Paladin identity.
 	if record.RequesterPaladinIdentity != "" {
-		s.logger.Info("returning Zeto tokens on reject", "to", record.RequesterPaladinIdentity, "amount", record.Amount)
+		s.logger.Info("returning Zeto tokens on reject", "to", record.RequesterPaladinIdentity, "escrow_id", record.ID)
 		if _, err := s.zeto.Transfer(ctx, record.RequesterPaladinIdentity, record.Amount); err != nil {
 			s.logger.Error("failed to return Zeto tokens on reject — manual intervention may be needed",
 				"redeem_id", req.RedeemId, "error", err)
@@ -424,7 +427,7 @@ func (s *paymentOrchestratorService) InitiateZetoTransfer(ctx context.Context, r
 		return nil, status.Error(codes.InvalidArgument, "to_identity and amount are required")
 	}
 
-	s.logger.Info("initiating Zeto transfer", "to", req.ToIdentity, "amount", req.Amount)
+	s.logger.Info("initiating Zeto transfer", "to", req.ToIdentity)
 	txHash, err := s.zeto.Transfer(ctx, req.ToIdentity, req.Amount)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "zeto transfer: %v", err)

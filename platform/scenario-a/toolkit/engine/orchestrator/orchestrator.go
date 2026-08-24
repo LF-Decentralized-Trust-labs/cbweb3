@@ -166,7 +166,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 		newRegisterNodesStep(spokeID, dataDir, besuRPCURL, m.Spec.Node.AdvertisedHost, deps.KeyProvider, deps.Timeouts.OnboardRegistry),
 		newStartPaladinStep(spokeID, dataDir, deps.ComposeTemplatePath, deps.PaladinCBURL, deps.PaladinImage, m.Spec.Node.AdvertisedHost, deps.Timeouts.PaladinHealthCheck, deps.Timeouts.PaladinHealthCheckInterval),
 		newCreateZetoStep(spokeID, dataDir, deps.PaladinCBURL, deps.ScriptsDir, deps.Timeouts.GoTestStep),
-		newOnboardRegistryStep(spokeID, dataDir, besuRPCURL, deps.KeyProvider,
+		newOnboardRegistryStep(spokeID, m.Metadata.Name, dataDir, besuRPCURL, deps.KeyProvider,
 			filepath.Join(deps.ContractsOutDir, "IdentityRegistry.sol", "IdentityRegistry.json"),
 			deps.Timeouts.OnboardRegistry),
 		// Besu-layer settlement contracts (Scenario A): fCeBM + HTLC. deploy-htlc
@@ -226,12 +226,19 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 		newRenderCBEnvStep(spokeID, entity, m.Spec.Spoke.Currency, besuRPCPort, m.Spec.Spoke.ChainID, dataDir, operatorKeyHex, frontendAdvertisedHost(m), m.Spec.FXPartyRoster, cactiContainerURL(manifestRelayEndpoint(m)), proxyEnabled),
 		newStartInfraStep(StepStartCBInfra, prefix, net, dataDir,
 			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),
-			dbName, "default", "default", ports.Postgres, ports.Redis, stackTO),
+			dbName, "default", "", ports.Postgres, ports.Redis, stackTO),
 		newProvisionKeycloakStep(StepProvisionKeycloak, keycloakStepParams{
 			EntityPrefix: prefix, NetName: net,
 			ComposePath: filepath.Join(templatesDir, "entity-keycloak", "keycloak-compose.yaml"),
-			KCDBURL:     kcDBURL, KCUser: "default", KCPassword: "default",
-			HostPort: ports.Keycloak, Realms: centralBankRealmPlans(entity, m.Spec.AdminUsers), Timeout: stackTO,
+			KCDBURL:     kcDBURL, KCUser: "default",
+			KCPassword:      mustInfraSecret(dataDir, "POSTGRES_PASSWORD"),
+			KCAdminPassword: mustInfraSecret(dataDir, "KC_ADMIN_PASSWORD"),
+			HostPort:        ports.Keycloak, Timeout: stackTO,
+			// The realm's redirectUris/webOrigins are the SAME origins the api-gateway is
+			// given as CORS_ALLOW_ORIGINS, so Keycloak and the gateway cannot disagree about
+			// which portals may talk to them (finding R1-10.7 — they used to be "*").
+			Realms: centralBankRealmPlans(entity, m.Spec.AdminUsers, m.Spec.Environment,
+				splitOrigins(cbCORSOriginsFor(ports, frontendAdvertisedHost(m), proxyEnabled))),
 		}),
 		newStartBackendStackStep(StepStartCBBackend, backendStackParams{
 			SpokeID: spokeID, EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
@@ -717,12 +724,17 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		}),
 		newStartInfraStep(StepStartBankInfra, prefix, net, dataDir,
 			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),
-			dbName, "default", "default", ports.Postgres, ports.Redis, stackTO),
+			dbName, "default", "", ports.Postgres, ports.Redis, stackTO),
 		newProvisionKeycloakStep(StepProvisionBankKeycloak, keycloakStepParams{
 			EntityPrefix: prefix, NetName: net,
 			ComposePath: filepath.Join(templatesDir, "entity-keycloak", "keycloak-compose.yaml"),
-			KCDBURL:     kcDBURL, KCUser: "default", KCPassword: "default",
-			HostPort: ports.Keycloak, Realms: []KeycloakRealmPlan{commercialBankRealmPlan(bank, m.Spec.AdminUsers)}, Timeout: stackTO,
+			KCDBURL:     kcDBURL, KCUser: "default",
+			KCPassword:      mustInfraSecret(dataDir, "POSTGRES_PASSWORD"),
+			KCAdminPassword: mustInfraSecret(dataDir, "KC_ADMIN_PASSWORD"),
+			HostPort:        ports.Keycloak, Timeout: stackTO,
+			// Same origin list the bank's api-gateway receives as CORS_ALLOW_ORIGINS.
+			Realms: []KeycloakRealmPlan{commercialBankRealmPlan(bank, m.Spec.AdminUsers, m.Spec.Environment,
+				splitOrigins(bankCORSOriginsFor(ports, frontendAdvertisedHost(m), proxyEnabled)))},
 		}),
 		newStartBackendStackStep(StepStartBackend, backendStackParams{
 			SpokeID: spokeID, EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
@@ -818,4 +830,17 @@ func centralBankAPIURL(cbEndpoint string) string {
 // from its Besu RPC host port (see startPaladinJoinStep port scheme).
 func bankPaladinURL(besuRPCPort int) string {
 	return fmt.Sprintf("http://localhost:%d", besuRPCPort+bankPaladinRPCPortOffset)
+}
+
+// splitOrigins turns the comma-separated CORS_ALLOW_ORIGINS value into the slice the
+// Keycloak realm plan wants. One source of truth, two encodings: the gateway reads an
+// env string, Keycloak's realm import takes a JSON array.
+func splitOrigins(csv string) []string {
+	var out []string
+	for _, o := range strings.Split(csv, ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			out = append(out, o)
+		}
+	}
+	return out
 }

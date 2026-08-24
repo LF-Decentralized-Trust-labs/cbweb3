@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {HashTimeLockedContract} from "../src/HashTimeLockedContract.sol";
@@ -43,11 +43,19 @@ contract HashTimeLockedContractTest is Test {
         identityRegistry = new IdentityRegistry(admin);
         vm.startPrank(admin);
         identityRegistry.registerParticipant(
-            sender, "Commercial Bank A", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+            sender,
+            "Commercial Bank A",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            bytes32("inst-sender")
         );
         identityRegistry.verifyParticipant(sender);
         identityRegistry.registerParticipant(
-            receiver, "Commercial Bank B", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+            receiver,
+            "Commercial Bank B",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            bytes32("inst-receiver")
         );
         identityRegistry.verifyParticipant(receiver);
         vm.stopPrank();
@@ -427,7 +435,11 @@ contract HashTimeLockedContractTest is Test {
         address centralBank = makeAddr("htlcCentralBank");
         vm.prank(admin);
         identityRegistry.registerParticipant(
-            centralBank, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            centralBank,
+            "Central Bank",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-centralBank")
         );
         vm.prank(admin);
         identityRegistry.verifyParticipant(centralBank);
@@ -448,7 +460,11 @@ contract HashTimeLockedContractTest is Test {
         centralBank = makeAddr("fbCentralBank");
         vm.prank(admin);
         identityRegistry.registerParticipant(
-            centralBank, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            centralBank,
+            "Central Bank",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-centralBank")
         );
         vm.prank(admin);
         identityRegistry.verifyParticipant(centralBank);

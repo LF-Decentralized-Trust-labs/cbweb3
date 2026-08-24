@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	ProviderLocal  = "local"
-	ProviderAws    = "aws"
-	ProviderAzure  = "azure"
+	ProviderLocal = "local"
+	ProviderAws   = "aws"
+	ProviderAzure = "azure"
 )
 
 // Config holds the KMS provider selection configuration.

@@ -54,6 +54,17 @@ const (
 // bank's Besu + Paladin, but does NOT create the bilateral Pente context or
 // deploy FXAgreement-in-Pente — those are per-relationship and are created at
 // join time (feature 033), when a commercial bank's Paladin node exists.
+//
+// This slice must stay in lockstep with the order buildSteps appends the steps
+// in — it is what the apply report and the dry-run plan are rendered from, and a
+// report that lists steps in an order the run did not follow is an audit-trail
+// defect. StepRegisterRelay in particular runs LAST of the provisioning steps
+// (after the frontend, once the CB coordinator endpoints exist), not right after
+// deploy-htlc. TestCanonicalStepOrderMatchesExecution locks the two together.
+//
+// It never includes StepStartProxy: that step is appended only when
+// spec.proxy == "enable". Build the order a run will actually execute with
+// PlannedStepOrder rather than reading this slice directly.
 var CanonicalStepOrder = []string{
 	StepStartBesu,
 	StepDeployContracts,
@@ -65,12 +76,12 @@ var CanonicalStepOrder = []string{
 	StepOnboardRegistry,
 	StepDeployFiatToken,
 	StepDeployHTLC,
-	StepRegisterRelay,
 	StepRenderCBEnv,
 	StepStartCBInfra,
 	StepProvisionKeycloak,
 	StepStartCBBackend,
 	StepStartCBFrontend,
+	StepRegisterRelay,
 	StepStartLauncher,
 }
 
@@ -141,4 +152,27 @@ var CanonicalJoinStepOrder = []string{
 	StepDeployFXAJoin,
 	StepGenCSR,
 	StepStartLauncher,
+}
+
+// PlannedStepOrder returns the step sequence a run will actually execute for the
+// given mode and proxy setting. It is the single source both the dry-run plan and
+// the apply report are built from: previously each assembled its own order, and
+// only the dry-run path remembered to account for the reverse-proxy step — so a
+// proxy-enabled run executed a step its own report did not list.
+//
+// The returned slice is always a fresh copy; callers may append to it without
+// mutating the package-level canonical orders.
+func PlannedStepOrder(mode string, proxyEnabled bool) []string {
+	base := CanonicalStepOrder
+	if mode == "join" {
+		base = CanonicalJoinStepOrder
+	}
+	order := make([]string, len(base), len(base)+1)
+	copy(order, base)
+	// buildSteps / buildJoinSteps append the reverse-proxy step last, and only
+	// when spec.proxy == "enable".
+	if proxyEnabled {
+		order = append(order, StepStartProxy)
+	}
+	return order
 }

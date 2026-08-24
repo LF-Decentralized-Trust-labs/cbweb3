@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {CurrencyRegistry} from "../src/CurrencyRegistry.sol";
@@ -32,11 +32,11 @@ contract CurrencyRegistryTest is Test {
         identityRegistry = new IdentityRegistry(admin);
         vm.startPrank(admin);
         identityRegistry.registerParticipant(
-            cbA, "Central Bank A", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            cbA, "Central Bank A", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0), bytes32("inst-cbA")
         );
         identityRegistry.verifyParticipant(cbA);
         identityRegistry.registerParticipant(
-            cbB, "Central Bank B", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            cbB, "Central Bank B", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0), bytes32("inst-cbB")
         );
         identityRegistry.verifyParticipant(cbB);
         vm.stopPrank();
@@ -174,6 +174,29 @@ contract CurrencyRegistryTest is Test {
         ICurrencyRegistry.CurrencyEntry[] memory all = registry.getAllCurrencies();
         assertEq(all.length, 1);
         assertEq(all[0].symbol, "EUR");
+    }
+
+    /// @notice Re-registering a removed symbol must leave ONE entry, not two.
+    /// @dev removeCurrency tombstones the entry (`_symbolExists = false`) and deliberately leaves
+    ///      `_symbols` untouched so paging offsets stay stable. Registering the symbol again then
+    ///      pushed a second copy of the same string, and every reader that walks `_symbols` and
+    ///      filters on `_symbolExists` — currencyCount, getCurrenciesPaged, getAllCurrencies —
+    ///      counted the live entry once per copy.
+    function test_registerCurrency_afterRemoval_doesNotDuplicateTheSymbol() public {
+        vm.startPrank(cbA);
+        registry.registerCurrency("BRL", "Brazil", address(tokenBRL), "central_bank_a");
+        registry.removeCurrency("BRL");
+        registry.registerCurrency("BRL", "Brazil", address(tokenBRL), "central_bank_a");
+        vm.stopPrank();
+
+        assertEq(registry.currencyCount(), 1, "a re-registered symbol must be counted once");
+
+        ICurrencyRegistry.CurrencyEntry[] memory all = registry.getAllCurrencies();
+        assertEq(all.length, 1, "getAllCurrencies must not list the symbol twice");
+        assertEq(all[0].symbol, "BRL");
+
+        (ICurrencyRegistry.CurrencyEntry[] memory page,) = registry.getCurrenciesPaged(0, 10);
+        assertEq(page.length, 1, "a page must not list the symbol twice");
     }
 
     function test_removeCurrency_notFound_reverts() public {

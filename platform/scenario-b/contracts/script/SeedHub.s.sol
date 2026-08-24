@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 import {Script, console} from "forge-std/Script.sol";
 import {TokenizedCentralBankMoney} from "../src/TokenizedCentralBankMoney.sol";
@@ -59,24 +59,36 @@ contract SeedHub is Script {
             vm.startBroadcast(adminKey);
             IdentityRegistry hubRegistry = IdentityRegistry(hubRegistryAddr);
             _registerIfNeeded(
-                hubRegistry, centralBankSigner, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK
+                hubRegistry,
+                centralBankSigner,
+                "Central Bank",
+                IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+                vm.envOr("CENTRAL_BANK_A_CODE", string("central-bank-a"))
             );
             _registerIfNeeded(
                 hubRegistry,
                 BANK_AB_ADDRESS,
                 "Commercial Bank AB",
-                IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK
+                IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+                "bank-ab"
             );
             _registerIfNeeded(
                 hubRegistry,
                 BANK_CD_ADDRESS,
                 "Commercial Bank CD",
-                IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK
+                IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+                "bank-cd"
             );
+            // The dev gateway signer holds CENTRAL_BANK role so canGovern() passes, but it is not a
+            // sovereign CB — its own code keeps it from silently sharing a real CB's quorum vote.
             _registerIfNeeded(
-                hubRegistry, AMM_SIGNER, "AMM Gateway Dev", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK
+                hubRegistry,
+                AMM_SIGNER,
+                "AMM Gateway Dev",
+                IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+                "amm-gateway-dev"
             );
-            _registerIfNeeded(hubRegistry, mlpSigner, "MLP", IdentityRegistryLibrary.ParticipantRole.MLP);
+            _registerIfNeeded(hubRegistry, mlpSigner, "MLP", IdentityRegistryLibrary.ParticipantRole.MLP, "mlp");
             console.log("Hub participants registered");
 
             // Grant LiquidityProvider role to gateway signers so they can call
@@ -119,11 +131,16 @@ contract SeedHub is Script {
         vm.stopBroadcast();
     }
 
+    /// @param institutionCode Institution-level code, shared by every wallet of one institution and
+    ///        hashed into the on-chain institutionId. It must match the BANK_CODE that institution's
+    ///        services run with, or the same institution ends up with two ids and the AMM resume
+    ///        quorum — which counts institutions, not keys — stops meaning what it says.
     function _registerIfNeeded(
         IdentityRegistry registry,
         address account,
         string memory name,
-        IdentityRegistryLibrary.ParticipantRole role
+        IdentityRegistryLibrary.ParticipantRole role,
+        string memory institutionCode
     ) internal {
         if (registry.canTransact(account)) {
             console.log("[Hub] Already registered:", name);
@@ -131,7 +148,7 @@ contract SeedHub is Script {
         }
         // Two-step onboarding: register (Pending) then verify (Pending -> Verified). The admin
         // broadcast key holds both GOVERNANCE_ROLE and VERIFIER_ROLE in local dev.
-        registry.registerParticipant(account, name, role, bytes32(0));
+        registry.registerParticipant(account, name, role, bytes32(0), keccak256(abi.encodePacked(institutionCode)));
         registry.verifyParticipant(account);
         console.log("[Hub] Registered and verified:", name);
     }

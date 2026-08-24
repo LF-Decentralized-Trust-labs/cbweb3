@@ -27,14 +27,25 @@ services:
       # when the spoke is configured, which local dev skips.
       CACTI_API_URL: "${CACTI_API_URL:-http://host.docker.internal:7000}"
       # Shared DB with the api-gateway: the outbox the gateway enqueues to.
-      DATABASE_URL: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:-cbweb3}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:?}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
       # Hub signing: the CB holds CENTRAL_BANK_ROLE on the W-<source> token and
       # mints it on the hub. Chain id defaults to the hub's (1337 locally).
       # Routable hub RPC (set by the toolkit from the hub bundle) so the bridge
       # RelayerWorker mints/burns on the hub cross-VM; single-host fallback keeps
       # host.docker.internal:<published-port>. Wrong host here → "Wrong chainId".
       HUB_BESU_RPC_URL: "${HUB_BESU_RPC_URL:-http://host.docker.internal:${HUB_RPC_PORT}}"
-      SIGNER_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
+      # Hub signing key — the RELAYER's own hub identity, distinct from the api-gateway's.
+      # Both belong to this central bank, but go-ethereum tracks nonces per process: with one
+      # shared key the two containers each keep their own counter and concurrent submissions
+      # claim the same nonce, replacing one another. A replaced transaction is worse than a
+      # failed one here, because the burn/mint hash is persisted as an intent on broadcast, so
+      # the position then waits forever on a hash that will never be mined.
+      #
+      # This address needs only CENTRAL_BANK_ROLE on the CB's W-token to mint and burn; the
+      # gateway grants it at boot, which it can do because the currency handover made the CB
+      # the token's administrator. It is deliberately NOT the address IdentityRegistry maps as
+      # the token's central bank — that one signs the corridor's governance acts.
+      SIGNER_PRIVATE_KEY: "${HUB_RELAYER_PRIVATE_KEY:?}"
       HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
       SPOKE_CHAIN_ID: "${SPOKE_CHAIN_ID:-1337}"
       # Spoke token clients — the deposit/escrow/redeem flow. On deposit APPROVAL the
@@ -57,7 +68,20 @@ services:
       SPOKE_SIGNER_KEY: "${CB_PRIVATE_KEY:?}"
       # Local dev: skip the SpokeBridge.lock leg for the CB's OWN sovereign liquidity
       # positions (hub-only mint); the commercial-bank burn-from path above still runs.
-      BRIDGE_SKIP_SPOKE_LOCK: "true"
+      BRIDGE_SKIP_SPOKE_LOCK: "${BRIDGE_SKIP_SPOKE_LOCK:-true}"
+      # Deployment profile for the flag above. The Hub mint that BRIDGE_SKIP_SPOKE_LOCK
+      # permits has no spoke-side reserve behind it, so the orchestrator refuses it unless
+      # the profile is explicitly "local" — and refuses to boot at all with the flag set
+      # outside local.
+      #
+      # Defaulting to local is accurate rather than convenient: manifest validation still
+      # rejects any spec.environment other than "local" (toolkit/engine/manifest/validate.go),
+      # so every stack this template renders today IS a local lab, deploy-lnet included. When
+      # staging/prod profiles are enabled (ADR-004), this must be threaded from
+      # spec.environment through the compose env instead of defaulted here — otherwise the
+      # guard has no teeth on the deployment that needs it most. Until then an operator can
+      # harden a specific stack by exporting ENVIRONMENT and BRIDGE_SKIP_SPOKE_LOCK=false.
+      ENVIRONMENT: "${ENVIRONMENT:-local}"
       # R2-H-8 service-mesh mTLS — the orchestrator is a gRPC server (gateway→PO).
       # Opt-in via GRPC_MTLS_ENABLE (empty by default → plaintext, unchanged).
       GRPC_MTLS_CERT_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/payment-orchestrator.crt}"

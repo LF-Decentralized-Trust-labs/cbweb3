@@ -129,6 +129,13 @@ func (h *CrossCurrencyResidueHandler) HandleResidueReturn(c *fiber.Ctx) error {
 		})
 	}
 
+	// The verified caller may only ask for its own residue back. The position's ownership is
+	// checked further down, but against the request's payer_bank_id — which is only a boundary
+	// once that id is known to be the caller's own.
+	if ok, refusal := authorizeRelayCallerFor(c, req.PayerBankID); !ok {
+		return refusal
+	}
+
 	if h.wTokenAddress == "" || h.fiatTokenAddress == "" {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error": "CB sovereign token addresses not configured (W_TOKEN_ADDRESS / TOKEN_ADDRESS)",
@@ -147,6 +154,25 @@ func (h *CrossCurrencyResidueHandler) HandleResidueReturn(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 			"error": "bridge position reader not configured on this gateway",
 			"code":  "POSITION_READER_NOT_CONFIGURED",
+		})
+	}
+
+	// The bridge-in position is this CB's own record of what it moved to the Hub. It is the
+	// only admissible source for the bridged amount.
+	pos, err := h.positionReader.GetPosition(c.Context(), req.BridgeInPositionID)
+	if err != nil {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error": "bridge-in position not found: " + err.Error(),
+			"code":  "POSITION_NOT_FOUND",
+		})
+	}
+	// Ownership is checked BEFORE the replay lookup: answering "duplicate" to a request that
+	// names another bank's swap would disclose that position's id and state to a caller with no
+	// claim to it. The reordering costs nothing — both are local reads.
+	if !sameBank(pos.OwnerBankID, req.PayerBankID) {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error": "bridge-in position belongs to another bank",
+			"code":  "POSITION_OWNER_MISMATCH",
 		})
 	}
 
@@ -187,21 +213,6 @@ func (h *CrossCurrencyResidueHandler) HandleResidueReturn(c *fiber.Ctx) error {
 		})
 	}
 
-	// The bridge-in position is this CB's own record of what it moved to the Hub. It is the
-	// only admissible source for the bridged amount.
-	pos, err := h.positionReader.GetPosition(c.Context(), req.BridgeInPositionID)
-	if err != nil {
-		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
-			"error": "bridge-in position not found: " + err.Error(),
-			"code":  "POSITION_NOT_FOUND",
-		})
-	}
-	if !strings.EqualFold(strings.TrimSpace(pos.OwnerBankID), strings.TrimSpace(req.PayerBankID)) {
-		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
-			"error": "bridge-in position belongs to another bank",
-			"code":  "POSITION_OWNER_MISMATCH",
-		})
-	}
 	if !strings.EqualFold(pos.MirroredAsset, h.wTokenAddress) {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error": "bridge-in position is not denominated in this CB's W-token",

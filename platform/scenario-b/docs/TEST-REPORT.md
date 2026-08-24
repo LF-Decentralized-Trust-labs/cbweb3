@@ -55,7 +55,7 @@ coverage).
 fakes, no infra). PR-gated.
 
 **Live-stack E2E (`integration`)** — `make scenario-b.test-integration` (`TestFullHappyPath`)
-drives the full hub happy path against `make scenario-b.up`.
+drives the full hub happy path against `cd samples && ./deploy-all.sh`.
 
 Live run captured 2026-06-19 — **PASS (63.1s total)**:
 

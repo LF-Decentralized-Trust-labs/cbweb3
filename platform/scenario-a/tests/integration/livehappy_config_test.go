@@ -6,16 +6,19 @@
 package integration_test
 
 import (
-	"bufio"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"testing"
 )
 
 // Config holds the environment-driven settings for the live happy-path suite.
-// Defaults match the deploy/local docker-compose host-port mappings and the
-// per-entity Keycloak client IDs used by the tryout scripts.
+//
+// Every field comes from the environment. tests/integration/toolkit-env.sh derives
+// the whole set from the toolkit manifests a stack was provisioned with, and the
+// make target sources it — so the values follow the topology under test instead of
+// being pinned to one bring-up's ports and entity names.
 type Config struct {
 	BankAURL        string
 	BankBURL        string
@@ -26,7 +29,7 @@ type Config struct {
 
 	// Besu JSON-RPC endpoints used to resolve on-chain evidence
 	// (eth_getTransactionReceipt / eth_getLogs). Any validator on a given chain
-	// can answer, so the always-up central-bank node is the default per spoke.
+	// can answer; toolkit-env.sh derives the always-up central-bank node per spoke.
 	BesuSpokeAURL string
 	BesuSpokeBURL string
 
@@ -50,7 +53,7 @@ type Config struct {
 	CBBTreasuryClient string
 	CBBTreasurySecret string
 
-	// Correspondent-banking roles (funded operators provisioned by `make spoke-all`):
+	// Correspondent-banking roles (each entity's Paladin funded operator):
 	//   IdentityBankA       — originator on spoke-a (locks the origin leg)
 	//   IdentityCorrespondentA — spoke-a financial correspondent (receives the origin leg)
 	//   IdentityCustodian   — custodian/financial-correspondent bank-d on spoke-b (locks the counter leg)
@@ -61,71 +64,102 @@ type Config struct {
 	IdentityCorrespondentA string
 	IdentityCustodian      string
 	IdentityBankB          string
+	// The settlement agent is the SOURCE central bank, not the originating bank.
+	IdentitySettlementAgent string
+
+	// Spoke identity and currencies of the topology under test. These used to be
+	// literals in the FX payload (spoke-a/spoke-b, USD/BRL) — names no toolkit
+	// spoke carries, so the propose was rejected before reaching the chain.
+	SpokeAID        string
+	SpokeBID        string
+	OriginCurrency  string
+	CounterCurrency string
 
 	// FX/HTLC amounts (origin leg on spoke-a, counter leg on spoke-b).
 	OriginAmount  string
 	CounterAmount string
 	MintAmount    string
 
-	SkipUp   bool // bring the stack up via `make spoke-all` before the suite
-	SkipDown bool // tear the stack down after the suite
+	// The suite neither provisions nor tears down: the toolkit is the single
+	// provisioning path and it is driven from samples/. Both flags exist only to
+	// reject the removed behaviour with an explanation instead of a stale target.
+	SkipUp   bool
+	SkipDown bool
 	SkipMint bool // skip the CB mint step (operators already funded)
 	Onboard  bool // run 3-phase PKI onboarding (ON by default; ONBOARD=0 to skip). Commercial banks are no longer pre-registered, so onboarding is what verifies them.
 }
 
 func loadConfig() *Config {
-	root := scenarioARoot()
 	return &Config{
-		BankAURL:        envOr("API_GW_BANK_A_URL", "http://localhost:18080"),
-		BankBURL:        envOr("API_GW_BANK_B_URL", "http://localhost:28080"),
-		BankCURL:        envOr("API_GW_BANK_C_URL", "http://localhost:48080"),
-		BankDURL:        envOr("API_GW_BANK_D_URL", "http://localhost:58080"),
-		CentralBankAURL: envOr("API_GW_CENTRAL_BANK_A_URL", "http://localhost:38080"),
-		CentralBankBURL: envOr("API_GW_CENTRAL_BANK_B_URL", "http://localhost:60080"),
+		// No fallback ports. The defaults here used to be the legacy deploy/local
+		// host-port mappings, which now answer nothing — so a bare `go test` failed
+		// by connection-refused against an address that no longer means anything.
+		// Unset is an explicit error instead (see requireComplete).
+		BankAURL:        os.Getenv("API_GW_BANK_A_URL"),
+		BankBURL:        os.Getenv("API_GW_BANK_B_URL"),
+		BankCURL:        os.Getenv("API_GW_BANK_C_URL"),
+		BankDURL:        os.Getenv("API_GW_BANK_D_URL"),
+		CentralBankAURL: os.Getenv("API_GW_CENTRAL_BANK_A_URL"),
+		CentralBankBURL: os.Getenv("API_GW_CENTRAL_BANK_B_URL"),
 
-		// Besu RPC host-port mappings from deploy/local/spoke-besu-{a,b}/startBesu.sh
-		// (central-bank node per spoke: spoke-a 8645, spoke-b 8745).
-		BesuSpokeAURL: envOr("BESU_SPOKE_A_RPC", "http://localhost:8645"),
-		BesuSpokeBURL: envOr("BESU_SPOKE_B_RPC", "http://localhost:8745"),
+		// Any validator on a spoke can answer an evidence query; the always-up
+		// central-bank node is what toolkit-env.sh derives.
+		BesuSpokeAURL: os.Getenv("BESU_SPOKE_A_RPC"),
+		BesuSpokeBURL: os.Getenv("BESU_SPOKE_B_RPC"),
 
-		BankAClient: envOr("KC_BANK_A_CLIENT", "bank-a-client"),
-		BankASecret: envOrEnvFile("KC_BANK_A_SECRET",
-			filepath.Join(root, "backend/config/.env.infra.bank-a"), "KC_CLIENT_SECRET", ""),
-		BankBClient: envOr("KC_BANK_B_CLIENT", "bank-b-client"),
-		BankBSecret: envOrEnvFile("KC_BANK_B_SECRET",
-			filepath.Join(root, "backend/config/.env.infra.bank-b"), "KC_CLIENT_SECRET", ""),
-		BankCClient: envOr("KC_BANK_C_CLIENT", "bank-c-client"),
-		BankCSecret: envOrEnvFile("KC_BANK_C_SECRET",
-			filepath.Join(root, "backend/config/.env.infra.bank-c"), "KC_CLIENT_SECRET", ""),
-		BankDClient: envOr("KC_BANK_D_CLIENT", "bank-d-client"),
-		BankDSecret: envOrEnvFile("KC_BANK_D_SECRET",
-			filepath.Join(root, "backend/config/.env.infra.bank-d"), "KC_CLIENT_SECRET", ""),
-		CBAClient: envOr("KC_CENTRAL_BANK_A_CLIENT", "central-bank-a-client"),
-		CBASecret: envOrEnvFile("KC_CENTRAL_BANK_A_SECRET",
-			filepath.Join(root, "backend/config/.env.infra.central-bank-a"), "KC_CLIENT_SECRET", ""),
-		CBBClient: envOr("KC_CENTRAL_BANK_B_CLIENT", "central-bank-b-client"),
-		CBBSecret: envOrEnvFile("KC_CENTRAL_BANK_B_SECRET",
-			filepath.Join(root, "backend/config/.env.infra.central-bank-b"), "KC_CLIENT_SECRET", ""),
+		// Operator logins. These six pairs used to fall back to reading
+		// KC_CLIENT_SECRET out of backend/config/.env.infra.<entity> — files the
+		// legacy deploy/local bring-up wrote and the toolkit deliberately does not
+		// (they only ever covered six reference entities; see
+		// toolkit/engine/orchestrator/entityenv.go). The fallback is gone: the suite
+		// now takes credentials only from the environment, which toolkit-env.sh
+		// derives from the manifests the stack was actually provisioned with.
+		//
+		// Despite the KC_*_CLIENT / KC_*_SECRET names, what belongs here is a
+		// Keycloak USERNAME and that user's PASSWORD. The login endpoint's
+		// clientId/clientSecret JSON fields are the wire contract's names, not the
+		// credential type: since f55ade5b the auth service accepts only the OIDC
+		// password grant, and a realm client id/secret is refused on purpose.
+		BankAClient: os.Getenv("KC_BANK_A_CLIENT"),
+		BankASecret: os.Getenv("KC_BANK_A_SECRET"),
+		BankBClient: os.Getenv("KC_BANK_B_CLIENT"),
+		BankBSecret: os.Getenv("KC_BANK_B_SECRET"),
+		BankCClient: os.Getenv("KC_BANK_C_CLIENT"),
+		BankCSecret: os.Getenv("KC_BANK_C_SECRET"),
+		BankDClient: os.Getenv("KC_BANK_D_CLIENT"),
+		BankDSecret: os.Getenv("KC_BANK_D_SECRET"),
+		CBAClient:   os.Getenv("KC_CENTRAL_BANK_A_CLIENT"),
+		CBASecret:   os.Getenv("KC_CENTRAL_BANK_A_SECRET"),
+		CBBClient:   os.Getenv("KC_CENTRAL_BANK_B_CLIENT"),
+		CBBSecret:   os.Getenv("KC_CENTRAL_BANK_B_SECRET"),
 
-		// Treasury clients are provisioned by deploy/local/keycloak/init.sh with
-		// fixed local-dev secrets (not stored in the .env.infra files).
-		CBATreasuryClient: envOr("KC_CENTRAL_BANK_A_TREASURY_CLIENT", "central-bank-a-treasury-client"),
-		CBATreasurySecret: envOr("KC_CENTRAL_BANK_A_TREASURY_SECRET", "central-bank-a-treasury-local-secret"),
-		CBBTreasuryClient: envOr("KC_CENTRAL_BANK_B_TREASURY_CLIENT", "central-bank-b-treasury-client"),
-		CBBTreasurySecret: envOr("KC_CENTRAL_BANK_B_TREASURY_SECRET", "central-bank-b-treasury-local-secret"),
+		// Minting requires ROLE_TREASURY; the governance operators above cannot mint.
+		CBATreasuryClient: os.Getenv("KC_CENTRAL_BANK_A_TREASURY_CLIENT"),
+		CBATreasurySecret: os.Getenv("KC_CENTRAL_BANK_A_TREASURY_SECRET"),
+		CBBTreasuryClient: os.Getenv("KC_CENTRAL_BANK_B_TREASURY_CLIENT"),
+		CBBTreasurySecret: os.Getenv("KC_CENTRAL_BANK_B_TREASURY_SECRET"),
 
-		IdentityBankA:          envOr("IDENTITY_BANK_A", "funded_operator@spoke-a-bank-a"),
-		IdentityCorrespondentA: envOr("IDENTITY_CORRESPONDENT_A", "funded_operator@spoke-a-bank-c"),
-		IdentityCustodian:      envOr("IDENTITY_CUSTODIAN", "funded_operator@spoke-b-bank-d"),
-		IdentityBankB:          envOr("IDENTITY_BANK_B", "funded_operator@spoke-b-bank-b"),
+		// Also required, and for the same reason as the endpoints: the old defaults
+		// named the legacy stack's Paladin nodes (spoke-a-bank-a …), which a toolkit
+		// stack does not have. Left to default they would fail deep in a lock, far
+		// from the cause.
+		IdentityBankA:           os.Getenv("IDENTITY_BANK_A"),
+		IdentityCorrespondentA:  os.Getenv("IDENTITY_CORRESPONDENT_A"),
+		IdentityCustodian:       os.Getenv("IDENTITY_CUSTODIAN"),
+		IdentityBankB:           os.Getenv("IDENTITY_BANK_B"),
+		IdentitySettlementAgent: os.Getenv("IDENTITY_SETTLEMENT_AGENT"),
+
+		SpokeAID:        os.Getenv("SPOKE_A_ID"),
+		SpokeBID:        os.Getenv("SPOKE_B_ID"),
+		OriginCurrency:  os.Getenv("FX_ORIGIN_CURRENCY"),
+		CounterCurrency: os.Getenv("FX_COUNTER_CURRENCY"),
 
 		OriginAmount:  envOr("FX_ORIGIN_AMOUNT", "100000"),
 		CounterAmount: envOr("FX_COUNTER_AMOUNT", "520000"),
 		MintAmount:    envOr("MINT_AMOUNT", "5000000"),
 
-		// Stack lifecycle is opt-in: by default the suite assumes a live stack and
-		// neither brings it up nor tears it down. `make spoke-all` regenerates
-		// genesis and wipes the chain, so we never trigger it implicitly.
+		// Default: assume a live stack. Setting either to 0 is now an error, not a
+		// lifecycle request (see TestMain).
 		SkipUp:   os.Getenv("SKIP_UP") != "0",
 		SkipDown: os.Getenv("SKIP_DOWN") != "0",
 		SkipMint: os.Getenv("SKIP_MINT") == "true",
@@ -142,35 +176,68 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-// envOrEnvFile returns os.Getenv(envKey) if set, otherwise reads fileKey from the
-// .env file at filePath, otherwise returns fallback.
-func envOrEnvFile(envKey, filePath, fileKey, fallback string) string {
-	if v := os.Getenv(envKey); v != "" {
-		return v
+// requireComplete fails the run when an endpoint or an operator login is missing,
+// rather than letting an empty string reach Keycloak and come back as a bare 401 —
+// the failure mode that cost real debugging time against the old bring-up.
+func (c *Config) requireComplete(t *testing.T) {
+	t.Helper()
+	required := []struct{ name, url string }{
+		{"API_GW_BANK_A_URL", c.BankAURL},
+		{"API_GW_BANK_B_URL", c.BankBURL},
+		{"API_GW_BANK_C_URL", c.BankCURL},
+		{"API_GW_BANK_D_URL", c.BankDURL},
+		{"API_GW_CENTRAL_BANK_A_URL", c.CentralBankAURL},
+		{"API_GW_CENTRAL_BANK_B_URL", c.CentralBankBURL},
+		{"BESU_SPOKE_A_RPC", c.BesuSpokeAURL},
+		{"BESU_SPOKE_B_RPC", c.BesuSpokeBURL},
+		{"IDENTITY_BANK_A", c.IdentityBankA},
+		{"IDENTITY_CORRESPONDENT_A", c.IdentityCorrespondentA},
+		{"IDENTITY_CUSTODIAN", c.IdentityCustodian},
+		{"IDENTITY_BANK_B", c.IdentityBankB},
+		{"IDENTITY_SETTLEMENT_AGENT", c.IdentitySettlementAgent},
+		{"SPOKE_A_ID", c.SpokeAID},
+		{"SPOKE_B_ID", c.SpokeBID},
+		{"FX_ORIGIN_CURRENCY", c.OriginCurrency},
+		{"FX_COUNTER_CURRENCY", c.CounterCurrency},
 	}
-	if v := readEnvFile(filePath, fileKey); v != "" {
-		return v
-	}
-	return fallback
-}
-
-// readEnvFile parses a KEY=VALUE .env file and returns the value for the key.
-func readEnvFile(path, key string) string {
-	f, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	prefix := key + "="
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, prefix) {
-			return strings.TrimPrefix(line, prefix)
+	var unset []string
+	for _, e := range required {
+		if e.url == "" {
+			unset = append(unset, e.name)
 		}
 	}
-	return ""
+	if len(unset) > 0 {
+		t.Fatalf("unset required setting(s): %s.\n%s", strings.Join(unset, ", "), configHelp)
+	}
+
+	pairs := []struct{ name, user, pass string }{
+		{"bank-a", c.BankAClient, c.BankASecret},
+		{"bank-b", c.BankBClient, c.BankBSecret},
+		{"bank-c", c.BankCClient, c.BankCSecret},
+		{"bank-d", c.BankDClient, c.BankDSecret},
+		{"central-bank-a", c.CBAClient, c.CBASecret},
+		{"central-bank-b", c.CBBClient, c.CBBSecret},
+		{"central-bank-a treasury", c.CBATreasuryClient, c.CBATreasurySecret},
+		{"central-bank-b treasury", c.CBBTreasuryClient, c.CBBTreasurySecret},
+	}
+	var missing []string
+	for _, p := range pairs {
+		if p.user == "" || p.pass == "" {
+			missing = append(missing, p.name)
+		}
+	}
+	if len(missing) > 0 {
+		t.Fatalf("no operator credentials for %s.\n%s", strings.Join(missing, ", "), configHelp)
+	}
 }
+
+const configHelp = "" +
+	"This suite takes its whole configuration from the environment — it has no\n" +
+	"built-in topology. Derive it from the manifests the stack was provisioned with:\n" +
+	"    make scenario-a.test-integration        # derives and runs\n" +
+	"    make scenario-a.test-integration-env    # prints what it would use\n" +
+	"Bring a stack up first with the single provisioning path:\n" +
+	"    cd samples && ./deploy-all.sh"
 
 // scenarioARoot resolves scenario-a/ by walking up from this test file's location
 // (tests/integration/ → scenario-a/).

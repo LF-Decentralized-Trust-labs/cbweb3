@@ -9,6 +9,11 @@ services:
     container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-api-gateway"
     environment:
       ENTITY: "${ENTITY:?}"
+      # Institution identity for on-chain participant registration: institutionId =
+      # keccak256(INSTITUTION_CODE). Deliberately not BANK_CODE, which is the entity ROLE and
+      # identical on every central bank — hashing that would collapse them into one institution
+      # and leave the AMM 2-of-N resume quorum unreachable.
+      INSTITUTION_CODE: "${INSTITUTION_CODE:-}"
       HUB_RPC_URL: "http://host.docker.internal:${HUB_RPC_PORT:?}"
       ENTITY_BESU_RPC_URL: "http://host.docker.internal:${ENTITY_RPC_PORT:?}"
       GATEWAY_PORT: "${GATEWAY_PORT:?}"

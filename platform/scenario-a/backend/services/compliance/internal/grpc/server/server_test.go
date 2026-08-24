@@ -13,6 +13,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/repository"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
 	pki "github.com/LACNetNetworks/cbweb3-platform/backend/shared/identity"
+	authz "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	compliancv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/compliance/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -33,14 +34,15 @@ type recordingRegistry struct {
 	lastAddr     string
 	lastInst     string
 	lastRole     string
+	lastInstID   [32]byte
 	returnErr    error
 }
 
-func (r *recordingRegistry) RegisterParticipant(_ context.Context, addr, inst, role string, _ [32]byte) (string, error) {
+func (r *recordingRegistry) RegisterParticipant(_ context.Context, addr, inst, role string, _, institutionID [32]byte) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls++
-	r.lastAddr, r.lastInst, r.lastRole = addr, inst, role
+	r.lastAddr, r.lastInst, r.lastRole, r.lastInstID = addr, inst, role, institutionID
 	if r.returnErr != nil {
 		return "", r.returnErr
 	}
@@ -458,6 +460,33 @@ func TestApproveKYC_RegistersOnChain(t *testing.T) {
 	}
 }
 
+// KYC approval is the path that puts a commercial bank's wallet on-chain, so it is also
+// where that wallet acquires its institution. Deriving from bank_code (not the display
+// name) is what keeps a bank's second wallet inside the same institution — the property
+// the AMM resume quorum counts on.
+func TestApproveKYC_DerivesInstitutionIDFromBankCode(t *testing.T) {
+	t.Parallel()
+	svc, reg := newCATestService(t)
+	ctx := context.Background()
+	_, _ = svc.UpsertParticipant(ctx, &compliancv1.UpsertParticipantRequest{
+		Participant: &compliancv1.Participant{
+			UserId: "bank-user", InstitutionName: "Bank A", WalletAddress: "0xabc",
+			Role: "commercial_bank", BankCode: "bank-a", Status: string(domain.StatusCredentialRequested),
+		},
+	})
+
+	if _, err := svc.ApproveKYC(ctx, &compliancv1.ApproveKYCRequest{Subject: "bank-user", ActorSubject: "cb", Reason: "ok"}); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+
+	if want := registry.InstitutionIDFromString("bank-a"); reg.lastInstID != want {
+		t.Fatalf("institutionId = %x, want keccak256(bank-a) = %x", reg.lastInstID, want)
+	}
+	if reg.lastInstID == registry.InstitutionIDFromString("Bank A") {
+		t.Error("institutionId was derived from the institution name, not the bank code")
+	}
+}
+
 func TestApproveKYC_NoWallet_SkipsChain(t *testing.T) {
 	t.Parallel()
 	svc, reg := newCATestService(t)
@@ -528,7 +557,7 @@ func TestManageParticipantStatus(t *testing.T) {
 func TestCircuitBreaker_RoundTrip(t *testing.T) {
 	t.Parallel()
 	svc := newTestService()
-	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-actor-subject", "noc-operator"))
+	ctx := authz.NewContext(context.Background(), &authz.Identity{Subject: "noc-operator", Method: "mtls"})
 
 	// Default state: not paused.
 	st, err := svc.GetCircuitBreakerStatus(ctx, &emptypb.Empty{})
@@ -609,7 +638,7 @@ func TestUpdateSystemParameters_MissingReason(t *testing.T) {
 func TestUpdateSystemParameters_ActorFromCtx(t *testing.T) {
 	t.Parallel()
 	svc := newTestService()
-	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-actor-subject", "ctx-actor"))
+	ctx := authz.NewContext(context.Background(), &authz.Identity{Subject: "ctx-actor", Method: "mtls"})
 	_, err := svc.UpdateSystemParameters(ctx, &compliancv1.UpdateSystemParametersRequest{Reason: "r"})
 	if err != nil {
 		t.Fatalf("update: %v", err)
@@ -623,9 +652,11 @@ func TestCtxHelpers(t *testing.T) {
 	md := metadata.Pairs(
 		"x-correlation-id", "corr-1",
 		"x-forwarded-for", "1.2.3.4",
-		"x-actor-subject", "actor-1",
 	)
 	ctx := metadata.NewIncomingContext(context.Background(), md)
+	// The actor comes from the authenticated identity, not from metadata: the
+	// x-actor-subject header this test used to set is no longer read at all.
+	ctx = authz.NewContext(ctx, &authz.Identity{Subject: "actor-1", Method: "mtls"})
 	if correlationIDFromCtx(ctx) != "corr-1" {
 		t.Error("correlation id")
 	}

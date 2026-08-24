@@ -16,7 +16,12 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-const maxAuditLimit = 100
+const (
+	maxAuditLimit = 100
+	// defaultAuditLimit is the page size used when the client asks for none or asks for
+	// something unusable. It matches the compliance repository's own default.
+	defaultAuditLimit = 50
+)
 
 // ComplianceAuditLister fetches and writes compliance audit log entries.
 type ComplianceAuditLister interface {
@@ -92,21 +97,20 @@ func (h *SupervisorHandler) SetHTLCScanner(s htlcLookup) {
 
 // GetAuditLogs handles GET /api/v1/compliance/audit/logs.
 //
-// Query params: category, severity, from_date, to_date, page (default 1), limit (default 20, max 100).
+// Query params: category, severity, from_date, to_date, page (default 1),
+// limit (default defaultAuditLimit, max maxAuditLimit).
+//
+// Page and limit go through the same auditPageNumber/auditPageSize helpers the governance route
+// uses. Two routes reading one audit log must agree on what a legal page is, and before this they
+// did not: this one defaulted to 20 where governance defaulted to 50, and it mapped `limit=0` to
+// the MAXIMUM page rather than the default, so asking for nothing returned the most (R2-M-14).
 func (h *SupervisorHandler) GetAuditLogs(c *fiber.Ctx) error {
 	category := c.Query("category")
 	severity := c.Query("severity")
 	fromDate := c.Query("from_date")
 	toDate := c.Query("to_date")
-	page := c.QueryInt("page", 1)
-	limit := c.QueryInt("limit", 20)
-
-	if page < 1 {
-		page = 1
-	}
-	if limit < 1 || limit > maxAuditLimit {
-		limit = maxAuditLimit
-	}
+	page := auditPageNumber(c.Query("page"))
+	limit := auditPageSize(c.Query("limit"))
 
 	logs, err := h.lister.GetAuditLogs(c.UserContext(), category, severity, fromDate, toDate, page, limit)
 	if err != nil {
@@ -155,7 +159,7 @@ func (h *SupervisorHandler) DecryptTransaction(c *fiber.Ctx) error {
 	}
 
 	var req struct {
-		TxHash  string `json:"tx_hash"`  // HTLC contract ID (0x...), same as shown in the dashboard
+		TxHash  string `json:"tx_hash"` // HTLC contract ID (0x...), same as shown in the dashboard
 		ViewKey string `json:"view_key"`
 		Reason  string `json:"reason"`
 	}

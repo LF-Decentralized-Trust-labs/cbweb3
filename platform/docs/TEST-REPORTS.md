@@ -60,12 +60,28 @@ make contracts.coverage
 # Note (scenario-a): run with contracts/.env absent — Foundry auto-loads it and the dev
 # CENTRAL_BANK_ADDRESS breaks a deploy-script test locally (CI is unaffected; .env is git-ignored).
 
-# Live-stack E2E happy path (brings the stack up if needed)
+# Live-stack E2E happy path (needs an already-running stack: since the legacy
+# deploy/local path was retired on 2026-08-21, no make target brings one up — and the
+# test still names the retired topology, see docs/deliverables/D12-defect-log.md DEF-007)
 make scenario-a.test-integration            # scenario-b: make scenario-b.test-integration
 
 # Performance suite
 make scenario-a.perf-all                    # scenario-b: make scenario-b.perf-all
 ```
+
+## Execution record (D12)
+
+Measured results answer *what the tests found*. These three answer *what was run, when, and
+what is still open*:
+
+| Document | Holds |
+|----------|-------|
+| [`deliverables/D12-timeline-actuals.md`](deliverables/D12-timeline-actuals.md) | Planned vs actual dates per phase, and the nine recorded deviations |
+| [`deliverables/D12-defect-log.md`](deliverables/D12-defect-log.md) | The defect register — format, severity/SLA, lifecycle, and the 14 defects the executed phases produced |
+| [`deliverables/D12-uat-records.md`](deliverables/D12-uat-records.md) | Phase 5 UAT record and sign-off formats, plus the preconditions still blocking UAT |
+
+Phases 1–4 have executed; Phase 5 (bank-led UAT) has not, and there are no UAT records on
+file. Six Phase 4 threshold findings remain open.
 
 ## Next pass
 - Side-by-side perf deep-dive (the two throughput ceilings: A = Paladin/Zeto blocking lock

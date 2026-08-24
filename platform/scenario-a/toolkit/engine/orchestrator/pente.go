@@ -5,6 +5,7 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -270,6 +271,14 @@ const (
 // zeroBytes32 is the ABI zero value for a bytes32 (e.g. an unset zkPointer).
 const zeroBytes32 = "0x0000000000000000000000000000000000000000000000000000000000000000"
 
+// penteInstitutionID renders the institutionId for an in-group registry participant as the
+// 0x-prefixed bytes32 Paladin expects. Same keccak256-of-a-code derivation as
+// institutionIDFromCode and the Go services, so the value is recognisable rather than opaque.
+func penteInstitutionID(code string) string {
+	id := institutionIDFromCode(code)
+	return "0x" + hex.EncodeToString(id[:])
+}
+
 // deployContractInPente deploys a Foundry-compiled contract inside the privacy group via
 // pgroup_sendTransaction (from = the deployer's node identity), passing ctorInput to the
 // constructor, and returns the deployed in-group address.
@@ -389,7 +398,11 @@ func resolveAddress(ctx context.Context, paladinURL, identity string) (string, e
 // creating account in Pending with the given role. `from` MUST hold GOVERNANCE_ROLE (the
 // registry admin / deployer). A follow-up verifyParticipantInPente is required to reach
 // Verified — see setupBilateralFXAContext.
-func registerParticipantInPente(ctx context.Context, paladinURL, groupID, from, registryAddr, account, name string, role int, progress func(string)) error {
+//
+// institutionID identifies the member's INSTITUTION and must be non-zero: the in-group
+// registry refuses a zero id, for the same reason the base-ledger one does — every unset id
+// is the same id, so a quorum counting institutions would read them all as one.
+func registerParticipantInPente(ctx context.Context, paladinURL, groupID, from, registryAddr, account, name string, role int, institutionID string, progress func(string)) error {
 	if progress != nil {
 		progress(fmt.Sprintf("registering participant %s (role %d)…", name, role))
 	}
@@ -400,6 +413,7 @@ func registerParticipantInPente(ctx context.Context, paladinURL, groupID, from, 
 			{"name": "name", "type": "string"},
 			{"name": "role", "type": "uint8"},
 			{"name": "zkPointer", "type": "bytes32"},
+			{"name": "institutionId", "type": "bytes32"},
 		},
 	}
 	tx := map[string]interface{}{
@@ -411,6 +425,7 @@ func registerParticipantInPente(ctx context.Context, paladinURL, groupID, from, 
 		"input": map[string]interface{}{
 			"account": account, "name": name,
 			"role": fmt.Sprintf("%d", role), "zkPointer": zeroBytes32,
+			"institutionId": institutionID,
 		},
 	}
 	var txID string
@@ -524,7 +539,11 @@ func setupBilateralFXAContext(ctx context.Context, paladinURL, groupID, deployer
 		// Two-step onboarding: register (Pending) then verify (Pending -> Verified) so the member
 		// passes canTransact/canGovern in the in-group FXAgreement. The deployer holds both
 		// GOVERNANCE_ROLE and VERIFIER_ROLE (in-group registry constructor grants both to admin).
-		if err := registerParticipantInPente(ctx, paladinURL, groupID, deployer, registryAddr, addr, r.name, r.role, progress); err != nil {
+		// The in-group registry is its own registry, so the id only has to be stable and
+		// distinct WITHIN this group. The member's node name is exactly that: one per
+		// institution, and the collision branch above already keeps the surviving name.
+		if err := registerParticipantInPente(ctx, paladinURL, groupID, deployer, registryAddr, addr, r.name, r.role,
+			penteInstitutionID(r.name), progress); err != nil {
 			return "", "", err
 		}
 		if err := verifyParticipantInPente(ctx, paladinURL, groupID, deployer, registryAddr, addr, r.name, progress); err != nil {

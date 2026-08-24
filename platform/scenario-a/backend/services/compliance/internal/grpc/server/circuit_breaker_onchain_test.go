@@ -9,9 +9,9 @@ import (
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/repository"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/amm"
+	authz "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	compliancv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/compliance/v1"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -65,7 +65,7 @@ func newChainService(breaker amm.Breaker) *complianceService {
 }
 
 func actorCtx(subject string) context.Context {
-	return metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-actor-subject", subject))
+	return authz.NewContext(context.Background(), &authz.Identity{Subject: subject, Method: "mtls"})
 }
 
 // A single Central Bank pauses on-chain (1-of-N) and the DB mirrors the chain.

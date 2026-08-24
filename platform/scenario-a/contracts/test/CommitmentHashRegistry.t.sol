@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {CommitmentHashRegistry} from "../src/CommitmentHashRegistry.sol";
@@ -30,7 +30,11 @@ contract CommitmentHashRegistryTest is Test {
         // Register governance participant
         vm.startPrank(admin);
         identityRegistry.registerParticipant(
-            governance, "Governance", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            governance,
+            "Governance",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-governance")
         );
         identityRegistry.verifyParticipant(governance);
         vm.stopPrank();

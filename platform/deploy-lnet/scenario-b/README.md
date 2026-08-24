@@ -49,6 +49,17 @@ The manifests here are wired for genuinely separate VMs, but be aware of the sea
    as an operator-patched path, not a toolkit feature. The blockchain layers (hub chain, per-spoke QBFT
    chains, bank joins) form correctly regardless.
 
+4. **Service-to-service authentication is per entity, and one half of it does not cross VMs.** The
+   internal `/internal/*` routes now verify a per-entity signature instead of the shared
+   `INTERNAL_RELAY_AUTH_SECRET` (see the runbook's item 9). Banks and central banks get their
+   identities from onboarding and provisioning, which work fine here. The **Cacti relay** does not:
+   the toolkit writes its certificate into each CB's PKI volume with a volume-to-volume copy
+   (`pin-relay-cert`), and that only works when the relay and the CB share a Docker daemon. On LNET
+   the relay lives on `.20` while the CBs are on `.21`/`.24`, so the step finds nothing and is skipped
+   (it is soft on purpose). Consequence: those CBs cannot verify the relay. Harmless while
+   enforcement is off — the relay falls back to the shared secret — but it must be done by hand before
+   enabling it (see §6).
+
 DNS: point each launcher FQDN at the matching VM IP.
 
 ## Manifests are templates
@@ -94,6 +105,14 @@ deploy-lnet/deploy.sh cacti
 # Found the hub (render + apply):
 deploy-lnet/deploy.sh b hub
 #   -> emits deploy-lnet/bundles/hub/hub.bundle.yaml
+
+# REQUIRED: the relay was started BEFORE the hub (it is a hard prerequisite of
+# register-relay-spoke), so it booted before found-hub wrote its signing identity — and a
+# signer is read once, at construction. Without this restart the relay forwards the
+# bridge-out leg unsigned, which the central banks reject once enforcement is on.
+docker restart cbweb3-cacti-liquidity-relay
+docker logs cbweb3-cacti-liquidity-relay 2>&1 | grep 'signature enabled'
+#   [CrossCurrencySwapRelay] per-entity signature enabled (key-id=cacti-relay)
 ```
 
 Patch the hub bundle's cross-host URLs (emitted as `localhost`), then copy into
@@ -175,6 +194,55 @@ Same as step 3 with `cb5.yaml` / `cb6.yaml`.
 
 All modes are idempotent (`<dataDir>/.provisioning-state.yaml` + flock); re-run `apply` to resume.
 Use `--dry-run` to plan without side effects.
+
+### 6 — Optional: enforce per-entity signatures on the internal routes
+
+The `/internal/*` routes accept either a per-entity signature or the shared
+`INTERNAL_RELAY_AUTH_SECRET` — a secret identical in every entity, so it proves that *some* entity is
+calling and never *which*. Enforcement stops accepting it. It is **off by default** and is an operator
+decision per central bank; the full description is in the runbook's "service-to-service authentication"
+item.
+
+On LNET one prerequisite is not automatic: the relay's certificate must reach each CB's PKI volume,
+which the toolkit only manages when they share a Docker daemon (see seam 4). Copy it by hand, in the
+same spirit as the hub-bundle `scp` above — the certificate is public, the private key stays on `.20`:
+
+```bash
+# On .20 — extract the relay's certificate (NOT its key) from the relay's volume:
+docker run --rm -v cbweb3-relay_data:/t:ro alpine:3.23 cat /t/cacti-relay.crt > /tmp/cacti-relay.crt
+scp /tmp/cacti-relay.crt op@10.10.0.21:/tmp/
+scp /tmp/cacti-relay.crt op@10.10.0.24:/tmp/
+
+# On each CB VM (.21 and .24) — pin it in that CB's PKI volume. <prefix> is the entity's
+# volume prefix (e.g. spoke-brl_central-bank); `docker volume ls | grep cb_tls` finds it.
+docker run --rm -v <prefix>_cb_tls:/t -v /tmp:/in:ro alpine:3.23 \
+  sh -c 'cp /in/cacti-relay.crt /t/cacti-relay.crt && chmod 0644 /t/cacti-relay.crt'
+```
+
+Then verify on each CB that every peer it must authenticate is pinned — its onboarded banks, the
+relay, and itself — before turning enforcement on:
+
+```bash
+docker logs <cb-gateway> 2>&1 | grep '\[relay-auth\] registry refreshed'
+#   [relay-auth] registry refreshed: N peer key(s) pinned [bank-… cacti-relay <cb-name>]
+```
+
+Enable it by exporting `RELAY_REQUIRE_SIGNATURE=true` before `apply` on the **central bank** VMs only
+— never on a bank VM. Enforcement is a receiver-side setting and a bank hosts no internal routes; the
+toolkit forces the variable empty on `join` for that reason, but exporting it in a shell that also
+runs a join is a habit worth avoiding. A gateway with the flag set and no pinned peer **refuses to
+start** rather than answering 401 to every internal request, so a mistake here is loud, not silent.
+
+Prove it took effect — this is the check that shows behaviour rather than configuration:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST "$CB_GW/internal/amm/cross-currency-bridge-in" \
+  -H 'Content-Type: application/json' -H "X-Relay-Auth: $INTERNAL_RELAY_AUTH_SECRET" -d '{}'
+#   401   (the shared secret alone is no longer accepted)
+```
+
+To roll back, unset the variable and re-apply: the receiver accepts the secret again and senders keep
+signing harmlessly.
 
 ## Port map (per VM)
 

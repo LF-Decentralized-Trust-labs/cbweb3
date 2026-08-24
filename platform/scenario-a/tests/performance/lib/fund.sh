@@ -2,7 +2,10 @@
 # fund.sh — seed + fund the sender identity so the throughput runs don't trip the
 # <1% error gate by running out of fCeBM.
 #
-# Reuses the exact funding path from tryouts/tryout-escrow-flow.sh:
+# Reuses the exact funding path the sample walkthrough drives
+# (samples/sample-tryout.sh, tokenisation steps); the tryout script this used to name
+# was removed with the retired deploy/local test layer. This lib reimplements the
+# calls rather than sourcing anything, so nothing here depended on that file:
 #   deposit (bank) -> approve (CB gov) -> fiat-exchange/mint fCeBM (CB gov).
 # That mints fCeBM to the commercial bank, which backs both the HTLC lock path
 # (Zeto lock is funded from tCeBM, but the escrow request that the Zeto harness

@@ -45,7 +45,7 @@ services:
   # paladin-data-init (commercial-bank/paladin-compose.yaml,
   # central-bank/paladin-compose.yaml).
   besu-volumes-init:
-    image: alpine:3.20
+    image: alpine:3.23
     user: "0:0"
     volumes:
       - besu_data:/data/besu

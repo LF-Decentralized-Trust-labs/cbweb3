@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {SpokeBridge} from "../src/SpokeBridge.sol";
@@ -41,11 +41,15 @@ contract SpokeBridgeTest is Test {
         // Register participants
         vm.startPrank(admin);
         registry.registerParticipant(
-            alice, "Alice Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+            alice,
+            "Alice Bank",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            bytes32("inst-alice")
         );
         registry.verifyParticipant(alice);
         registry.registerParticipant(
-            bob, "Bob Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+            bob, "Bob Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0), bytes32("inst-bob")
         );
         registry.verifyParticipant(bob);
         vm.stopPrank();

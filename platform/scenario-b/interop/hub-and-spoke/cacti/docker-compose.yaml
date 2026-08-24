@@ -26,6 +26,17 @@ services:
       GATEWAY_INTERNAL_URLS: "${GATEWAY_INTERNAL_URLS:-}"
       # Shared secret for X-Relay-Auth when calling internal gateway endpoints
       INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:-cbweb3-relay-shared-secret}"
+      # Per-entity signing for the calls the relay makes to a central bank's internal endpoints. The
+      # secret above is identical in every entity, so it cannot attribute a call; this key can. The
+      # toolkit writes it into this same volume (found-hub step gen-relay-identity-cacti) and pins the
+      # certificate half in each CB's PKI volume, so the relay never needs a host path for its key.
+      #
+      # Absent is a valid state: the relay then forwards with the shared secret only, which is the
+      # migration state. It becomes required once a CB sets RELAY_REQUIRE_SIGNATURE — and that CB
+      # refuses to start without pinned peers, so the two ends cannot be switched on out of order
+      # without the operator being told.
+      RELAY_KEY_ID: "${RELAY_KEY_ID:-cacti-relay}"
+      RELAY_SIGNING_KEY_FILE: "${RELAY_SIGNING_KEY_FILE:-/data/cacti-relay.key}"
       # Hub Besu RPC — the LiquidityCommitWatcher and the cross-currency bridge-out
       # circuit-breaker gate (isPaused() on the pair's AMM) read the HUB, not a spoke.
       # The sample hub listens on 33845 (Scenario B host ports shifted +25000

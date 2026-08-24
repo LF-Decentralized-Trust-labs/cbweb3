@@ -27,7 +27,18 @@ type Config struct {
 	EntityBesuAddress       string // Besu address of this entity; used by the escrow proxy to enrich requests
 	CBTokenRecipientAddress string // Central Bank's token recipient address (Besu address); receiver for token transfers in redeem flow
 	RelayAuthSecret         string // shared secret for X-Relay-Auth header on internal service-to-service endpoints (legacy fallback)
-	RelayRequireSignature   bool   // when true, internal relay endpoints reject requests without a valid per-CB signature (post-cutover enforcement)
+	// RelayKeyID identifies this entity in service-to-service authentication: the sender puts it in
+	// X-Relay-Key-Id and the receiver pins one public key per id, so it is also what attributes an
+	// internal act to a specific sovereign. It must be UNIQUE across the deployment.
+	//
+	// Separate from BankCode on purpose. The compose template sets BANK_CODE to the entity's ROLE,
+	// so every central bank is "central-bank" — two of them sharing an id means the registry can pin
+	// only one key, and "signed by central-bank" would not say which one. BankCode cannot simply be
+	// changed: it flows into owner_bank_id on bridge positions and into the reconciliation's
+	// self-exclusion, so that would be a data migration. Defaults to BankCode, which is already
+	// unique for a commercial bank.
+	RelayKeyID            string
+	RelayRequireSignature bool // when true, internal relay endpoints reject requests without a valid per-CB signature (post-cutover enforcement)
 	// Simplified bridge/liquidity config (008-fix-cb-liquidity API simplification)
 	SpokeNetwork      string // spoke-a, spoke-b (for bridge lock-mint derivation)
 	NativeAssetSymbol string // tCeBM_BRL, tCeBM_ARS (for bridge lock-mint derivation)
@@ -63,6 +74,7 @@ func Load() Config {
 		CBTokenRecipientAddress: getEnv("CB_TOKEN_RECIPIENT_ADDRESS", ""),
 		RelayAuthSecret:         getEnv("INTERNAL_RELAY_AUTH_SECRET", ""),
 		RelayRequireSignature:   getEnvBool("RELAY_REQUIRE_SIGNATURE", false),
+		RelayKeyID:              getEnv("RELAY_KEY_ID", bankCode),
 		SpokeNetwork:            getEnv("SPOKE_NETWORK", ""),
 		NativeAssetSymbol:       getEnv("NATIVE_ASSET_SYMBOL", ""),
 		FiatSymbol:              getEnv("FIAT_SYMBOL", ""),

@@ -371,7 +371,7 @@ func TestCompleteOnboarding(t *testing.T) {
 				return complianceclient.SignedCSR{CertPEM: "CERT"}, nil
 			},
 		}
-		bc := &fakeRegistry{registerFn: func(_ context.Context, _, _, _ string, _ [32]byte) (string, error) {
+		bc := &fakeRegistry{registerFn: func(_ context.Context, _, _, _ string, _, _ [32]byte) (string, error) {
 			return "", errors.New("revert")
 		}}
 		_, err := svc(nil, comp, nil, bc, nil, "").CompleteOnboarding(ctx, validReq())
@@ -386,7 +386,7 @@ func TestCompleteOnboarding(t *testing.T) {
 				return complianceclient.SignedCSR{CertPEM: "CERT"}, nil
 			},
 		}
-		bc := &fakeRegistry{registerFn: func(_ context.Context, _, _, _ string, _ [32]byte) (string, error) {
+		bc := &fakeRegistry{registerFn: func(_ context.Context, _, _, _ string, _, _ [32]byte) (string, error) {
 			return "0xTX", nil
 		}}
 		kc := okKC()
@@ -409,7 +409,7 @@ func TestCompleteOnboarding(t *testing.T) {
 				return nil
 			},
 		}
-		bc := &fakeRegistry{registerFn: func(_ context.Context, _, _, _ string, _ [32]byte) (string, error) {
+		bc := &fakeRegistry{registerFn: func(_ context.Context, _, _, _ string, _, _ [32]byte) (string, error) {
 			return "0xTX", nil
 		}}
 		resp, err := svc(okKC(), comp, nil, bc, nil, "").CompleteOnboarding(ctx, validReq())

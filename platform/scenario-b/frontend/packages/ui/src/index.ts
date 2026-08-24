@@ -20,6 +20,8 @@ export {
 	DialogTitle,
 	DialogDescription,
 } from "./components/dialog";
+export { ConfirmActionDialog } from "./components/confirm-action-dialog";
+export type { ConfirmActionField } from "./components/confirm-action-dialog";
 export { Calendar } from "./components/calendar";
 export { DatePicker } from "./components/date-picker";
 export { Toaster } from "./components/sonner";

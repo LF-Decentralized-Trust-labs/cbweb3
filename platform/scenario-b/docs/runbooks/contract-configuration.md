@@ -320,7 +320,7 @@ The `LiquidityCommitRegistry` implements the commit-reveal protocol for cooperat
 
 ## Keycloak — realms and permissions
 
-Scenario B uses 7 realms (6 entity realms + 1 MLP realm). The Keycloak `init.sh` script creates all realms, clients, and writes secrets automatically during `make scenario-b.up-infra`.
+Scenario B uses 7 realms (6 entity realms + 1 MLP realm). The Keycloak `init.sh` script creates all realms, clients, and writes secrets automatically during `cd samples && ./deploy-all.sh`.
 
 ### Realms and clients
 
@@ -412,7 +412,7 @@ The `auth` service uses `CA_CERT_FILE` and `CA_KEY_FILE` to sign participant cer
 
 ## Post-deployment checklist
 
-Run after `make scenario-b.up` to validate that all components are correctly configured.
+Run after `cd samples && ./deploy-all.sh` to validate that all components are correctly configured.
 
 ### Contracts
 

@@ -20,8 +20,17 @@ services:
   redis:
     image: "redis:${REDIS_IMAGE_TAG:-7-alpine}"
     container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-redis"
-    ports:
-      - "${REDIS_PORT:?}:6379"
+    # This Redis is not a cache. It holds the relay-auth replay guard
+    # (relayauth:seen:, where SET NX admits each signature exactly once) and the
+    # auth service's PKI login nonces (pki:nonce:). Anyone able to delete those
+    # keys can re-arm a signature that was already spent, which is replay of a
+    # signed internal call. So it takes a password, and it is not published.
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?}"]
+    # No host port on purpose: every consumer reaches this by container name over
+    # entity_net (REDIS_ADDR is "<prefix>-<entity>-redis:6379"), so publishing 6379
+    # only widened the attack surface. Reach it for debugging with
+    #   docker exec -it <prefix>-<entity>-redis redis-cli
+    # which needs no published port, or add a temporary mapping deliberately.
     networks:
       - entity_net
     restart: always

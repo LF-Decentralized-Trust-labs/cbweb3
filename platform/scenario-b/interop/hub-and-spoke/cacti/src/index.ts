@@ -25,6 +25,7 @@ import { makeSpokesHandler } from "./spokes-api";
 import { createLiquidityCommitWatcherFromEnv } from "./liquidity-commit-watcher";
 import { createCrossCurrencySwapRelay } from "./cross-currency-swap-relay";
 import { makeEthersIsPausedReader, checkNotPaused } from "./circuit-breaker";
+import { requireRelayAuth } from "./relay-route-auth";
 
 async function waitForHubRpc(rpcUrl: string, maxWaitMs = 60_000, intervalMs = 2_000): Promise<void> {
   if (!rpcUrl) return;
@@ -142,13 +143,25 @@ async function main(): Promise<void> {
       void hydrateSpoke(spoke); // create connector/watcher without restart
     },
   });
-  app.post("/api/v1/spokes", (req: Request, res: Response) => {
+  // Registering a spoke points the relay at a Besu RPC and a gateway URL, so this route is
+  // a write to what the relay watches and where it forwards settlement — it authenticates
+  // (finding R2-M-10). The guard fails closed: with no INTERNAL_RELAY_AUTH_SECRET every
+  // registration is refused rather than served openly, which is why the absence is logged
+  // as an error and not a warning. The toolkit's registrar sends the same header.
+  const inboundAuthSecret = process.env["INTERNAL_RELAY_AUTH_SECRET"] ?? "";
+  if (!inboundAuthSecret) {
+    console.error(
+      "[cacti] INTERNAL_RELAY_AUTH_SECRET not set — POST /api/v1/spokes will refuse every " +
+        "registration (fail-closed). Spokes cannot join until it is configured.",
+    );
+  }
+  app.post("/api/v1/spokes", requireRelayAuth(inboundAuthSecret), (req: Request, res: Response) => {
     void spokesHandler({ body: req.body }, {
       status: (c: number) => { res.status(c); return res as never; },
       json: (p: unknown) => res.json(p),
     });
   });
-  console.log("[cacti] registered POST /api/v1/spokes");
+  console.log("[cacti] registered POST /api/v1/spokes (X-Relay-Auth required)");
 
   // Liveness
   app.get("/api/v1/health", (_req: Request, res: Response) => {

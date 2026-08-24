@@ -1,5 +1,11 @@
 # FX Agreement Deployment Guide
 
+> **Stale bring-up commands below.** This guide still instructs `make deploy.up-backend*`
+> and `make deploy.down-backend`, which were removed with the legacy `deploy/local` path.
+> A stack is stood up with the toolkit — `cd scenario-a/samples && ./deploy-all.sh` — which
+> provisions and starts each entity's backend as a step of `apply`. The FX-agreement steps
+> that follow are still correct; only the container lifecycle commands are not.
+
 ## Overview
 
 This guide covers deploying FX Agreement infrastructure across both Besu spokes,

@@ -20,10 +20,12 @@ import (
 	relayadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/relay"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/config"
 	dbinit "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/db/init"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/deadlines"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/router"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/grpcx"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"google.golang.org/grpc"
@@ -63,6 +65,7 @@ func dialGRPC(address, serverName string, timeout time.Duration) (*grpc.ClientCo
 		dialCtx,
 		address,
 		credOpt,
+		grpc.WithChainUnaryInterceptor(grpcx.WithDefaultDeadline(deadlines.Auth)),
 	)
 }
 
@@ -154,6 +157,11 @@ func New(cfg config.Config) (*App, error) {
 		// Resolve requester institution names for deposit/escrow/redeem listings
 		// (Treasury portal auditing) via the compliance participant registry.
 		ph = ph.WithParticipantResolver(complianceGRPC)
+		// Record mint and burn in the immutable audit trail. Before R2-M-8 the two
+		// operations that create and destroy money left no record of who, how much
+		// or why — which is also why the Treasury history screen, which reads the
+		// TREASURY category, had nothing to show.
+		ph = ph.WithAuditLogger(complianceGRPC)
 		// FX party roster sourced from real Pente membership (via the orchestrator),
 		// with PALADIN_IDENTITIES as an optional static override. Shared by the
 		// identities endpoint and propose-time validation, so an identity that is
@@ -246,12 +254,7 @@ func New(cfg config.Config) (*App, error) {
 		deps.OnboardingHandler = handlers.NewOnboardingHandler(identityManager)
 	}
 
-	fiberApp := fiber.New(
-		fiber.Config{
-			BodyLimit: 10 * 1024 * 1024,
-			AppName:   "api-gateway",
-		},
-	)
+	fiberApp := fiber.New(serverConfig())
 
 	// CORS middleware: only enable if explicitly configured to avoid security issues.
 	// AllowCredentials=true is incompatible with AllowOrigins="*" per RFC 6749.
@@ -274,5 +277,42 @@ func closeAll(closers []io.Closer) {
 		if err := c.Close(); err != nil {
 			log.Printf("warning: failed to close resource: %v", err)
 		}
+	}
+}
+
+// serverConfig is the api-gateway's Fiber configuration, including the connection
+// timeouts (finding R2-LOW).
+//
+// WHY THESE THREE. Without ReadTimeout a connection can open, dribble its headers and hold
+// a server slot for as long as it likes — the slowloris shape, and nothing in the handler
+// chain can bound it because it happens before any handler runs. IdleTimeout does the same
+// for keep-alive connections that stop sending anything.
+//
+// WHY A TIGHT WriteTimeout IS SAFE HERE, which is the non-obvious part. A cross-currency
+// swap is documented as taking up to 180s and this gateway's own internal deadlines already
+// reach 150s, so the reflex worry is that a 30s write timeout would cut a legitimate swap.
+// It does not: fasthttp applies WriteTimeout to writing the response, not to the handler's
+// duration. Measured, not assumed — a 5s handler completes under a 2s WriteTimeout, and
+// TestServerTimeouts_SlowHandlerStillCompletes keeps that true if anyone retunes this.
+func serverConfig() fiber.Config {
+	return serverConfigWith(30*time.Second, 30*time.Second, 120*time.Second)
+}
+
+// serverConfigWith is serverConfig with the timeouts supplied, so the behaviour tests can
+// exercise the same configuration on one-second bounds. Waiting on the production 30s
+// ReadTimeout to fire cost 62 seconds per scenario, which is not a price a unit suite
+// should pay to assert something a short timeout proves identically.
+func serverConfigWith(read, write, idle time.Duration) fiber.Config {
+	return fiber.Config{
+		// BodyLimit and ReadTimeout are coupled: in fasthttp the read deadline covers the
+		// headers AND the body, so the largest accepted body must be uploadable within
+		// ReadTimeout. 10MB in 30s needs roughly 2.7 Mbit/s. Today's payloads are small
+		// JSON and PEMs, so there is slack to spare — but move either number and check the
+		// other still fits.
+		BodyLimit:    10 * 1024 * 1024,
+		AppName:      "api-gateway",
+		ReadTimeout:  read,
+		WriteTimeout: write,
+		IdleTimeout:  idle,
 	}
 }

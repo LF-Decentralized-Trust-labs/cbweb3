@@ -57,7 +57,7 @@ The following components and layers are explicitly **in scope**:
 - **Cacti Relay**: CommitMatched event subscription, health validation, cross-spoke relay
 - **Compliance Layer**: KYC/AML screening, participant onboarding, status management for hub entities
 - **Performance Testing**: AMM quote latency, swap latency, pool status monitoring
-- **Test Environments**: Devnet (local Docker Compose via `make scenario-b.up-infra`) and Testnet (staging)
+- **Test Environments**: Devnet (local Docker Compose via `cd samples && ./deploy-all.sh`) and Testnet (staging)
 
 The following are explicitly **out of scope**:
 
@@ -125,13 +125,22 @@ The following are explicitly **out of scope**:
 
 > Total: **~9 weeks** from mobilization to submission. Scenario B execution begins after Scenario A baseline has been established. Actual calendar dates are to be agreed with the IDB Technical Committee.
 
+> **What actually happened is recorded elsewhere.** The windows above are the plan; execution
+> did not follow the stated ordering (Scenario B's performance run preceded Scenario A's).
+> Absolute dates per phase, the deviations, and the phases not yet started are in
+> [`docs/deliverables/D12-timeline-actuals.md`](../../docs/deliverables/D12-timeline-actuals.md).
+> Defects found by the executed phases are in
+> [`docs/deliverables/D12-defect-log.md`](../../docs/deliverables/D12-defect-log.md), and the
+> Phase 5 record and sign-off formats are in
+> [`docs/deliverables/D12-uat-records.md`](../../docs/deliverables/D12-uat-records.md).
+
 ### Phase Checklists
 
 #### Phase 0 — Mobilization (Week 1)
 
 **LNET:** deploy hub test environment · **Banks:** confirm UAT participants and schedule
 
-- [ ] Hub devnet deployed (`make scenario-b.up-infra` + `make scenario-b.deploy-contracts`)
+- [ ] Hub devnet deployed (`cd samples && ./deploy-all.sh` + `make scenario-b.deploy-contracts`)
 - [ ] Hub Besu RPC reports blocks advancing (`:8645`)
 - [ ] Spoke-B Besu RPC reports blocks advancing (`:8745`)
 - [ ] All 6+ API gateways healthy (`/healthz` 200 OK)
@@ -177,9 +186,7 @@ The following are explicitly **out of scope**:
 - [ ] `tryout-scenario-b-e2e.sh us4` — FX Agreement lifecycle on hub
 - [ ] `tryout-scenario-b-e2e.sh us5` — PairRegistry bilateral pair approval
 - [ ] `tryout-scenario-b-e2e.sh us6` — SpokeBridge Lock&Mint / Burn&Unlock
-- [ ] `tryout-cross-currency-full-lifecycle.sh` — Full payment lifecycle including bridge
 - [ ] `tryout-cacti-interop.sh` — Cacti relay health + CommitMatched event detection
-- [ ] `tryout-commercial-swap-e2e.sh` — Commercial bank cross-currency swap (partial; commercial bank path in progress)
 - [ ] Evidence bundle generated per flow
 
 #### Phase 4 — Performance & Security (Week 5)
@@ -284,7 +291,7 @@ Validates coordination between components with live local hub infrastructure.
 
 ### End-to-End (E2E) Testing
 
-Validates complete user journeys via the REST API against a full running hub stack (`make scenario-b.up`).
+Validates complete user journeys via the REST API against a full running hub stack (`cd samples && ./deploy-all.sh`).
 
 All E2E tests follow the **API-First** approach: no UI interaction; assertions are made against both the API response and direct on-chain state via `eth_getLogs` and contract read functions.
 
@@ -298,10 +305,7 @@ E2E scripts are located in `scenario-b/tryouts/`. See the [API-First E2E Executi
 | `tryout-scenario-b-e2e.sh us4` | US4: FX Agreement lifecycle on hub | Implemented |
 | `tryout-scenario-b-e2e.sh us5` | US5: PairRegistry bilateral pair approval | Implemented |
 | `tryout-scenario-b-e2e.sh us6` | US6: SpokeBridge Lock&Mint / Burn&Unlock | Implemented |
-| `tryout-commercial-swap-e2e.sh` | Commercial bank cross-currency swap | Partial |
-| `tryout-cross-currency-full-lifecycle.sh` | Full payment lifecycle including bridge | Implemented |
 | `tryout-cacti-interop.sh` | Cacti relay health + CommitMatched event detection | Implemented |
-| `tryout-deposit-flow.sh` | Spoke deposit (fCeBM) flow | Implemented |
 | `tryout-lp-bilateral-ratio.sh` | LP share ratio calculation | Implemented |
 | `tryout-payment-routes.sh` | Payment routing validation | Implemented |
 
@@ -339,7 +343,7 @@ E2E scripts are located in `scenario-b/tryouts/`. See the [API-First E2E Executi
 9. Assert: W-tCeBM burned on hub; spoke tCeBM balance increased by corresponding amount
 10. Assert: FX swap fully settled; no orphaned tokens on hub or spoke
 
-- **Scripts**: `tryout-scenario-b-e2e.sh us3`, `tryout-commercial-swap-e2e.sh`
+- **Scripts**: `tryout-scenario-b-e2e.sh us3`, `samples/sample-tryout.sh`
 - **Status**: Partial — governance path works; commercial bank direct swap path is in progress
 
 #### Flow 3 — SpokeBridge Round-Trip (US6)
@@ -427,9 +431,9 @@ The Hyperledger Cacti relay subscribes to hub events (CommitMatched) and spoke e
 
 - **Purpose**: unit/integration tests, rapid iteration, E2E flow development
 - **Persistence**: Ephemeral — spun up fresh per test run
-- **Start**: `make scenario-b.up-infra` then `make scenario-b.deploy-contracts`
+- **Start**: `cd samples && ./deploy-all.sh` (the toolkit provisions and deploys), then `make scenario-b.deploy-contracts` only if redeploying contracts against a running stack
 - **Seeding**: initialization scripts register test participants, seed AMM pool with BRL-USD liquidity, activate ManualOracle rate
-- **Teardown**: `make scenario-b.down-infra` destroys all state
+- **Teardown**: `cd samples && ./deploy-all.sh --clean` destroys all state
 - **Readiness criteria**: see readiness checklist below
 
 ### Testnet (Staging)
@@ -515,7 +519,7 @@ The k6 script (`scenario-b/tests/performance/scenario-b-perf.js`) runs three con
 
 ### API Security (OWASP Controls)
 
-All endpoints defined in the Scenario B OpenAPI spec (`scenario-b/apis/openapi/amm.yaml`) are subject to:
+All endpoints defined in the Scenario B OpenAPI spec (`scenario-b/backend/services/api-gateway/docs/openapi.yaml` — the spec the gateway serves at `GET /openapi.yaml`) are subject to:
 
 | Control | Test |
 |---------|------|
@@ -581,13 +585,11 @@ To be triggered every night against the persistent hub Testnet (staging) environ
 
 ```bash
 # Full hub stack
-cd scenario-b && make scenario-b.up
+cd scenario-b/samples && ./deploy-all.sh
 
 # E2E flows
 bash tryouts/tryout-scenario-b-e2e.sh all
-bash tryouts/tryout-commercial-swap-e2e.sh
 bash tryouts/tryout-cacti-interop.sh
-bash tryouts/tryout-cross-currency-full-lifecycle.sh
 
 # Performance baseline
 make scenario-b.perf-baseline
@@ -650,7 +652,6 @@ The following areas are identified as having incomplete or missing test coverage
 | PairRegistry pair removal / archival | `PairRegistry.sol` | Removing an active pair; archiving deactivated pairs; re-proposing an archived pair | Medium |
 | FXAgreement concurrent settlement | `FXAgreement.sol` (hub) | Two concurrent `settle` calls on the same agreement; only one should succeed | High |
 | LiquidityCommitRegistry garbage collection | `LiquidityCommitRegistry.sol` | Batch expiry of multiple expired commits; gas cost of cleanup; state consistency after cleanup | Medium |
-| Commercial bank FX swap E2E | `tryout-commercial-swap-e2e.sh` | Full commercial bank path (not governance bypass): quote → swap → bridge round-trip | High |
 | Integration: Cacti event detection | Cacti relay + hub | End-to-end test that Cacti watcher detects `CommitMatched` on hub and triggers spoke action | High |
 | Integration: SpokeBridge on-chain | SpokeBridge API | Full integration test: API call → on-chain `Locked` event → W-tCeBM minted on hub | Medium |
 | AMM throughput validation | k6 performance | 30 TPS target is draft; must be validated with measured devnet results under realistic load | Medium |

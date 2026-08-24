@@ -1,8 +1,0 @@
-# Generated at setup time — do not commit
-spoke-*/config/**/config.yaml
-spoke-*/config/**/tls.crt
-spoke-*/config/**/tls.key
-spoke-*/.deployed-addrs.env
-
-# Temporary helper scripts
-_*.py

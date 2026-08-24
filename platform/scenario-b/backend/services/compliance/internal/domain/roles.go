@@ -4,11 +4,11 @@ package domain
 
 // Participant roles — must match Keycloak realm roles.
 const (
-	RoleGovernance        = "ROLE_GOVERNANCE"        // Banco Central (CA Root authority)
-	RoleCommercialBank    = "ROLE_COMMERCIAL_BANK"   // Requires X.509 PKI login
-	RoleTreasury          = "ROLE_TREASURY"          // Requires X.509 PKI login
-	RoleSupervisor        = "ROLE_SUPERVISOR"        // Password-only login
-	RoleNOC               = "ROLE_NOC"               // Password-only login
+	RoleGovernance        = "ROLE_GOVERNANCE"         // Banco Central (CA Root authority)
+	RoleCommercialBank    = "ROLE_COMMERCIAL_BANK"    // Requires X.509 PKI login
+	RoleTreasury          = "ROLE_TREASURY"           // Requires X.509 PKI login
+	RoleSupervisor        = "ROLE_SUPERVISOR"         // Password-only login
+	RoleNOC               = "ROLE_NOC"                // Password-only login
 	RoleGovernanceOfficer = "ROLE_GOVERNANCE_OFFICER" // Password-only login
 )
 

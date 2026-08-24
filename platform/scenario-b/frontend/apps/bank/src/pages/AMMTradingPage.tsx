@@ -8,6 +8,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  ConfirmActionDialog,
   Input,
   Label,
   Tabs,
@@ -60,6 +61,7 @@ function AMMTradingV2() {
 
   const [approveAmount, setApproveAmount] = useState("");
   const [showApprovePanel, setShowApprovePanel] = useState(false);
+  const [confirmingSwap, setConfirmingSwap] = useState(false);
   const [nowTimestamp, setNowTimestamp] = useState(() => Date.now());
 
   useEffect(() => {
@@ -109,12 +111,19 @@ function AMMTradingV2() {
     await fetchQuote(pair, displayToBase(parseAmountInput(amountOut), tokenDecimals));
   };
 
-  const handleSwap = async (event: FormEvent<HTMLFormElement>) => {
+  // The swap used to execute straight off the submit event, guarded only by the
+  // breaker/pool state (finding R2-M-8). Settlement is on-chain, so the operator
+  // now confirms the amounts that will actually be submitted.
+  const handleSwap = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isHalted || isPoolInactive) {
       return;
     }
+    setConfirmingSwap(true);
+  };
 
+  const confirmSwap = async () => {
+    setConfirmingSwap(false);
     await executeSwap({
       pair,
       amount_out: displayToBase(parseAmountInput(amountOut), tokenDecimals),
@@ -355,6 +364,23 @@ function AMMTradingV2() {
       <TabsContent value="cross-currency" className="space-y-4">
         <CrossCurrencySwapPanel />
       </TabsContent>
+
+      <ConfirmActionDialog
+        open={confirmingSwap}
+        onOpenChange={setConfirmingSwap}
+        title="Confirm swap"
+        description="This executes the swap against the pool. Settlement is on-chain and cannot be undone."
+        fields={[
+          { label: "Pool", value: pair },
+          { label: "Beneficiary", value: beneficiaryId },
+          { label: "Amount out (exact)", value: amountOut },
+          { label: "Max amount in", value: maxAmountIn },
+          { label: "Quoted input", value: quote ? weiToDisplay(quote.required_input, tokenDecimals) : "no quote fetched" },
+        ]}
+        confirmLabel="Confirm swap"
+        busy={status === "loading"}
+        onConfirm={() => void confirmSwap()}
+      />
     </Tabs>
   );
 }
@@ -405,6 +431,7 @@ function CrossCurrencySwapPanel() {
   const [targetCurrency, setTargetCurrency] = useState("ARS");
   const [amountOut, setAmountOut] = useState("");
   const [beneficiaryBankId, setBeneficiaryBankId] = useState("");
+  const [confirmingSwap, setConfirmingSwap] = useState(false);
   const [nowTimestamp, setNowTimestamp] = useState(() => Date.now());
 
   useEffect(() => {
@@ -479,12 +506,19 @@ function CrossCurrencySwapPanel() {
     await fetchQuote(sourceCurrency, targetCurrency, displayToBase(parseAmountInput(amountOut), tokenDecimals));
   };
 
-  const handleExecuteSwap = async (event: FormEvent<HTMLFormElement>) => {
+  const handleExecuteSwap = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!quote) {
       return;
     }
+    setConfirmingSwap(true);
+  };
 
+  const confirmExecuteSwap = async () => {
+    if (!quote) {
+      return;
+    }
+    setConfirmingSwap(false);
     clearQuoteRefreshedNotice();
     await executeSwap({
       source_currency: sourceCurrency,
@@ -712,6 +746,23 @@ function CrossCurrencySwapPanel() {
           </CardContent>
         </Card>
       ) : null}
+
+      <ConfirmActionDialog
+        open={confirmingSwap}
+        onOpenChange={setConfirmingSwap}
+        title="Confirm cross-currency swap"
+        description="This bridges in, swaps and bridges out across two spokes. Settlement is on-chain and cannot be undone."
+        fields={[
+          { label: "Direction", value: `${sourceCurrency} → ${targetCurrency}` },
+          { label: "Beneficiary bank", value: beneficiaryBankId || "-" },
+          { label: "Amount out (exact)", value: amountOut },
+          { label: "Quoted input", value: quote ? weiToDisplay(quote.amount_in, tokenDecimals) : "-" },
+          { label: "Quote", value: quote?.quote_id ?? "-" },
+        ]}
+        confirmLabel="Confirm swap"
+        busy={step !== "idle"}
+        onConfirm={() => void confirmExecuteSwap()}
+      />
     </div>
   );
 }

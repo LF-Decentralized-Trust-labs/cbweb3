@@ -20,6 +20,7 @@ import (
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/config"
 	dbinit "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/db/init"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/deadlines"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/middleware"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/router"
@@ -29,6 +30,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
 	tcebmclient "github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/tcebm"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/grpcx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/gofiber/fiber/v2"
@@ -37,6 +39,95 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
+
+// newSignedPaymentProxy builds the bank-side payment proxy with this entity's signer attached.
+//
+// One constructor for both wiring paths: they differ only in when the payment gRPC connection is
+// available, and having each build the proxy on its own is how one of them ends up not signing.
+func newSignedPaymentProxy(cfg config.Config) *handlers.PaymentProxyHandler {
+	proxy := handlers.NewPaymentProxyHandler(cfg.CentralBankAPIURL, cfg.EntityBesuAddress, cfg.RelayAuthSecret)
+	if s, err := relayauth.LoadSigner(cfg.PKIDir, cfg.RelayKeyID); err == nil {
+		log.Printf("[app] payment proxy: per-entity signature enabled (key-id=%s)", cfg.RelayKeyID)
+		return proxy.WithSigner(s)
+	} else if cfg.PKIDir != "" {
+		log.Printf("[app] payment proxy: signing unavailable (%v) — deposits/escrows/redeems fall back to the shared secret", err)
+	}
+	return proxy
+}
+
+// relayAuthConfigFor builds the internal-relay auth configuration from the environment: peer
+// verifying keys pinned from PKI_DIR/<entity>.crt, the legacy shared secret, and whether signatures
+// are mandatory.
+//
+// Silent by design — it is called twice, once by New to validate before any side effect and once by
+// the dependency wiring — so the logging lives with the caller that reports the outcome. Loading is
+// file reads only, which is why calling it twice is cheap enough to prefer over threading the
+// result through construction.
+func relayAuthConfigFor(cfg config.Config) middleware.RelayAuthConfig {
+	registry, _ := relayauth.LoadRegistryGlob(cfg.PKIDir)
+	return middleware.RelayAuthConfig{
+		Registry:     relayauth.NewStore(registry),
+		LegacySecret: os.Getenv("INTERNAL_RELAY_AUTH_SECRET"),
+		// One accepted signature, one request. The window a verified signature stays replayable in
+		// is the window in which a captured transfer-limit Restore keeps giving a bank its daily
+		// allowance back, so the guard's memory is exactly that window.
+		Replay:           relayauth.NewReplayGuard(relayauth.DefaultMaxSkew),
+		RequireSignature: cfg.RelayRequireSignature,
+	}
+}
+
+// validateRelayAuthForBoot decides whether this gateway may serve traffic with the relay-auth
+// settings it was given, judging the registry that will ACTUALLY verify requests.
+//
+// The file glob alone is the wrong thing to judge on a central bank. Its peers are the banks it
+// onboarded, and those are pinned from the participants table — its PKI dir holds no peer
+// certificates at all. Validating the file registry therefore refused to start exactly the
+// deployment the enforcement flag exists for: enforcement on, peers pinned from the database, the
+// relay's leaf certificate not distributed to this host (a documented cross-VM gap). So the pins are
+// folded in first, using a connection opened and closed here — reads only, and before any gRPC dial,
+// worker or on-chain write, which is the property that made the check belong at boot in the first
+// place.
+//
+// A database that cannot be read is deliberately NOT a refusal. Then nothing is known about the pins,
+// and refusing over a transient outage would take the gateway down for a condition that resolves
+// itself: the periodic refresher pins the peers as soon as the database answers. The state is logged
+// instead, and requests still fail closed one at a time.
+func validateRelayAuthForBoot(cfg config.Config) (middleware.RelayAuthConfig, error) {
+	c := relayAuthConfigFor(cfg)
+	if !c.RequireSignature {
+		return c, nil
+	}
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		// No participant source exists; the files are the whole registry and judging them is right.
+		return c, c.Validate()
+	}
+	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
+	if err != nil {
+		log.Printf("[app] relay auth: could not read participant pins at boot (%v) — starting anyway; "+
+			"internal requests fail closed until the periodic refresh pins this CB's peers", err)
+		return c, nil
+	}
+	if sqlDB, sqlErr := db.DB(); sqlErr == nil {
+		defer func() { _ = sqlDB.Close() }()
+	}
+	pins, pinErr := loadParticipantPins(context.Background(), db)
+	if pinErr != nil {
+		log.Printf("[app] relay auth: could not read participant pins at boot (%v) — starting anyway; "+
+			"internal requests fail closed until the periodic refresh pins this CB's peers", pinErr)
+		return c, nil
+	}
+	return c, validateRelayAuthWithPins(c, cfg.PKIDir, pins)
+}
+
+// validateRelayAuthWithPins is the decision itself: assemble both sources, then judge. Split out so
+// the rule can be tested with pins in hand, which is the part that was wrong — not the plumbing that
+// fetches them.
+func validateRelayAuthWithPins(c middleware.RelayAuthConfig, pkiDir string, pins []relayauth.ParticipantPin) error {
+	files, _ := relayauth.LoadRegistryGlob(pkiDir)
+	c.Registry.Set(relayauth.BuildRegistry(files, pins))
+	return c.Validate()
+}
 
 // App wraps the Fiber HTTP server and all gRPC connections for lifecycle management.
 type App struct {
@@ -70,10 +161,22 @@ func dialGRPC(address, serverName string, timeout time.Duration) (*grpc.ClientCo
 		dialCtx,
 		address,
 		credOpt,
+		grpc.WithChainUnaryInterceptor(grpcx.WithDefaultDeadline(deadlines.Auth)),
 	)
 }
 
 func New(cfg config.Config) (*App, error) {
+	// Refuse a relay-auth configuration that would answer 401 to every internal request
+	// (enforcement demanded, nothing pinned to verify against) BEFORE anything else happens.
+	//
+	// Placement matters and was chosen from a live run: validating after buildV2Dependencies also
+	// refuses to start, but by then the wiring has already dialled gRPC, started background workers
+	// and — through bootstrapLiquidityProviderRole — submitted an on-chain transaction. A process
+	// that refuses to start must not have written to the ledger first.
+	if _, err := validateRelayAuthForBoot(cfg); err != nil {
+		return nil, fmt.Errorf("relay auth configuration: %w", err)
+	}
+
 	var closers []io.Closer
 
 	// Single shared gRPC connection for auth + identity (same AUTH_GRPC_ADDR).
@@ -117,6 +220,30 @@ func New(cfg config.Config) (*App, error) {
 	// --- Scenario B v2 service wiring (T020) ---
 	v2Deps := buildV2Dependencies(cfg, identityGRPCProvider, identityManager)
 
+	// Make the replay guard hold across REPLICAS, not just inside this process.
+	//
+	// Its in-memory half protects one gateway. A central bank that scales its gateway out gets no
+	// protection from that at all — the captured request goes to a replica which has never seen the
+	// signature — and the control this exists for is a compliance one: a replayed transfer-limit
+	// restore credits a bank's daily allowance back and lets it transact past its configured limit.
+	// Redis is where that becomes a shared decision; it already runs per entity (REDIS_ADDR, the
+	// same instance the auth service keeps its login nonces in), so this adds no infrastructure.
+	//
+	// Without REDIS_ADDR the guard stays single-process and says so, because "one replica" then
+	// becomes a property the deployment has to hold rather than one the code enforces.
+	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
+		seen := relayauth.NewRedisSeenStore(redisAddr, os.Getenv("REDIS_PASSWORD"), 0)
+		v2Deps.RelayAuth.Replay.WithShared(seen)
+		closers = append(closers, seen)
+		log.Printf("[app] relay auth: replay guard shared via Redis at %s — one signature is admitted "+
+			"once across every replica of this gateway", redisAddr)
+	} else {
+		log.Printf("[app] relay auth: replay guard is IN-MEMORY only (REDIS_ADDR unset) — a captured " +
+			"request replayed against a DIFFERENT replica of this gateway would not be caught; run a " +
+			"single replica, or set REDIS_ADDR. Harmless on a gateway that serves no signed internal " +
+			"routes (the hub), material on a central bank")
+	}
+
 	deps := router.Dependencies{
 		AuthHandler:       authHandler,
 		ComplianceHandler: complianceHandler,
@@ -142,11 +269,7 @@ func New(cfg config.Config) (*App, error) {
 				log.Printf("warning: payment gRPC unavailable at %s, payment proxy disabled: %v", cfg.PaymentGRPCAddr, err)
 			} else {
 				closers = append(closers, paymentGRPC)
-				deps.PaymentProxyHandler = handlers.NewPaymentProxyHandler(
-					cfg.CentralBankAPIURL,
-					cfg.EntityBesuAddress,
-					cfg.RelayAuthSecret,
-				)
+				deps.PaymentProxyHandler = newSignedPaymentProxy(cfg)
 				deps.PaymentHandler = handlers.NewPaymentHandler(paymentGRPC)
 			}
 		}
@@ -174,21 +297,12 @@ func New(cfg config.Config) (*App, error) {
 			closers = append(closers, paymentGRPC)
 			deps.PaymentHandler = handlers.NewPaymentHandler(paymentGRPC)
 			if cfg.CentralBankAPIURL != "" {
-				deps.PaymentProxyHandler = handlers.NewPaymentProxyHandler(
-					cfg.CentralBankAPIURL,
-					cfg.EntityBesuAddress,
-					cfg.RelayAuthSecret,
-				)
+				deps.PaymentProxyHandler = newSignedPaymentProxy(cfg)
 			}
 		}
 	}
 
-	fiberApp := fiber.New(
-		fiber.Config{
-			BodyLimit: 10 * 1024 * 1024,
-			AppName:   "api-gateway",
-		},
-	)
+	fiberApp := fiber.New(serverConfig())
 
 	// CORS middleware: only enable if explicitly configured to avoid security issues.
 	if corsOrigins := os.Getenv("CORS_ALLOW_ORIGINS"); corsOrigins != "" {
@@ -231,6 +345,11 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	// Ensure this CB's Hub signer is registered as LiquidityProvider in the Hub
 	// IdentityRegistry (007-bridge-based-cb-liquidity / FR-004). Idempotent.
 	bootstrapLiquidityProviderRole(context.Background())
+	// The CB's relayer signs on the hub with its own identity (separate nonce space); it needs
+	// CENTRAL_BANK_ROLE on this CB's W-token to mint and burn. This only CHECKS the grant — making
+	// it is a provisioning act now that token administration no longer rests with this gateway.
+	// A no-op on a bank.
+	verifyRelayerIssuanceRole(context.Background())
 
 	deps := v2router.Dependencies{
 		AuthProvider: authProvider,
@@ -258,6 +377,30 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	dbURL := os.Getenv("DATABASE_URL")
 	hubRPC := os.Getenv("HUB_BESU_RPC_URL")
 	signerKey := os.Getenv("SIGNER_PRIVATE_KEY")
+	// This gateway's own Hub address. A CB needs it to tell a delegating bank where a swap output
+	// landed; a bank that delegates every Hub act has no signing key and leaves this empty.
+	//
+	// LOCAL_CB_HUB_SIGNER (the address) is preferred over deriving it from SIGNER_PRIVATE_KEY,
+	// because it is the form that survives production custody: a KMS never exports the key, so the
+	// address has to arrive as configuration. Deriving from the key stays as the fallback for
+	// deployments that only set the key, and the two are cross-checked when both are present —
+	// a mismatch means the environment describes two different identities, which would have the
+	// gateway report an address it cannot sign from.
+	hubSignerAddr := strings.TrimSpace(os.Getenv("LOCAL_CB_HUB_SIGNER"))
+	if signerKey != "" {
+		if privKey, keyErr := crypto.HexToECDSA(strings.TrimPrefix(signerKey, "0x")); keyErr == nil {
+			derived := crypto.PubkeyToAddress(privKey.PublicKey).Hex()
+			switch {
+			case hubSignerAddr == "":
+				hubSignerAddr = derived
+			case !strings.EqualFold(hubSignerAddr, derived):
+				log.Printf("warning: LOCAL_CB_HUB_SIGNER (%s) is not the address of SIGNER_PRIVATE_KEY (%s) — using the derived address, since that is the one this gateway can actually sign from", hubSignerAddr, derived)
+				hubSignerAddr = derived
+			}
+		} else {
+			log.Printf("warning: SIGNER_PRIVATE_KEY is not a valid secp256k1 key: %v — Hub signing disabled", keyErr)
+		}
+	}
 	chainIDStr := resolveHubChainIDStr(log.New(os.Stderr, "", 0))
 	// When SOVEREIGN_HUB_TOKEN_A/B_ADDRESS is set, use it for the token preparer
 	// (mint+approve). Falls back to HUB_TOKEN_A/B_ADDRESS for regular pairs.
@@ -471,7 +614,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	// Circuit-breaker institutional attestation is signed server-side with the CB's PKI
 	// key (PKI_DIR/<BANK_CODE>.key), so operators never supply a signature by hand.
 	if cfg.PKIDir != "" && cfg.BankCode != "" {
-		if cbSigner, sErr := relayauth.LoadSigner(cfg.PKIDir, cfg.BankCode); sErr == nil {
+		if cbSigner, sErr := relayauth.LoadSigner(cfg.PKIDir, cfg.RelayKeyID); sErr == nil {
 			deps.CircuitBreakerSigner = cbSigner
 		} else {
 			log.Printf("[app] circuit-breaker attestation key unavailable for %q: %v (attestation left empty)", cfg.BankCode, sErr)
@@ -503,7 +646,17 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	} else {
 		relaySecret := os.Getenv("INTERNAL_RELAY_AUTH_SECRET")
 		if relaySecret != "" {
-			transferLimitChecker = services.NewRemoteTransferLimitChecker(cfg.CentralBankAPIURL, relaySecret, cfg.RequestTimeout)
+			remoteChecker := services.NewRemoteTransferLimitChecker(cfg.CentralBankAPIURL, relaySecret, cfg.RequestTimeout)
+			// Sign the delegation with this entity's own key, so the CB can attribute the daily-limit
+			// call to a specific bank instead of to "whoever holds the shared secret" — which is
+			// every entity, since the secret is identical across the deployment.
+			if s, sErr := relayauth.LoadSigner(cfg.PKIDir, cfg.RelayKeyID); sErr == nil {
+				remoteChecker = remoteChecker.WithSigner(s)
+				log.Printf("[app] transfer limit pre-auth: per-entity signature enabled (key-id=%s)", cfg.RelayKeyID)
+			} else if cfg.PKIDir != "" {
+				log.Printf("[app] transfer limit pre-auth: signing unavailable (%v) — falling back to the shared secret", sErr)
+			}
+			transferLimitChecker = remoteChecker
 			log.Printf("[app] transfer limit enforcement: delegating pre-auth to CB at %s", cfg.CentralBankAPIURL)
 		} else {
 			log.Printf("[app] WARNING: CENTRAL_BANK_API_URL set but INTERNAL_RELAY_AUTH_SECRET missing — transfer limit enforcement disabled")
@@ -559,7 +712,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		// gateway's PKI key (PKI_DIR/<BANK_CODE>.key). nil falls back to the legacy secret.
 		var relaySigner *relayauth.Signer
 		if cfg.PKIDir != "" && cfg.BankCode != "" {
-			if s, sErr := relayauth.LoadSigner(cfg.PKIDir, cfg.BankCode); sErr == nil {
+			if s, sErr := relayauth.LoadSigner(cfg.PKIDir, cfg.RelayKeyID); sErr == nil {
 				relaySigner = s
 			} else {
 				log.Printf("[app] relay signing key unavailable for %q: %v (internal relay calls use legacy secret)", cfg.BankCode, sErr)
@@ -606,6 +759,17 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 				orchestrator = orchestrator.WithBridgeInRelay(bridgeInRelay)
 				log.Printf("[app] CrossCurrencySwapOrchestrator: bridge-in relay wired (CB %s)", cbURL)
 
+				// Step 2 goes to the same CB over the same channel: the Hub AMM admits only
+				// verified Hub participants and this gateway is not one. Delegating the trade
+				// keeps the CB's key inside the CB — the alternative is signing on the Hub with
+				// a key this container should never hold.
+				hubSwapRelay := services.NewCrossCurrencyHubSwapRelay(cbURL, relaySecret)
+				if relaySigner != nil {
+					hubSwapRelay = hubSwapRelay.WithSigner(relaySigner)
+				}
+				orchestrator = orchestrator.WithHubSwapRelay(hubSwapRelay)
+				log.Printf("[app] CrossCurrencySwapOrchestrator: hub-swap relay wired (CB %s) — no Hub signing key needed on this gateway", cbURL)
+
 				// Step 4 goes back to the same CB over the same channel: it bridged the
 				// slippage buffer in, so it is the one that can give the remainder back.
 				residueRelay := services.NewCrossCurrencyResidueRelay(cbURL, relaySecret)
@@ -619,15 +783,12 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			}
 		}
 
-		// Derive the Hub signer address from SIGNER_PRIVATE_KEY so CB-B knows where
-		// W-ARS landed after the AMM swap.
-		if signerKey != "" {
-			rawKey := strings.TrimPrefix(signerKey, "0x")
-			if privKey, keyErr := crypto.HexToECDSA(rawKey); keyErr == nil {
-				addr := crypto.PubkeyToAddress(privKey.PublicKey)
-				orchestrator = orchestrator.WithHubSignerAddress(addr.Hex())
-				log.Printf("[app] CrossCurrencySwapOrchestrator: hub signer address = %s", addr.Hex())
-			}
+		// The Hub signer address (derived above) tells CB-B where W-<target> landed after a
+		// locally executed swap. When Step 2 is delegated, the executing CB reports its own
+		// address on the response instead — this gateway may hold no Hub key at all.
+		if hubSignerAddr != "" {
+			orchestrator = orchestrator.WithHubSignerAddress(hubSignerAddr)
+			log.Printf("[app] CrossCurrencySwapOrchestrator: hub signer address = %s", hubSignerAddr)
 		}
 
 		if transferLimitChecker != nil {
@@ -637,6 +798,10 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		// to the payer's own spoke wallet, resolved from the participants registry.
 		if db != nil {
 			orchestrator = orchestrator.WithPayerWalletResolver(services.NewParticipantResolver(db))
+			// A locally executed Step 2 must record what it cost, in the same place the delegated
+			// path does. Without it the Hub reconciliation reads the position as never swapped and
+			// claims more is on the Hub than the balance holds.
+			orchestrator = orchestrator.WithHubSwapConsumptionRecorder(newCrossCurrencyHubSwapRepository(db))
 		}
 		// Dynamic per-pair model: let Step 3 tell the Cacti relay which AMM to run
 		// its isPaused() gate against, resolved from the on-chain PairRegistry.
@@ -646,6 +811,10 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		deps.CrossCurrencySwapOrchestrator = orchestrator
 		// Expose the swap repository for the paginated history endpoint (GET /amm/swap/cross-currency).
 		deps.CrossCurrencySwapLister = swapRepo
+		// Re-drive residue returns whose enqueue failed. A failed enqueue creates no bridge
+		// position, so the relayer queue has nothing to retry and the payer's unspent reserve
+		// would sit on the issuing CB's Hub address indefinitely.
+		startResidueRetryWorker(orchestrator, swapRepo)
 
 		// 009-commercial-cross-currency-swap: Wire quote generator with 15s TTL (T030/T031).
 		var quoteReserve services.AMMReserveReader
@@ -659,38 +828,49 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	}
 
 	// Phase 8: PairRegistry multi-pair service (FR-017 / D9-D11 / 005-cooperative-liquidity).
-	// PAIR_REGISTRY_CONTRACT_ADDRESS enables propose/confirm; read-only ListActivePairs from DB only.
-	if db != nil && pairRegistryAddr != "" && hubRPC != "" && signerKey != "" {
-		chainID := int64(0)
-		if chainIDStr != "" {
-			bid := new(big.Int)
-			if _, ok := bid.SetString(chainIDStr, 10); ok {
-				chainID = bid.Int64()
+	// PAIR_REGISTRY_CONTRACT_ADDRESS enables propose/confirm; without a signing key the client is
+	// still built, read-only, because the hub registry — not this entity's database — is the
+	// catalogue of pairs. A commercial bank holds no hub key and would otherwise list nothing.
+	if db != nil {
+		pairRepo := NewPairRepository(db)
+		pairMode := resolveHubRegistryMode(pairRegistryAddr, hubRPC, signerKey)
+		// DB-only is the floor, not a failure: the pairs route stays served even when the hub is
+		// unreachable, rather than disappearing into a 404 that reads like a missing feature.
+		deps.PairService = services.NewPairService(nil, pairRepo)
+
+		if pairMode != hubRegistryDisabled {
+			chainID := int64(0)
+			if chainIDStr != "" {
+				bid := new(big.Int)
+				if _, ok := bid.SetString(chainIDStr, 10); ok {
+					chainID = bid.Int64()
+				}
+			}
+			prClient, err := NewPairRegistryClient(context.Background(), PairRegistryConfig{
+				RPCURL:          hubRPC,
+				ContractAddress: pairRegistryAddr,
+				ChainID:         chainID,
+				PrivateKeyHex:   signerKey,
+				Timeout:         15 * time.Second,
+				// Enables ProposePair to deploy a dedicated per-pair AMM (empty amm_address path).
+				IdentityRegistryAddress: os.Getenv("HUB_IDENTITY_REGISTRY_ADDRESS"),
+			})
+			if err != nil {
+				log.Printf("warning: PairRegistry client init failed, pairs served from DB only: %v", err)
+			} else {
+				// The authority reader lets an unauthorized confirm be refused with its real reason
+				// instead of a reverted transaction and a generic message.
+				deps.PairService = services.NewPairService(prClient, pairRepo).
+					WithTokenAuthorityReader(prClient)
+				log.Printf("[app] PairRegistry client ready (%s)", pairMode)
 			}
 		}
-		prClient, err := NewPairRegistryClient(context.Background(), PairRegistryConfig{
-			RPCURL:          hubRPC,
-			ContractAddress: pairRegistryAddr,
-			ChainID:         chainID,
-			PrivateKeyHex:   signerKey,
-			Timeout:         15 * time.Second,
-			// Enables ProposePair to deploy a dedicated per-pair AMM (empty amm_address path).
-			IdentityRegistryAddress: os.Getenv("HUB_IDENTITY_REGISTRY_ADDRESS"),
-		})
-		if err != nil {
-			log.Printf("warning: PairRegistry client init failed: %v", err)
-		} else {
-			pairRepo := NewPairRepository(db)
-			deps.PairService = services.NewPairService(prClient, pairRepo)
-		}
-	} else if db != nil {
-		// Read-only mode: ListActivePairs only (no on-chain calls).
-		pairRepo := NewPairRepository(db)
-		deps.PairService = services.NewPairService(nil, pairRepo)
 	}
 
 	// 006-hub-currency-registry: CurrencyRegistry client (read/write on-chain, no DB).
-	if currencyRegistryAddr != "" && hubRPC != "" && signerKey != "" {
+	// Listing currencies is a view call and maps token addresses to symbols for every portal, so it
+	// is built without a signing key too; the adapter's write methods refuse a nil signer.
+	if currencyMode := resolveHubRegistryMode(currencyRegistryAddr, hubRPC, signerKey); currencyMode != hubRegistryDisabled {
 		chainID := int64(0)
 		if chainIDStr != "" {
 			bid := new(big.Int)
@@ -709,6 +889,17 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			log.Printf("warning: CurrencyRegistry client init failed: %v", err)
 		} else {
 			deps.CurrencyService = services.NewCurrencyService(crClient)
+			log.Printf("[app] CurrencyRegistry client ready (%s)", currencyMode)
+
+			// Sovereign wrapped-token supply (GET /api/v2/hub/token/supply): resolves this
+			// CB's own W-tCeBM_<CUR> through the registry it just wired, so a currency
+			// registered at runtime needs no restart.
+			if ssa := newSovereignSupplyAdapter(deps.CurrencyService, hubRPC,
+				os.Getenv("NATIVE_ASSET_SYMBOL"), 15*time.Second); ssa != nil {
+				deps.SovereignSupplyReader = ssa
+			} else {
+				log.Printf("[app] sovereign token supply endpoint disabled (NATIVE_ASSET_SYMBOL or HUB_BESU_RPC_URL unset)")
+			}
 		}
 	}
 
@@ -718,19 +909,63 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	// R2-CR-6: per-CB asymmetric relay auth. Pin peer verifying keys from the PKI certs
 	// (PKI_DIR/<entity>.crt). Internal relay routes prefer a valid signature and fall back
 	// to the shared secret until RELAY_REQUIRE_SIGNATURE is set (post-cutover enforcement).
-	relayRegistry, relayRegErr := relayauth.LoadRegistryGlob(cfg.PKIDir)
-	if relayRegErr != nil {
+	if _, relayRegErr := relayauth.LoadRegistryGlob(cfg.PKIDir); relayRegErr != nil {
 		log.Printf("[app] relay auth: could not load peer certs from PKI_DIR=%q: %v", cfg.PKIDir, relayRegErr)
 	}
-	deps.RelayAuth = middleware.RelayAuthConfig{
-		Registry:         relayRegistry,
-		LegacySecret:     deps.InternalRelayAuthSecret,
-		RequireSignature: cfg.RelayRequireSignature,
+	deps.RelayAuth = relayAuthConfigFor(cfg)
+	// The tenant scope of /internal/v1/payments listings comes from the participants table: it maps
+	// the entity id this gateway verified to the address that bank's records are keyed by. Without a
+	// database those listings fail closed rather than answering from every bank's rows.
+	if db != nil {
+		deps.RequesterScopeResolver = services.NewParticipantResolver(db)
 	}
+
+	// Fold in the peers this central bank onboarded, THEN report. Order matters: the participants
+	// table is what makes a CB's registry non-empty at all (its PKI dir holds no peer certificates),
+	// so refreshing after the report would describe a state that never existed.
+	//
+	// Two sources on purpose. The table is authoritative for onboarded peers because it carries the
+	// ACTIVE status — deactivating a bank in compliance is what revokes its ability to authenticate.
+	// Files cover peers that are never onboarded, the Cacti relay being the case that matters.
+	refreshRelayRegistry(context.Background(), deps.RelayAuth.Registry, db, cfg.PKIDir)
+	// Reload on demand when a request presents an unknown key-id, rate-limited. This is what makes a
+	// bank verifiable the moment it finishes onboarding instead of at the next periodic sweep — the
+	// sample deployment onboards a bank and immediately makes a deposit, which would otherwise 401.
+	deps.RelayAuth.Registry.SetRefresher(func() {
+		refreshRelayRegistry(context.Background(), deps.RelayAuth.Registry, db, cfg.PKIDir)
+	}, relayRegistryMinRefreshInterval)
+	if stop := startRelayRegistryRefresher(deps.RelayAuth.Registry, db, cfg.PKIDir); stop != nil {
+		_ = stop // process-lifetime, like the other background workers wired here
+	}
+
+	relayRegistry := deps.RelayAuth.Registry.Get()
 	if relayRegistry != nil && relayRegistry.Len() > 0 {
-		log.Printf("[app] relay auth: %d peer key(s) pinned from PKI_DIR; require_signature=%v", relayRegistry.Len(), cfg.RelayRequireSignature)
+		ids := relayRegistry.IDs()
+		log.Printf("[app] relay auth: %d peer key(s) pinned %v; require_signature=%v", relayRegistry.Len(), ids, cfg.RelayRequireSignature)
+		// A registry holding ONLY this entity's own id is the dangerous middle state: non-empty, so
+		// the middleware verifies strictly and stops falling back to the shared secret, but with no
+		// peer pinned every SIGNED request is rejected with 401. Banks already sign their internal
+		// calls, so on a CB this silently breaks bridge-in, the delegated hub swap and the residue
+		// return. Not a refusal to start — the entity may legitimately receive no internal calls —
+		// but it must not be discovered from the 401s.
+		if len(ids) == 1 && ids[0] == cfg.RelayKeyID {
+			log.Printf("[app] relay auth: WARNING: the only pinned key is this entity's own (%s) — no PEER identity was found, "+
+				"neither an onboarded participant with an issued certificate nor a <key-id>.crt in PKI_DIR. "+
+				"Any signed request from a peer will be rejected with 401 (RELAY_SIGNATURE_INVALID) instead of falling back to the shared secret.", cfg.RelayKeyID)
+		}
+	} else if cfg.RelayRequireSignature {
+		// Do not claim the legacy fallback here: with enforcement on and nothing pinned, the shared
+		// secret is NOT accepted — every internal request is rejected with 401.
+		//
+		// Reaching this line means the boot guard let the process through, which it does only when the
+		// participant pins could not be read (a database that was not answering yet). So the state is
+		// expected to repair itself on the next refresh, and saying "refusing to start" here — as this
+		// line used to — described the one thing that did not happen.
+		log.Printf("[app] relay auth: no peer keys pinned AND require_signature=true — every internal request " +
+			"will be rejected with 401 until this CB's peers are pinned; the participants table could not be " +
+			"read at boot, so the periodic refresh is what will fix this")
 	} else {
-		log.Printf("[app] relay auth: no PKI peer keys pinned; internal routes use legacy shared secret")
+		log.Printf("[app] relay auth: no peer keys pinned; internal routes use legacy shared secret")
 	}
 	lcrAddr := os.Getenv("LIQUIDITY_COMMIT_REGISTRY_ADDRESS")
 	if lcrAddr != "" && hubRPC != "" && signerKey != "" && db != nil {
@@ -765,6 +1000,15 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 				deps.SovereignBridgeChecker = sovereignSvc
 				deps.LCRRegistrar = &lcrHandlerAdapter{c: lcrClient}
 				deps.LPPositionRepo = lpRepo // 008-fix-cb-liquidity: enable GET /liquidity/positions
+				// Same repo as a writer, so sovereign deposit-side records the CB's own
+				// position and /liquidity/remove has an lp_id to address. Deliberately
+				// paired with the reader: a gateway that cannot LIST positions must not
+				// silently WRITE them either.
+				//
+				// Both inherit this block's gate on the LiquidityCommitRegistry client —
+				// which the sovereign seeding path itself no longer uses. Worth untangling,
+				// but doing it here would restructure wiring beyond this fix.
+				deps.LPPositionWriter = lpRepo
 			}
 			// Surface a counterpart CB's on-chain PENDING commit on the opposite side
 			// (cross-CB discovery). Only meaningful for CB gateways serving pool status directly.
@@ -812,6 +1056,9 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	deps.ApproveSide = cfg.ApproveSide
 	// Fix: populate LOCAL_CB_HUB_SIGNER for balance checks (recipient of lock-mint tokens).
 	deps.LocalCBHubSigner = strings.ToLower(os.Getenv("LOCAL_CB_HUB_SIGNER"))
+	// This gateway's own Hub address: a CB reports it on a delegated swap so the bank knows
+	// where the output landed. Empty on a bank that holds no Hub key.
+	deps.HubSignerAddress = hubSignerAddr
 
 	// 009-commercial-cross-currency-swap: cross-currency bridge-out receiver (CB-B side).
 	// Register the internal Cacti relay endpoint when this gateway has a BridgeBurnUnlockService
@@ -856,6 +1103,49 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			}
 		} else {
 			log.Printf("[app] WARNING: PAYMENT_GRPC_ADDR not set — Reserve Tokenisation balance enforcement disabled on bridge-in handler")
+		}
+
+		// Step 2 receiver: the Hub AMM admits only verified Hub participants, and only a CB
+		// holds a Hub identity — so the CB executes the trade for the bank instead of handing
+		// the bank its signing key. Requires a signing AMM client (pairResolver + signerKey)
+		// and the replay guard; without either the endpoint is not registered and a delegating
+		// bank sees a clean 404 rather than an unguarded swap.
+		if pairResolver != nil && signerKey != "" && swapSvc != nil {
+			deps.CrossCurrencyHubSwapExecutor = &swapServiceAdapter{svc: swapSvc}
+			deps.CrossCurrencyHubSwapRecorder = newCrossCurrencyHubSwapRepository(db)
+			deps.CrossCurrencyHubSwapDirection = &ammAddrResolverAdapter{r: pairResolver}
+			if deps.CrossCurrencyBridgePositionReader == nil {
+				deps.CrossCurrencyBridgePositionReader = services.NewBridgePositionReader(db)
+			}
+			if deps.CrossCurrencyBeneficiaryResolver == nil {
+				deps.CrossCurrencyBeneficiaryResolver = services.NewParticipantResolver(db)
+			}
+			log.Printf("[app] sovereign hub swap delegation enabled (POST %s)", services.HubSwapPath)
+		} else {
+			log.Printf("[app] WARNING: hub swap delegation not registered (needs PAIR_REGISTRY_CONTRACT_ADDRESS + HUB_BESU_RPC_URL + SIGNER_PRIVATE_KEY) — delegating banks will fall back to signing on the Hub themselves")
+		}
+
+		// Hub reconciliation: this CB's own W-token balance against its own records. Wired on the
+		// same condition as bridge-in — it reconciles the money this CB minted for its banks, and
+		// only an issuing CB has that. Reports; never acts.
+		if hubRPC != "" && deps.WTokenAddress != "" && hubSignerAddr != "" {
+			// Process-lifetime, like the other Hub clients built here: buildV2Dependencies has no
+			// closer list, and the checker needs the connection for as long as it runs.
+			if reader := newHubBalanceReader(context.Background(), hubRPC, 15*time.Second); reader != nil {
+				// BANK_CODE on a CB gateway is the CB's own entity id, so it identifies the
+				// positions that are this CB's own money (liquidity it deployed) rather than an
+				// obligation toward a bank. Empty simply disables that exclusion.
+				reconciler := services.NewHubReconciliationService(
+					reader, newHubReconciliationRepository(db, hubSignerAddr, cfg.BankCode),
+					deps.WTokenAddress, hubSignerAddr)
+				if reconciler != nil {
+					deps.HubReconciler = reconciler
+					startHubReconciliationChecker(reconciler)
+					log.Printf("[app] hub reconciliation enabled for %s held at %s", deps.WTokenAddress, hubSignerAddr)
+				}
+			}
+		} else {
+			log.Printf("[app] hub reconciliation not enabled (needs HUB_BESU_RPC_URL, W_TOKEN_ADDRESS and a hub signer) — an unattributable Hub balance would go unnoticed")
 		}
 
 		// Step 4 receiver: the CB that bridged W-<source> in is also the only one that can
@@ -999,4 +1289,41 @@ func (a *ammAddrResolverAdapter) AMMAddressFor(ctx context.Context, poolPair str
 // so the cross-currency swap can run in either direction over one sovereign pair.
 func (a *ammAddrResolverAdapter) OutputIsTokenA(ctx context.Context, poolPair, targetCurrency string) (bool, error) {
 	return a.r.OutputIsTokenA(ctx, poolPair, targetCurrency)
+}
+
+// serverConfig is the api-gateway's Fiber configuration, including the connection
+// timeouts (finding R2-LOW).
+//
+// WHY THESE THREE. Without ReadTimeout a connection can open, dribble its headers and hold
+// a server slot for as long as it likes — the slowloris shape, and nothing in the handler
+// chain can bound it because it happens before any handler runs. IdleTimeout does the same
+// for keep-alive connections that stop sending anything.
+//
+// WHY A TIGHT WriteTimeout IS SAFE HERE, which is the non-obvious part. A cross-currency
+// swap is documented as taking up to 180s and this gateway's own internal deadlines already
+// reach 150s, so the reflex worry is that a 30s write timeout would cut a legitimate swap.
+// It does not: fasthttp applies WriteTimeout to writing the response, not to the handler's
+// duration. Measured, not assumed — a 5s handler completes under a 2s WriteTimeout, and
+// TestServerTimeouts_SlowHandlerStillCompletes keeps that true if anyone retunes this.
+func serverConfig() fiber.Config {
+	return serverConfigWith(30*time.Second, 30*time.Second, 120*time.Second)
+}
+
+// serverConfigWith is serverConfig with the timeouts supplied, so the behaviour tests can
+// exercise the same configuration on one-second bounds. Waiting on the production 30s
+// ReadTimeout to fire cost 62 seconds per scenario, which is not a price a unit suite
+// should pay to assert something a short timeout proves identically.
+func serverConfigWith(read, write, idle time.Duration) fiber.Config {
+	return fiber.Config{
+		// BodyLimit and ReadTimeout are coupled: in fasthttp the read deadline covers the
+		// headers AND the body, so the largest accepted body must be uploadable within
+		// ReadTimeout. 10MB in 30s needs roughly 2.7 Mbit/s. Today's payloads are small
+		// JSON and PEMs, so there is slack to spare — but move either number and check the
+		// other still fits.
+		BodyLimit:    10 * 1024 * 1024,
+		AppName:      "api-gateway",
+		ReadTimeout:  read,
+		WriteTimeout: write,
+		IdleTimeout:  idle,
+	}
 }

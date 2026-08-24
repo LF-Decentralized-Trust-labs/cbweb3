@@ -20,8 +20,8 @@
 - [Scenario A — API Unit Tests](#scenario-a--api-unit-tests)
 - [Scenario A — API Integration Tests](#scenario-a--api-integration-tests)
 - [Scenario A — E2E Tests](#scenario-a--e2e-tests)
-- [Scenario B — Smart Contract Unit Tests (Implemented, Hub Deployment Pending)](#scenario-b--smart-contract-unit-tests)
-- [Scenario B — API and E2E Tests (Planned)](#scenario-b--api-and-e2e-tests-planned)
+- [AMM Smart Contract Unit Tests (Scenario A's AMM copy)](#amm-smart-contract-unit-tests-scenario-as-amm-copy)
+- [Scenario B — API and E2E Tests](#scenario-b--api-and-e2e-tests)
 
 ---
 
@@ -197,7 +197,7 @@ See `SpokeBridge.t.sol` for function-level test list. Tests cover cross-spoke me
 ## Scenario A — API Integration Tests
 
 **Framework**: Go `testing` with live local Devnet infrastructure
-**Prerequisites**: `make spoke-all` running; `make pki.check` passes
+**Prerequisites**: the sample stack running (`cd samples && ./deploy-all.sh`); `make pki.check` passes
 
 | Test ID | Title | Preconditions | Steps | Expected Result | Status |
 |---------|-------|---------------|-------|-----------------|--------|
@@ -225,7 +225,7 @@ See `SpokeBridge.t.sol` for function-level test list. Tests cover cross-spoke me
 ## Scenario A — E2E Tests
 
 **Framework**: Bash scripts (`scenario-a/tryouts/`)
-**Prerequisites**: `make spoke-all` completed; all 6 API gateways return 200 on `/healthz`
+**Prerequisites**: the sample stack completed (`cd samples && ./deploy-all.sh`); every API gateway returns 200 on `/healthz`
 **On-chain verification**: `eth_getTransactionReceipt` polling + contract read functions
 
 ---
@@ -276,7 +276,10 @@ See `SpokeBridge.t.sol` for function-level test list. Tests cover cross-spoke me
 
 ### E2E-A-05 — Escrow Flow (Deposit → Escrow → Redeem)
 
-- **Script**: `tryouts/tryout-escrow-flow.sh`
+- **Script**: `samples/sample-tryout.sh` (issuance + tokenisation steps, then the redeem
+  steps at the end). It replaced `tryouts/tryout-escrow-flow.sh`, which was retired with
+  the legacy test layer — that script drove the removed deploy/local topology and could
+  not authenticate against a toolkit stack.
 - **Status**: [Implemented]
 - **Preconditions**: bank-a and central-bank-a on Spoke-A; fiat collateral initialized
 
@@ -295,7 +298,14 @@ See `SpokeBridge.t.sol` for function-level test list. Tests cover cross-spoke me
 
 ### E2E-A-06 — Compliance Participant Screening
 
-- **Script**: `tryouts/tryout-compliance-participants.sh`
+- **Script**: `tests/integration` under the `integration_lite` tag —
+  `TestAML_DeniedTransfer_BlocksSettlement_NoSideEffect` and
+  `TestAML_RecheckedAtInitiation_NotJustOnboarding` (CI runs this lane on every PR).
+  Named deliberately instead of `samples/sample-tryout.sh`: the sample walkthrough drives
+  the happy path and does NOT screen a sanctioned participant, so pointing this entry at
+  it would overstate the coverage. The retired
+  `tryouts/tryout-compliance-participants.sh` was the live-stack version of the same
+  checks.
 - **Status**: [Implemented]
 - **Flow**: Register sanctioned participant → attempt FX Agreement with sanctioned counterparty → verify block at pre-agreement stage
 - **Success Criteria**: AML block triggered before any `agreementId` is created; no DLT interaction occurs
@@ -325,9 +335,18 @@ See `SpokeBridge.t.sol` for function-level test list. Tests cover cross-spoke me
 
 ---
 
-## Scenario B — Smart Contract Unit Tests
+## AMM Smart Contract Unit Tests (Scenario A's AMM copy)
 
-> **Status**: Tests implemented; hub deployment pending. Run with `forge test --match-path "test/AutomatedMarketMaker.t.sol"`.
+> **Status**: implemented. Run with `forge test --match-path "test/AutomatedMarketMaker.t.sol"` from `scenario-a/contracts/`.
+>
+> These cover **Scenario A's own** `AutomatedMarketMaker.sol`. Scenario B is
+> implemented and carries its own contract tree and its own test suite — including
+> `AutomatedMarketMaker.t.sol`, `PairRegistry.t.sol`, `LiquidityCommitRegistry.t.sol`,
+> `CurrencyRegistry.t.sol` and `SpokeBridge.t.sol`. Those are catalogued in
+> [`scenario-b/tests/TEST-CATALOG.md`](../../scenario-b/tests/TEST-CATALOG.md), not here.
+>
+> The `UT-SC-B-*` test IDs below are kept unchanged for traceability against
+> Deliverable 12, despite naming Scenario A's file.
 
 **File**: `contracts/test/AutomatedMarketMaker.t.sol`
 
@@ -354,11 +373,22 @@ See `SpokeBridge.t.sol` for function-level test list. Tests cover cross-spoke me
 
 ---
 
-## Scenario B — API and E2E Tests (Planned)
+## Scenario B — API and E2E Tests
 
-> These tests will be implemented when the hub network (chain 1337) is deployed. Smart contracts are ready; API endpoints and integration layer are pending.
+> **Scenario B's authoritative test catalogue is
+> [`scenario-b/tests/TEST-CATALOG.md`](../../scenario-b/tests/TEST-CATALOG.md).**
+> The hub (chain 1337) is deployed and Scenario B has its own suites under
+> `scenario-b/tests/` (`unit`, `integration`, `e2e`, `performance`, `supervisor`)
+> plus a toolkit E2E under `scenario-b/toolkit/tests/`. Refer to that catalogue and
+> to [`scenario-b/docs/TEST-REPORT.md`](../../scenario-b/docs/TEST-REPORT.md) for
+> current status.
+>
+> The tables below are a **Scenario A-side wish list retained for traceability**.
+> Their `[Planned]` markers were not reconciled test by test against Scenario B's
+> suites and must not be read as evidence that the coverage is missing. The
+> original rationale — "pending until the hub is deployed" — no longer holds.
 
-### API Integration Tests — AMM (Planned)
+### API Integration Tests — AMM (not reconciled against Scenario B's suites)
 
 | Test ID | Title | Status |
 |---------|-------|--------|
@@ -373,7 +403,7 @@ See `SpokeBridge.t.sol` for function-level test list. Tests cover cross-spoke me
 | INT-API-B-09 | Circuit Breaker RBAC Enforcement — `COMMERCIAL_BANK` role receives 403 | [Planned] |
 | INT-API-B-10 | Circuit Breaker Maintenance Mode Transition — `CENTRAL_BANK_ADMIN` pauses AMM | [Planned] |
 
-### E2E Tests — Scenario B (Planned)
+### E2E Tests — Scenario B (not reconciled against Scenario B's suites)
 
 | Test ID | Title | Flow | Status |
 |---------|-------|------|--------|

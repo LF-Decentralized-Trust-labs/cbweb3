@@ -181,15 +181,42 @@ printf '%s' "$BODY" | grep -q "W-tCeBM_${CUR_B}" || die "W-tCeBM_${CUR_B} not re
 ok "W-tCeBM_${CUR_A} and W-tCeBM_${CUR_B} are registered"
 
 # ═══════════════════════════════ OPEN CORRIDOR ══════════════════════════════════
-# The hub deploys the sovereign-pair AMM over the two registered W-tokens and
-# registers the pair (proposePair + confirmPair). CBs never touch the hub chain;
-# the hub governance signer performs the on-chain acts. Idempotent by pair id.
-step "Open the ${CUR_A}↔${CUR_B} corridor (hub deploys the sovereign AMM + registers the pair)"
-call POST "$HUB/internal/v1/spokes/register-pair" "" \
-  "{\"currency_a\":\"$CUR_A\",\"currency_b\":\"$CUR_B\",\"pair_id\":\"$POOL\"}" \
-  "X-Relay-Auth: $RELAY_SECRET"
+# A corridor is a bilateral act, and the PairRegistry enforces it: proposePair admits
+# only getCentralBankOf(tokenA) and confirmPair only getCentralBankOf(tokenB). Each
+# sovereign W-token's issuance authority belongs to its own central bank, so the pair is
+# opened by TWO signatures — the issuing CB of each side, from its own governance portal.
+#
+# The hub-mediated shortcut (POST /internal/v1/spokes/register-pair) is deliberately not
+# used: it only ever worked while one key was the central bank of both tokens, which made a
+# single holder able to confirm both sides of a bilateral corridor.
+step "Open the ${CUR_A}↔${CUR_B} corridor (${CUR_A} CB proposes, ${CUR_B} CB confirms)"
+relogin
+TOKEN_A=$(try GET "$BR_CB/api/v2/hub/currencies" "$BR_TOK"; printf '%s' "$BODY" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+rows = d if isinstance(d, list) else d.get("currencies", [])
+sym = "W-tCeBM_" + sys.argv[1]
+print(next((r.get("token_address", "") for r in rows if r.get("symbol") == sym), ""))
+' "$CUR_A")
+TOKEN_B=$(try GET "$BR_CB/api/v2/hub/currencies" "$BR_TOK"; printf '%s' "$BODY" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+rows = d if isinstance(d, list) else d.get("currencies", [])
+sym = "W-tCeBM_" + sys.argv[1]
+print(next((r.get("token_address", "") for r in rows if r.get("symbol") == sym), ""))
+' "$CUR_B")
+[[ -n $TOKEN_A && -n $TOKEN_B ]] || die "could not resolve the W-token addresses for $CUR_A/$CUR_B"
+info "tokenA=$TOKEN_A tokenB=$TOKEN_B"
+
+# The proposing CB deploys the pair's dedicated AMM when amm_address is omitted, so the
+# corridor's infrastructure and its first sovereign act land in one signed call.
+call POST "$BR_CB/api/v2/amm/pairs/propose" "$BR_TOK" \
+  "{\"pair_id\":\"$POOL\",\"token_a_address\":\"$TOKEN_A\",\"token_b_address\":\"$TOKEN_B\",\"proposer_cb\":\"$CUR_A\"}"
 AMM=$(printf '%s' "$BODY" | jget amm_address)
-ok "corridor $POOL ready (amm=$AMM already_registered=$(printf '%s' "$BODY" | jget already_registered))"
+ok "${CUR_A} CB proposed $POOL (amm=$AMM)"
+
+call POST "$AR_CB/api/v2/amm/pairs/confirm" "$AR_TOK" "{\"pair_id\":\"$POOL\",\"confirmer_cb\":\"$CUR_B\"}"
+ok "${CUR_B} CB confirmed $POOL — corridor ACTIVE"
 
 # ═══════════════════════════════ LIQUIDITY ══════════════════════════════════════
 # Sovereign escrow-and-finalize seeding: each central bank deposits ONLY its own side
@@ -255,6 +282,7 @@ call GET "$ITAU/api/v1/token/balance" "$ITAU_TOK"
 BAL=$(printf '%s' "$BODY" | jget balance)
 python3 -c "import sys; sys.exit(0 if int('${BAL:-0}') >= int('$CC_MAX_IN') else 1)" \
   || die "bank-itau tCeBM balance $BAL < required $CC_MAX_IN — reserve tokenisation did not settle"
+BAL_PRE_SWAP="$BAL"
 ok "bank-itau holds $BAL $(printf '%s' "$BODY" | jget symbol) (>= $CC_MAX_IN required)"
 
 # ═══════════════════════════ CROSS-CURRENCY SWAP (BRIDGE) ════════════════════════
@@ -274,14 +302,49 @@ call POST "$ITAU/api/v2/amm/swap/cross-currency" "$ITAU_TOK" \
   "{\"source_currency\":\"$CUR_A\",\"target_currency\":\"$CUR_B\",\"pool_pair\":\"$POOL\",\"amount_out\":\"$CC_OUT\",\"max_amount_in\":\"$CC_MAX_IN\",\"beneficiary_bank_id\":\"$BENEF_BANK\"}"
 SWAP_STATUS=$(printf '%s' "$BODY" | jget status)
 [[ $SWAP_STATUS == COMPLETED ]] || die "cross-currency swap not COMPLETED (status=$SWAP_STATUS): $BODY"
-ok "swap COMPLETED: in=$(printf '%s' "$BODY" | jget amount_in) out=$(printf '%s' "$BODY" | jget amount_out)"
+SWAP_AMT_IN=$(printf '%s' "$BODY" | jget amount_in)
+RESIDUE_AMT=$(printf '%s' "$BODY" | jget residue_amount)
+RESIDUE_STATUS=$(printf '%s' "$BODY" | jget residue_status)
+RESIDUE_POS=$(printf '%s' "$BODY" | jget residue_position_id)
+ok "swap COMPLETED: in=$SWAP_AMT_IN out=$(printf '%s' "$BODY" | jget amount_out)"
 ok "  bridge-in position=$(printf '%s' "$BODY" | jget bridge_in_position_id)"
 ok "  hub AMM swap tx=$(printf '%s' "$BODY" | jget swap_tx_hash)"
 ok "  bridge-out position=$(printf '%s' "$BODY" | jget bridge_out_position_id)"
+ok "  residue=${RESIDUE_AMT:-0} status=${RESIDUE_STATUS:-NONE} position=${RESIDUE_POS:-none}"
 
 step "Confirm the pool reserves moved (constant-product swap)"
 call GET "$BR_CB/api/v2/amm/pool/$POOL/status" "$BR_TOK"
 ok "reserves now A=$(printf '%s' "$BODY" | jget reserve_a) B=$(printf '%s' "$BODY" | jget reserve_b)"
+
+# ═══════════════════════════ RESIDUE RETURN (SETTLE) ══════════════════════════════
+# The bridge-in must move the FULL max_amount_in — the true cost is unknown until the AMM
+# swap runs — and the swap consumes only the realized amount_in. The unspent difference
+# (residue_amount) is returned to the payer by a separate RESIDUE leg driven by the relayer,
+# so residue_status=RETURN_ENQUEUED means "in flight", NOT "landed": it is deliberately
+# independent of the swap status, and its terminal state lives on the bridge position.
+#
+# The payer's balance therefore keeps RISING for a while after the swap reports COMPLETED.
+# Any later assertion on a balance DELTA must wait for that credit first, or it silently
+# measures the residue and the later operation together. This step both closes that race
+# and asserts the invariant the residue return exists to guarantee: the payer's NET debit
+# for the swap is the realized amount_in, never the cap.
+step "Wait for the asynchronous residue return to land (net debit must equal amount_in)"
+EXPECT_SETTLED=$(python3 -c "print(int('$BAL_PRE_SWAP') - int('$SWAP_AMT_IN'))")
+info "pre-swap=$BAL_PRE_SWAP realized_in=$SWAP_AMT_IN => expected settled balance=$EXPECT_SETTLED"
+SETTLED=""
+for i in $(seq 1 20); do
+  try GET "$ITAU/api/v1/token/balance" "$ITAU_TOK"
+  SETTLED=$(printf '%s' "$BODY" | jget balance)
+  info "attempt $i: tCeBM balance=$SETTLED"
+  [[ $SETTLED == "$EXPECT_SETTLED" ]] && break
+  sleep 3
+done
+[[ $SETTLED == "$EXPECT_SETTLED" ]] || die "residue return did not settle: balance=$SETTLED expected=$EXPECT_SETTLED
+    (over-debited by $(python3 -c "print(int('$EXPECT_SETTLED') - int('${SETTLED:-0}'))") wei)
+    swap residue_amount=${RESIDUE_AMT:-0} residue_status=${RESIDUE_STATUS:-NONE} residue_position_id=${RESIDUE_POS:-none}
+    The value is not lost — it sits on the issuing CB's Hub address. Check the relayer logs and
+    the RESIDUE bridge position; RETURN_FAILED is retried, RETURN_ESCALATED needs a human."
+ok "residue ${RESIDUE_AMT:-0} returned — net swap debit is the realized $SWAP_AMT_IN, not the $CC_MAX_IN cap"
 
 # ═══════════════════════════ REDEEM (DE-TOKENISATION) ════════════════════════════
 # Redeem is the exact inverse of the escrow tokenisation: on CB approval it BURNS the
@@ -322,12 +385,20 @@ call POST "$BR_CB/api/v1/payments/redeems/approve" "$BR_TOK" "{\"redeem_id\":\"$
 ok "redeem approved (fiat_mint_tx=$(printf '%s' "$BODY" | jget mint_tx_hash))"
 
 step "Verify the redeem BURNED tCeBM (balance went DOWN, not up)"
-call GET "$ITAU/api/v1/token/balance" "$ITAU_TOK"
-BAL_AFTER=$(printf '%s' "$BODY" | jget balance)
+BAL_EXPECT=$(python3 -c "print(int('$BAL_BEFORE') - int('$REDEEM_AMT'))")
+BAL_AFTER=""
+for i in $(seq 1 10); do
+  try GET "$ITAU/api/v1/token/balance" "$ITAU_TOK"
+  BAL_AFTER=$(printf '%s' "$BODY" | jget balance)
+  info "attempt $i: tCeBM balance after redeem = $BAL_AFTER (expected $BAL_EXPECT)"
+  [[ $BAL_AFTER == "$BAL_EXPECT" ]] && break
+  sleep 3
+done
 [[ -n $BAL_AFTER ]] || die "no tCeBM balance after redeem: $BODY"
-info "tCeBM balance after redeem = $BAL_AFTER"
-python3 -c "import sys; sys.exit(0 if int('${BAL_AFTER:-0}') == int('${BAL_BEFORE:-0}') - int('$REDEEM_AMT') else 1)" \
-  || die "redeem did not burn tCeBM correctly: before=$BAL_BEFORE after=$BAL_AFTER (redeem must DECREASE tCeBM by $REDEEM_AMT, not increase it)"
+[[ $BAL_AFTER == "$BAL_EXPECT" ]] \
+  || die "redeem did not burn tCeBM correctly: before=$BAL_BEFORE after=$BAL_AFTER expected=$BAL_EXPECT
+    (redeem must DECREASE tCeBM by exactly $REDEEM_AMT, not increase it)
+    delta was $(python3 -c "print(int('${BAL_AFTER:-0}') - int('$BAL_BEFORE'))") wei"
 ok "redeem correctly burned $REDEEM_AMT tCeBM: $BAL_BEFORE → $BAL_AFTER (converted to fiat)"
 
 printf '\n%s✓ tryout complete — %s corridor opened via the hub, liquidity seeded, an end-to-end cross-currency swap (bridge-in → AMM → bridge-out) settled across both sovereign networks, and a redeem de-tokenised tCeBM back to fiat%s\n' "$GREEN$BOLD" "$POOL" "$RST"

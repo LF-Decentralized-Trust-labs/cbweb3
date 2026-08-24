@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/bundle"
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/dockervolume"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/orchestrator"
 )
 
@@ -34,7 +35,8 @@ const (
 	// nocAgentImage is the local NOC agent image the observe deployment builds.
 	nocAgentImage = "cbweb3/noc-agent:local"
 	// nocAgentVolHelperImage seeds the rendered agent.yaml into a named volume.
-	nocAgentVolHelperImage = "alpine:3.20"
+	// Single source of truth lives in the dockervolume package.
+	nocAgentVolHelperImage = dockervolume.HelperImage
 )
 
 // observeStepOrder is the linear step set reported for mode:observe.
@@ -175,12 +177,7 @@ func runObserveMode(ctx context.Context, in ApplyInput) (ApplyResult, error) {
 		}
 		agentName := prefix + "-noc-agent"
 		_ = runDocker(ctx, nil, "rm", "-f", agentName) // idempotent re-create
-		return runDocker(ctx, nil, "run", "-d", "--name", agentName,
-			"-v", cfgVol+":/etc/noc-agent:ro",
-			"-v", "/var/run/docker.sock:/var/run/docker.sock:ro",
-			"--add-host", "host.docker.internal:host-gateway",
-			"-e", "AGENT_CONFIG_PATH=/etc/noc-agent/agent.yaml",
-			"--restart", "always", nocAgentImage)
+		return runDocker(ctx, nil, nocAgentRunArgs(agentName, cfgVol)...)
 	}); err != nil {
 		return result, err
 	}
@@ -247,12 +244,25 @@ func runJoinNOCAgent(ctx context.Context, in ApplyInput, spokeID, bankID string,
 	}
 	agentName := prefix + "-noc-agent"
 	_ = runDocker(ctx, nil, "rm", "-f", agentName) // idempotent re-create
-	return runDocker(ctx, nil, "run", "-d", "--name", agentName,
-		"-v", cfgVol+":/etc/noc-agent:ro",
-		"-v", "/var/run/docker.sock:/var/run/docker.sock:ro",
+	return runDocker(ctx, nil, nocAgentRunArgs(agentName, cfgVol)...)
+}
+
+// nocAgentRunArgs builds the `docker run` argv for a noc-agent container. Shared by the
+// founding CB and the joining bank so the two bring-ups cannot drift apart.
+func nocAgentRunArgs(agentName, cfgVol string) []string {
+	args := []string{"run", "-d", "--name", agentName,
+		"-v", cfgVol + ":/etc/noc-agent:ro",
+		"-v", dockerSocketPath + ":" + dockerSocketPath + ":ro",
 		"--add-host", "host.docker.internal:host-gateway",
-		"-e", "AGENT_CONFIG_PATH=/etc/noc-agent/agent.yaml",
-		"--restart", "always", nocAgentImage)
+		"-e", "AGENT_CONFIG_PATH=/etc/noc-agent/agent.yaml"}
+	// The agent image is non-root (uid 65532, finding R2-M-12) and the socket above is
+	// root:docker 0660, so it needs that group to tail logs at all. Omitted when the gid
+	// cannot be read: the agent then reports it at startup rather than silently
+	// collecting no logs.
+	if gid := dockerSocketGID(); gid != "" {
+		args = append(args, "--group-add", gid)
+	}
+	return append(args, "--restart", "always", nocAgentImage)
 }
 
 // seedVolumeFile writes content into <volume>/<name> via a throwaway container

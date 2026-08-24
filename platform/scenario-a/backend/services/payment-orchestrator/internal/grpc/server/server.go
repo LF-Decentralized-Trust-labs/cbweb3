@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -55,6 +56,18 @@ type paymentOrchestratorService struct {
 	mu           sync.RWMutex
 	htlcs        map[string]*domain.HTLCRecord
 	fxAgreements map[string]*domain.FXAgreementRecord // temporary fallback cache while repository migration is incremental
+
+	// settling holds the contract ids with a SettleHTLC call in flight RIGHT NOW.
+	// It is guarded by mu and is deliberately NOT persisted: it answers a question
+	// the durable state cannot.
+	//
+	// HTLCStateSettling means "an attempt started and has not completed", which is
+	// true both for a sequential retry after a failure — which must be allowed to
+	// re-run the Zeto transfer — and for a second caller arriving while the first
+	// is still inside it, which must not. Keying off the state alone conflated the
+	// two: the second concurrent caller was classified as a retry and transferred
+	// the locked note a second time.
+	settling map[string]struct{}
 }
 
 // Config holds the dependencies for the gRPC server.
@@ -125,6 +138,7 @@ func New(cfg Config) (*grpc.Server, func(context.Context), error) {
 		logger:             cfg.Logger,
 		htlcs:              make(map[string]*domain.HTLCRecord),
 		fxAgreements:       make(map[string]*domain.FXAgreementRecord),
+		settling:           make(map[string]struct{}),
 	}
 	if err := svc.loadHTLCsFromDB(context.Background()); err != nil {
 		return nil, nil, err
@@ -135,7 +149,7 @@ func New(cfg Config) (*grpc.Server, func(context.Context), error) {
 	// The x-caller-identity header is trusted only under GRPC_AUTHZ_ALLOW_HEADER_IDENTITY
 	// (transitional). Set the GRPC_MTLS_* vars for mutual TLS; GRPC_AUTHZ_ENFORCE
 	// (which requires mTLS) rejects unauthenticated callers.
-	serverOpts, err := authz.ServerOptionsFromEnv(cfg.Logger, nil)
+	serverOpts, err := authz.ServerOptionsFromEnv(cfg.Logger, serverPolicy())
 	if err != nil {
 		return nil, nil, fmt.Errorf("configure gRPC security: %w", err)
 	}
@@ -270,9 +284,16 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 	hashLock := hex.EncodeToString(hashLockBytes[:])
 
 	// 2. Lock tokens privately via Zeto
-	s.logger.Info("locking Zeto tokens", "amount", req.Amount, "receiver", req.Receiver)
+	s.logger.Info("locking Zeto tokens", "receiver", req.Receiver, "agreement_id", req.AgreementId)
 	lockResult, err := s.zeto.Lock(ctx, req.Amount, req.Receiver)
 	if err != nil {
+		// FailedPrecondition, not Internal: the request was well-formed and the service is
+		// healthy — this attempt merely drew a state id this Paladin build cannot spend.
+		// The remedy is to retry, and the code has to say so, because a client cannot act
+		// on advice that exists only in the message text.
+		if errors.Is(err, ports.ErrUnsettleableLock) {
+			return nil, status.Errorf(codes.FailedPrecondition, "zeto lock: %v", err)
+		}
 		return nil, status.Errorf(codes.Internal, "zeto lock: %v", err)
 	}
 
@@ -406,9 +427,16 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 	}
 
 	// Lock tokens privately via Zeto
-	s.logger.Info("locking Zeto tokens (with external hashLock)", "amount", req.Amount, "receiver", req.Receiver)
+	s.logger.Info("locking Zeto tokens (with external hashLock)", "receiver", req.Receiver, "agreement_id", req.AgreementId)
 	lockResult, err := s.zeto.Lock(ctx, req.Amount, req.Receiver)
 	if err != nil {
+		// FailedPrecondition, not Internal: the request was well-formed and the service is
+		// healthy — this attempt merely drew a state id this Paladin build cannot spend.
+		// The remedy is to retry, and the code has to say so, because a client cannot act
+		// on advice that exists only in the message text.
+		if errors.Is(err, ports.ErrUnsettleableLock) {
+			return nil, status.Errorf(codes.FailedPrecondition, "zeto lock: %v", err)
+		}
 		return nil, status.Errorf(codes.Internal, "zeto lock: %v", err)
 	}
 
@@ -552,6 +580,32 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 		return nil, status.Error(codes.InvalidArgument, "secret does not match hashLock")
 	}
 
+	// Exclude a CONCURRENT second caller. Everything below this point — the on-chain
+	// settle and the Zeto transfer — runs with mu released, because both are slow
+	// network I/O and holding the service-wide lock across them would serialise every
+	// other RPC. So the record's state cannot be the exclusion mechanism: by the time
+	// the second caller reads it, the first has already moved it to SETTLING and let
+	// the lock go.
+	//
+	// The marker below is that mechanism, and it is cleared by the deferred delete
+	// when this call returns — including on the error paths, so a genuine retry after
+	// a failure still gets through. Aborted (not FailedPrecondition) is the gRPC code
+	// for a concurrency conflict the caller may retry: once the winner finishes, a
+	// retry finds the record SETTLED and returns the idempotent success above.
+	if _, inFlight := s.settling[record.ContractID]; inFlight {
+		s.mu.Unlock()
+		s.logger.Info("SettleHTLC rejected: another settle is already in flight for this HTLC",
+			"contract_id", record.ContractID)
+		return nil, status.Errorf(codes.Aborted,
+			"a settle is already in progress for HTLC %q", record.ContractID)
+	}
+	s.settling[record.ContractID] = struct{}{}
+	defer func() {
+		s.mu.Lock()
+		delete(s.settling, record.ContractID)
+		s.mu.Unlock()
+	}()
+
 	// Determine whether this is a fresh attempt (LOCKED) or a retry (SETTLING).
 	isRetry := record.State == domain.HTLCStateSettling
 
@@ -583,7 +637,11 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 			return nil, status.Error(codes.FailedPrecondition,
 				"counterparty spoke has not yet locked its leg — wait for relay confirmation before settling")
 		}
-		// Transition to SETTLING under the lock to prevent concurrent settle attempts.
+		// Mark the attempt as started. This is the DURABLE half: it survives a
+		// restart and tells a later call that an attempt was begun and may need
+		// retrying. It does not exclude a concurrent caller — the in-flight marker
+		// above does that. The comment here used to claim this transition prevented
+		// concurrent settle attempts, which was false and cost real debugging time.
 		record.State = domain.HTLCStateSettling
 		record.Secret = req.Secret
 		record.UpdatedAt = time.Now().UTC()
@@ -1421,7 +1479,11 @@ func (s *paymentOrchestratorService) ListFXAgreements(ctx context.Context, req *
 	stateFilter := strings.TrimPrefix(req.State, "FX_STATE_")
 
 	if s.fxRepo != nil {
-		f := ports.FXAgreementFilter{Counterparty: req.Counterparty}
+		// Explicit, not left to the repository's clamp: the response is capped at one page
+		// and ListFXAgreementsRequest carries no page size, so a node with more agreements
+		// than this returns only the newest MaxFXAgreementPageSize of them. Naming the bound
+		// here is what keeps that visible to anyone reading this handler (finding R2-M-14).
+		f := ports.FXAgreementFilter{Counterparty: req.Counterparty, Limit: ports.MaxFXAgreementPageSize}
 		if stateFilter != "" {
 			f.State = domain.FXState(stateFilter)
 		}
@@ -1946,6 +2008,12 @@ func (s *paymentOrchestratorService) handleRelayLockEvent(proof ports.Interopera
 	s.mu.Unlock()
 
 	if s.fxRepo == nil {
+		// hashLock is intentionally logged: it is already public. The HTLC contract
+		// emits it in LogHTLCLocked (and the secret in LogHTLCClaimed), and the Cacti
+		// relay reads it from the chain to pair the two legs. Redacting it here would
+		// hide nothing and would cost the only handle for correlating a stuck relay
+		// event with its trade. What must never appear next to it is the Zeto amount —
+		// see private_amount_logging_test.go.
 		s.logger.Warn("relay lock: no FX repository — cannot determine local receiver", "hashLock", proof.HashLock)
 		return nil
 	}
@@ -1963,7 +2031,8 @@ func (s *paymentOrchestratorService) handleRelayLockEvent(proof ports.Interopera
 	}
 
 	// Find the accepted FX agreement where the counterparty spoke's receiver matches.
-	agreements, err := s.fxRepo.ListAgreements(context.Background(), ports.FXAgreementFilter{State: domain.FXStateAccepted})
+	agreements, err := s.fxRepo.ListAgreements(context.Background(),
+		ports.FXAgreementFilter{State: domain.FXStateAccepted, Limit: ports.MaxFXAgreementPageSize})
 	if err != nil {
 		return fmt.Errorf("relay lock: list agreements: %w", err)
 	}

@@ -27,7 +27,7 @@
   - [State Machines](#state-machines)
   - [Data Flows and Network Boundaries](#data-flows-and-network-boundaries)
   - [Key Design Decisions](#key-design-decisions)
-- [Scenario B — International Hub with AMM (Planned)](#scenario-b--international-hub-with-amm-planned)
+- [Scenario B — International Hub with AMM](#scenario-b--international-hub-with-amm)
 - [Technology Stack Summary](#technology-stack-summary)
 - [Related Documents](#related-documents)
 
@@ -123,7 +123,7 @@ api-gateway  (Go, REST/HTTP)
 | **compliance** | gRPC | Participant onboarding (AML/CFT screening), status management (Pending → Verified → Suspended), account freeze/unfreeze |
 | **payment-orchestrator** | gRPC | HTLC lifecycle (lock/settle/refund), FX Agreement state machine, Zeto private token operations, deposit/escrow/redeem flows, Cacti relay integration |
 
-The full OpenAPI specification for the api-gateway is maintained at [`../../apis/openapi/api-gateway.yaml`](../../apis/openapi/api-gateway.yaml) (v2.3.0, 75 operations).
+The full OpenAPI specification for the api-gateway is maintained at [`../../apis/openapi/api-gateway.yaml`](../../apis/openapi/api-gateway.yaml) (v2.3.0, 83 operations).
 
 #### Smart Contract Layer
 

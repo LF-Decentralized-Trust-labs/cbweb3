@@ -32,6 +32,7 @@ var (
 // IdentityRegistryLibraryParticipant is an auto generated low-level Go binding around an user-defined struct.
 type IdentityRegistryLibraryParticipant struct {
 	LegalName       string
+	InstitutionId   [32]byte
 	Role            uint8
 	Status          uint8
 	ZkPointer       [32]byte
@@ -41,7 +42,7 @@ type IdentityRegistryLibraryParticipant struct {
 
 // IdentityRegistryMetaData contains all meta data concerning the IdentityRegistry contract.
 var IdentityRegistryMetaData = &bind.MetaData{
-	ABI: "[{\"type\":\"constructor\",\"inputs\":[{\"name\":\"admin\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"DEFAULT_ADMIN_ROLE\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"GOVERNANCE_ROLE\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"canGovern\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"canTransact\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getCertFingerprint\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getParticipant\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"tuple\",\"internalType\":\"structIdentityRegistryLibrary.Participant\",\"components\":[{\"name\":\"legalName\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"role\",\"type\":\"uint8\",\"internalType\":\"enumIdentityRegistryLibrary.ParticipantRole\"},{\"name\":\"status\",\"type\":\"uint8\",\"internalType\":\"enumIdentityRegistryLibrary.KycStatus\"},{\"name\":\"zkPointer\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"certFingerprint\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"lastUpdate\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getRoleAdmin\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"grantRole\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"hasRole\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"isWhitelisted\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"registerParticipant\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"name\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"role\",\"type\":\"uint8\",\"internalType\":\"enumIdentityRegistryLibrary.ParticipantRole\"},{\"name\":\"zkPointer\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"renounceRole\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"callerConfirmation\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"revokeRole\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"setCertFingerprint\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"fingerprint\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"supportsInterface\",\"inputs\":[{\"name\":\"interfaceId\",\"type\":\"bytes4\",\"internalType\":\"bytes4\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"updateStatus\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"newStatus\",\"type\":\"uint8\",\"internalType\":\"enumIdentityRegistryLibrary.KycStatus\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"verifyParticipant\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"VERIFIER_ROLE\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"error\",\"name\":\"ParticipantNotPending\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}]},{\"type\":\"event\",\"name\":\"CertificateRegistered\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"certFingerprint\",\"type\":\"bytes32\",\"indexed\":false,\"internalType\":\"bytes32\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"IdentityUpdated\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"oldStatus\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumIdentityRegistryLibrary.KycStatus\"},{\"name\":\"newStatus\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumIdentityRegistryLibrary.KycStatus\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ParticipantRegistered\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"role\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumIdentityRegistryLibrary.ParticipantRole\"},{\"name\":\"name\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RoleAdminChanged\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"},{\"name\":\"previousAdminRole\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"},{\"name\":\"newAdminRole\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RoleGranted\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RoleRevoked\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"error\",\"name\":\"AccessControlBadConfirmation\",\"inputs\":[]},{\"type\":\"error\",\"name\":\"AccessControlUnauthorizedAccount\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"neededRole\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}]},{\"type\":\"error\",\"name\":\"InvalidIdentityData\",\"inputs\":[]},{\"type\":\"error\",\"name\":\"ParticipantNotVerified\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}]}]",
+	ABI: "[{\"type\":\"constructor\",\"inputs\":[{\"name\":\"admin\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"DEFAULT_ADMIN_ROLE\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"GOVERNANCE_ROLE\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"VERIFIER_ROLE\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"canGovern\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"canTransact\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getCertFingerprint\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getInstitutionId\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getParticipant\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"tuple\",\"internalType\":\"structIdentityRegistryLibrary.Participant\",\"components\":[{\"name\":\"legalName\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"institutionId\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"role\",\"type\":\"uint8\",\"internalType\":\"enumIdentityRegistryLibrary.ParticipantRole\"},{\"name\":\"status\",\"type\":\"uint8\",\"internalType\":\"enumIdentityRegistryLibrary.KycStatus\"},{\"name\":\"zkPointer\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"certFingerprint\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"lastUpdate\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getRoleAdmin\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"grantRole\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"hasRole\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"isWhitelisted\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"registerParticipant\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"name\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"role\",\"type\":\"uint8\",\"internalType\":\"enumIdentityRegistryLibrary.ParticipantRole\"},{\"name\":\"zkPointer\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"institutionId\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"renounceRole\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"callerConfirmation\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"revokeRole\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"setCertFingerprint\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"fingerprint\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"supportsInterface\",\"inputs\":[{\"name\":\"interfaceId\",\"type\":\"bytes4\",\"internalType\":\"bytes4\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"updateStatus\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"newStatus\",\"type\":\"uint8\",\"internalType\":\"enumIdentityRegistryLibrary.KycStatus\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"verifyParticipant\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"event\",\"name\":\"CertificateRegistered\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"certFingerprint\",\"type\":\"bytes32\",\"indexed\":false,\"internalType\":\"bytes32\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"IdentityUpdated\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"oldStatus\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumIdentityRegistryLibrary.KycStatus\"},{\"name\":\"newStatus\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumIdentityRegistryLibrary.KycStatus\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ParticipantRegistered\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"role\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumIdentityRegistryLibrary.ParticipantRole\"},{\"name\":\"name\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RoleAdminChanged\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"},{\"name\":\"previousAdminRole\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"},{\"name\":\"newAdminRole\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RoleGranted\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RoleRevoked\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"error\",\"name\":\"AccessControlBadConfirmation\",\"inputs\":[]},{\"type\":\"error\",\"name\":\"AccessControlUnauthorizedAccount\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"neededRole\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}]},{\"type\":\"error\",\"name\":\"InvalidIdentityData\",\"inputs\":[]},{\"type\":\"error\",\"name\":\"ParticipantNotPending\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}]},{\"type\":\"error\",\"name\":\"ParticipantNotVerified\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}]}]",
 }
 
 // IdentityRegistryABI is the input ABI used to generate the binding from.
@@ -252,6 +253,37 @@ func (_IdentityRegistry *IdentityRegistryCallerSession) GOVERNANCEROLE() ([32]by
 	return _IdentityRegistry.Contract.GOVERNANCEROLE(&_IdentityRegistry.CallOpts)
 }
 
+// VERIFIERROLE is a free data retrieval call binding the contract method 0xe7705db6.
+//
+// Solidity: function VERIFIER_ROLE() view returns(bytes32)
+func (_IdentityRegistry *IdentityRegistryCaller) VERIFIERROLE(opts *bind.CallOpts) ([32]byte, error) {
+	var out []interface{}
+	err := _IdentityRegistry.contract.Call(opts, &out, "VERIFIER_ROLE")
+
+	if err != nil {
+		return *new([32]byte), err
+	}
+
+	out0 := *abi.ConvertType(out[0], new([32]byte)).(*[32]byte)
+
+	return out0, err
+
+}
+
+// VERIFIERROLE is a free data retrieval call binding the contract method 0xe7705db6.
+//
+// Solidity: function VERIFIER_ROLE() view returns(bytes32)
+func (_IdentityRegistry *IdentityRegistrySession) VERIFIERROLE() ([32]byte, error) {
+	return _IdentityRegistry.Contract.VERIFIERROLE(&_IdentityRegistry.CallOpts)
+}
+
+// VERIFIERROLE is a free data retrieval call binding the contract method 0xe7705db6.
+//
+// Solidity: function VERIFIER_ROLE() view returns(bytes32)
+func (_IdentityRegistry *IdentityRegistryCallerSession) VERIFIERROLE() ([32]byte, error) {
+	return _IdentityRegistry.Contract.VERIFIERROLE(&_IdentityRegistry.CallOpts)
+}
+
 // CanGovern is a free data retrieval call binding the contract method 0x53aa4307.
 //
 // Solidity: function canGovern(address account) view returns(bool)
@@ -345,9 +377,40 @@ func (_IdentityRegistry *IdentityRegistryCallerSession) GetCertFingerprint(accou
 	return _IdentityRegistry.Contract.GetCertFingerprint(&_IdentityRegistry.CallOpts, account)
 }
 
+// GetInstitutionId is a free data retrieval call binding the contract method 0x6fb8224b.
+//
+// Solidity: function getInstitutionId(address account) view returns(bytes32)
+func (_IdentityRegistry *IdentityRegistryCaller) GetInstitutionId(opts *bind.CallOpts, account common.Address) ([32]byte, error) {
+	var out []interface{}
+	err := _IdentityRegistry.contract.Call(opts, &out, "getInstitutionId", account)
+
+	if err != nil {
+		return *new([32]byte), err
+	}
+
+	out0 := *abi.ConvertType(out[0], new([32]byte)).(*[32]byte)
+
+	return out0, err
+
+}
+
+// GetInstitutionId is a free data retrieval call binding the contract method 0x6fb8224b.
+//
+// Solidity: function getInstitutionId(address account) view returns(bytes32)
+func (_IdentityRegistry *IdentityRegistrySession) GetInstitutionId(account common.Address) ([32]byte, error) {
+	return _IdentityRegistry.Contract.GetInstitutionId(&_IdentityRegistry.CallOpts, account)
+}
+
+// GetInstitutionId is a free data retrieval call binding the contract method 0x6fb8224b.
+//
+// Solidity: function getInstitutionId(address account) view returns(bytes32)
+func (_IdentityRegistry *IdentityRegistryCallerSession) GetInstitutionId(account common.Address) ([32]byte, error) {
+	return _IdentityRegistry.Contract.GetInstitutionId(&_IdentityRegistry.CallOpts, account)
+}
+
 // GetParticipant is a free data retrieval call binding the contract method 0x7143059f.
 //
-// Solidity: function getParticipant(address account) view returns((string,uint8,uint8,bytes32,bytes32,uint256))
+// Solidity: function getParticipant(address account) view returns((string,bytes32,uint8,uint8,bytes32,bytes32,uint256))
 func (_IdentityRegistry *IdentityRegistryCaller) GetParticipant(opts *bind.CallOpts, account common.Address) (IdentityRegistryLibraryParticipant, error) {
 	var out []interface{}
 	err := _IdentityRegistry.contract.Call(opts, &out, "getParticipant", account)
@@ -364,14 +427,14 @@ func (_IdentityRegistry *IdentityRegistryCaller) GetParticipant(opts *bind.CallO
 
 // GetParticipant is a free data retrieval call binding the contract method 0x7143059f.
 //
-// Solidity: function getParticipant(address account) view returns((string,uint8,uint8,bytes32,bytes32,uint256))
+// Solidity: function getParticipant(address account) view returns((string,bytes32,uint8,uint8,bytes32,bytes32,uint256))
 func (_IdentityRegistry *IdentityRegistrySession) GetParticipant(account common.Address) (IdentityRegistryLibraryParticipant, error) {
 	return _IdentityRegistry.Contract.GetParticipant(&_IdentityRegistry.CallOpts, account)
 }
 
 // GetParticipant is a free data retrieval call binding the contract method 0x7143059f.
 //
-// Solidity: function getParticipant(address account) view returns((string,uint8,uint8,bytes32,bytes32,uint256))
+// Solidity: function getParticipant(address account) view returns((string,bytes32,uint8,uint8,bytes32,bytes32,uint256))
 func (_IdentityRegistry *IdentityRegistryCallerSession) GetParticipant(account common.Address) (IdentityRegistryLibraryParticipant, error) {
 	return _IdentityRegistry.Contract.GetParticipant(&_IdentityRegistry.CallOpts, account)
 }
@@ -521,46 +584,25 @@ func (_IdentityRegistry *IdentityRegistryTransactorSession) GrantRole(role [32]b
 	return _IdentityRegistry.Contract.GrantRole(&_IdentityRegistry.TransactOpts, role, account)
 }
 
-// RegisterParticipant is a paid mutator transaction binding the contract method 0x6f2f2b83.
+// RegisterParticipant is a paid mutator transaction binding the contract method 0x3bfef0f0.
 //
-// Solidity: function registerParticipant(address account, string name, uint8 role, bytes32 zkPointer) returns()
-func (_IdentityRegistry *IdentityRegistryTransactor) RegisterParticipant(opts *bind.TransactOpts, account common.Address, name string, role uint8, zkPointer [32]byte) (*types.Transaction, error) {
-	return _IdentityRegistry.contract.Transact(opts, "registerParticipant", account, name, role, zkPointer)
+// Solidity: function registerParticipant(address account, string name, uint8 role, bytes32 zkPointer, bytes32 institutionId) returns()
+func (_IdentityRegistry *IdentityRegistryTransactor) RegisterParticipant(opts *bind.TransactOpts, account common.Address, name string, role uint8, zkPointer [32]byte, institutionId [32]byte) (*types.Transaction, error) {
+	return _IdentityRegistry.contract.Transact(opts, "registerParticipant", account, name, role, zkPointer, institutionId)
 }
 
-// RegisterParticipant is a paid mutator transaction binding the contract method 0x6f2f2b83.
+// RegisterParticipant is a paid mutator transaction binding the contract method 0x3bfef0f0.
 //
-// Solidity: function registerParticipant(address account, string name, uint8 role, bytes32 zkPointer) returns()
-func (_IdentityRegistry *IdentityRegistrySession) RegisterParticipant(account common.Address, name string, role uint8, zkPointer [32]byte) (*types.Transaction, error) {
-	return _IdentityRegistry.Contract.RegisterParticipant(&_IdentityRegistry.TransactOpts, account, name, role, zkPointer)
+// Solidity: function registerParticipant(address account, string name, uint8 role, bytes32 zkPointer, bytes32 institutionId) returns()
+func (_IdentityRegistry *IdentityRegistrySession) RegisterParticipant(account common.Address, name string, role uint8, zkPointer [32]byte, institutionId [32]byte) (*types.Transaction, error) {
+	return _IdentityRegistry.Contract.RegisterParticipant(&_IdentityRegistry.TransactOpts, account, name, role, zkPointer, institutionId)
 }
 
-// RegisterParticipant is a paid mutator transaction binding the contract method 0x6f2f2b83.
+// RegisterParticipant is a paid mutator transaction binding the contract method 0x3bfef0f0.
 //
-// Solidity: function registerParticipant(address account, string name, uint8 role, bytes32 zkPointer) returns()
-func (_IdentityRegistry *IdentityRegistryTransactorSession) RegisterParticipant(account common.Address, name string, role uint8, zkPointer [32]byte) (*types.Transaction, error) {
-	return _IdentityRegistry.Contract.RegisterParticipant(&_IdentityRegistry.TransactOpts, account, name, role, zkPointer)
-}
-
-// VerifyParticipant is a paid mutator transaction binding the contract method verifyParticipant.
-//
-// Solidity: function verifyParticipant(address account) returns()
-func (_IdentityRegistry *IdentityRegistryTransactor) VerifyParticipant(opts *bind.TransactOpts, account common.Address) (*types.Transaction, error) {
-	return _IdentityRegistry.contract.Transact(opts, "verifyParticipant", account)
-}
-
-// VerifyParticipant is a paid mutator transaction binding the contract method verifyParticipant.
-//
-// Solidity: function verifyParticipant(address account) returns()
-func (_IdentityRegistry *IdentityRegistrySession) VerifyParticipant(account common.Address) (*types.Transaction, error) {
-	return _IdentityRegistry.Contract.VerifyParticipant(&_IdentityRegistry.TransactOpts, account)
-}
-
-// VerifyParticipant is a paid mutator transaction binding the contract method verifyParticipant.
-//
-// Solidity: function verifyParticipant(address account) returns()
-func (_IdentityRegistry *IdentityRegistryTransactorSession) VerifyParticipant(account common.Address) (*types.Transaction, error) {
-	return _IdentityRegistry.Contract.VerifyParticipant(&_IdentityRegistry.TransactOpts, account)
+// Solidity: function registerParticipant(address account, string name, uint8 role, bytes32 zkPointer, bytes32 institutionId) returns()
+func (_IdentityRegistry *IdentityRegistryTransactorSession) RegisterParticipant(account common.Address, name string, role uint8, zkPointer [32]byte, institutionId [32]byte) (*types.Transaction, error) {
+	return _IdentityRegistry.Contract.RegisterParticipant(&_IdentityRegistry.TransactOpts, account, name, role, zkPointer, institutionId)
 }
 
 // RenounceRole is a paid mutator transaction binding the contract method 0x36568abe.
@@ -645,6 +687,27 @@ func (_IdentityRegistry *IdentityRegistrySession) UpdateStatus(account common.Ad
 // Solidity: function updateStatus(address account, uint8 newStatus) returns()
 func (_IdentityRegistry *IdentityRegistryTransactorSession) UpdateStatus(account common.Address, newStatus uint8) (*types.Transaction, error) {
 	return _IdentityRegistry.Contract.UpdateStatus(&_IdentityRegistry.TransactOpts, account, newStatus)
+}
+
+// VerifyParticipant is a paid mutator transaction binding the contract method 0x643a7695.
+//
+// Solidity: function verifyParticipant(address account) returns()
+func (_IdentityRegistry *IdentityRegistryTransactor) VerifyParticipant(opts *bind.TransactOpts, account common.Address) (*types.Transaction, error) {
+	return _IdentityRegistry.contract.Transact(opts, "verifyParticipant", account)
+}
+
+// VerifyParticipant is a paid mutator transaction binding the contract method 0x643a7695.
+//
+// Solidity: function verifyParticipant(address account) returns()
+func (_IdentityRegistry *IdentityRegistrySession) VerifyParticipant(account common.Address) (*types.Transaction, error) {
+	return _IdentityRegistry.Contract.VerifyParticipant(&_IdentityRegistry.TransactOpts, account)
+}
+
+// VerifyParticipant is a paid mutator transaction binding the contract method 0x643a7695.
+//
+// Solidity: function verifyParticipant(address account) returns()
+func (_IdentityRegistry *IdentityRegistryTransactorSession) VerifyParticipant(account common.Address) (*types.Transaction, error) {
+	return _IdentityRegistry.Contract.VerifyParticipant(&_IdentityRegistry.TransactOpts, account)
 }
 
 // IdentityRegistryCertificateRegisteredIterator is returned from FilterCertificateRegistered and is used to iterate over the raw logs and unpacked data for CertificateRegistered events raised by the IdentityRegistry contract.

@@ -23,8 +23,8 @@ spec:
     fiatTokenName: Fiat COP
     fiatTokenSymbol: fCeBM_COP
   hubBundleRef: ../bundles/hub.bundle.yaml
-  # No `pair` block: this spoke joins the hub without opening a sovereign corridor
-  # yet — demonstrating a plain found-spoke (the sovereign tail is not appended).
+  # Opening a sovereign corridor is a runtime act (proposePair/confirmPair via each
+  # CB's governance portal), not a provisioning step — there is no manifest field for it.
   node:
     advertisedHost: host.docker.internal
     rpc:  { port: 33945 }

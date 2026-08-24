@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 import {AccessControl} from "@openzeppelin-contracts/access/AccessControl.sol";
 import {IIdentityRegistry} from "./interfaces/IIdentityRegistry.sol";
@@ -53,9 +53,13 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
         address account,
         string calldata name,
         IdentityRegistryLibrary.ParticipantRole role,
-        bytes32 zkPointer
+        bytes32 zkPointer,
+        bytes32 institutionId
     ) external override onlyRole(GOVERNANCE_ROLE) {
-        if (account == address(0)) {
+        // A zero institutionId is rejected rather than stored: the AMM resume quorum counts
+        // distinct institutions, and an unset id would collide across every participant that
+        // also left it unset — turning the institution check into a no-op for all of them.
+        if (account == address(0) || institutionId == bytes32(0)) {
             revert InvalidIdentityData();
         }
 
@@ -71,6 +75,7 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
         // Pente group, switch these writes to the Scenario A convention (lastUpdate = 0).
         _participants[account] = IdentityRegistryLibrary.Participant({
             legalName: name,
+            institutionId: institutionId,
             role: role,
             status: IdentityRegistryLibrary.KycStatus.Pending,
             zkPointer: zkPointer,
@@ -94,6 +99,11 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
         emit IdentityUpdated(
             account, IdentityRegistryLibrary.KycStatus.Pending, IdentityRegistryLibrary.KycStatus.Verified
         );
+    }
+
+    /// @inheritdoc IIdentityRegistry
+    function getInstitutionId(address account) external view override returns (bytes32) {
+        return _participants[account].institutionId;
     }
 
     /// @inheritdoc IIdentityRegistry

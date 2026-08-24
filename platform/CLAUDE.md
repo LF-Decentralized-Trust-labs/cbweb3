@@ -11,7 +11,7 @@ Treat them as separate products. Do not share code across them except via an exp
 
 Architectural and process rules live in `.specify/memory/constitution.md` (currently v1.0.4). Read it before non-trivial changes. Short version of the load-bearing rules:
 
-- **Scenario isolation.** Never reach across `scenario-a/` ↔ `scenario-b/`. A PR touching both needs explicit justification.
+- **Scenario isolation.** Never reach across `scenario-a/` ↔ `scenario-b/`. A PR touching both needs explicit justification. Which differences between the two are deliberate and which are accidental is recorded in [`docs/scenario-drift.md`](docs/scenario-drift.md) — read it before "fixing" an asymmetry.
 - **Privacy.** Inter-bank value transfers use `ZetoToken` (Paladin/Zeto, ZKP) or `NotoToken` (Paladin/Noto, notary). `tCeBM` is reserve-layer only. No plaintext PII or amounts on-chain.
 - **Atomicity.** Scenario A = HTLC lock + secret reveal. Scenario B = lock → mint, burn → unlock, with circuit-breaker (1-of-N pause, 2-of-N resume) validated before swaps. Partial settlement is forbidden in production paths; timeout/refund paths must be tested.
 - **Compliance gate at the API gateway.** IdentityRegistry + Compliance service + Keycloak OIDC. Never bypass in service-to-service calls. Re-check at payment initiation, not just onboarding.
@@ -23,22 +23,31 @@ Architectural and process rules live in `.specify/memory/constitution.md` (curre
 - Hyperledger Besu 25.8.0 with **QBFT** consensus (not IBFT 2.0), one network per spoke + hub
 - Solidity contracts compiled and tested with Foundry (`forge`)
 - Paladin Core (Zeto + Noto domains) for privacy tokens
-- Go 1.26+ microservices, gRPC intra-entity, REST via API Gateway externally
+- Go 1.26 microservices, gRPC intra-entity, REST via API Gateway externally
 - Keycloak (OIDC) for auth; PKI from central bank CAs
-- React + Turborepo frontend
+- React + Turborepo frontend on Node 22 LTS
 - Docker Compose per scenario; Postgres for service persistence
 
 New runtime dependencies outside this stack require justification in the PR and the scenario README.
+
+**Toolchain versions live in [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md) and that file wins.**
+The floor is the same for both scenarios: **Go 1.26** (every `go.mod`, every
+`golang:1.26-alpine` builder) and **Node 22 LTS** (root `.nvmrc`, `engines`, every
+`node:22-alpine` image, `@types/node ^22`). Older versions quoted in the Active
+Technologies list below are historical records of individual specs, not the current floor.
+Do not introduce a per-scenario or per-module version split without recording it in the
+Recorded deviations table of that file.
 
 ## Scenario B layout (most active)
 
 ```
 scenario-b/
   contracts/             Foundry project (FXAgreement, AutomatedMarketMaker, LiquidityCommitRegistry, HTLC, tCeBM, ZetoToken, NotoToken, IdentityRegistry)
-  backend/services/      api-gateway, auth, compliance, fx, ledger-gateway, payment-orchestrator, payments
+  backend/services/      api-gateway, auth, compliance, payment-orchestrator, noc-agent, noc-backend
+                         (fx/, ledger-gateway/, payments/ are reserved names — empty, no Go code)
   frontend/apps/         bank, governance, supervisor, treasury, noc
   interop/hub-and-spoke/ Cacti-based relay
-  deploy/local/          Docker Compose stacks + tooling
+  provisioning/          Compose templates the toolkit renders (the only bring-up path)
   make/                  Modular makefiles (included by scenario-b/Makefile)
   tests/                 E2E + performance baselines
   specs/                 Feature specs and plans
@@ -47,11 +56,18 @@ scenario-b/
 ## Common commands (run from `scenario-b/`)
 
 Infra and stack:
-- `make scenario-b.up` / `make scenario-b.down` — full stack lifecycle
+- `cd samples && ./deploy-all.sh` — **the** way to bring a stack up (hub + spokes + banks via `cbweb3b apply`)
 - `make scenario-b.nuke` — wipe state
-- `make scenario-b.restart`
-- `make deploy.up-besu` / `deploy.up-infra` / `deploy.up-backend` — bring up layers individually
-- `make dev.up-bank-a` / `dev.up-central-bank-a` / etc. — per-entity dev stacks
+- `make scenario-b.up-relayer` / `down-relayer` — the Cacti relay, an external prerequisite of `apply`
+
+The legacy `deploy/local` bring-up was removed: `scenario-b.up`, `deploy.up-*` and
+`dev.up-<entity>` no longer exist. It duplicated the toolkit and kept falling behind it —
+the Besu pin never reached it, and per-entity credentials and Redis auth only did because
+one PR touched both trees deliberately. One path means one place to harden.
+
+Targets that act ON a running stack are unchanged (contracts, tryouts, performance,
+evidence, tests), but their defaults still name the removed stack's ports; pass the
+toolkit's URLs explicitly until the migration card lands.
 
 Contracts:
 - `make contracts.build` / `contracts.test` / `contracts.fmt` / `contracts.lint` / `contracts.slither`
@@ -200,9 +216,9 @@ Also flag, in review, any change that weakens the gate itself: a counter moved b
 - Spoke bundle at `<outDir>/bundles/spoke-<id>.bundle.yaml` includes genesis + enode + chainId + spoke contract addresses (public, no secrets); consumed by join (TK-B8) (038-tk-b7-found)
 - Go 1.26 (toolkit) — no new Go deps; join mode reuses the TK-B6/B7 engine/exec/addrs/bundle (LoadSpoke) + pki.GenerateBankCSR; new wait-sync gate via eth_syncing; canonical flow has no relay/noc step (039-tk-b8-join)
 - Bank joins as a non-validating full node (CB is the sole QBFT validator): write-genesis copies the spoke bundle genesis (non-destructive + sha256 guard), wait-sync blocks on eth_syncing, gen-csr is the only PKI step (key 0600, OU=ROLE_COMMERCIAL_BANK, zero CA material; signing/registration are runtime) (039-tk-b8-join)
-- Go 1.26 (toolkit) — no new Go deps; sovereign-pair tail (open-sovereign-pair/commit-liquidity/seed-oracle) is a SOFT tail of found-spoke, triggered by spec.pair; idempotency is on-chain via cast call getPair status (040-tk-b9-sovereign-pair)
-- Strict sovereignty: each apply signs only the current CB's act (CB-A scaffolds + proposePair; a separate CB-B found-spoke confirmPair); no run holds the counterparty key, so SeedNewSovereignPair.s.sol (needs both keys) is NOT reused — acts driven discretely via cast/forge create; seed-oracle is local-only (040-tk-b9-sovereign-pair)
-- Go 1.26 (toolkit e2e/perf tests) — no new Go deps; TK-B10 is a verification phase (tests + docs): a full-pipeline E2E (found-hub→found-spoke×2→join→sovereign tail via apply.Apply) exercising swap/breaker/SpokeBridge, plus a toolkit-native Go perf baseline (p95 quote/swap) and E2E-STATUS.md; all skip-with-warning (041-tk-b10-e2e-baseline)
+- Go 1.26 (toolkit) — **SUPERSEDED**: the sovereign-pair tail (open-sovereign-pair/commit-liquidity/seed-oracle) and the `spec.pair` manifest field were REMOVED from found-spoke in c90de691. There is no provisioning step for corridors; `TestApplyFoundSpokeHasNoSovereignTail` asserts apply never plans them (040-tk-b9-sovereign-pair)
+- Strict sovereignty (still the governing rule, now enforced at runtime): opening a corridor is two independent sovereign acts, each signed by its own CB — one proposes via the governance portal (proposePair), the counterparty confirms (confirmPair), then each commits its own liquidity. No run holds the counterparty key, so SeedNewSovereignPair.s.sol (needs both) is NOT reused (040-tk-b9-sovereign-pair)
+- Go 1.26 (toolkit e2e/perf tests) — no new Go deps; TK-B10 is a verification phase (tests + docs): a full-pipeline E2E (found-hub→found-spoke×2→join via apply.Apply; the corridor is opened separately at runtime) exercising swap/breaker/SpokeBridge, plus a toolkit-native Go perf baseline (p95 quote/swap) and E2E-STATUS.md; all skip-with-warning (041-tk-b10-e2e-baseline)
 - SpokeBridge reality: only lock(token,amount,txId) + release(txId) (GOVERNANCE) + getLock — no on-chain mint/burn/unlock/timeout; mint is relay-mediated, refund is release; AMM swap is swapTokensForExactTokens; breaker via pause/signResume (quorum 2)/isPaused (041-tk-b10-e2e-baseline)
 
 ## Recent Changes

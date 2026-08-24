@@ -170,9 +170,16 @@ const (
 	// the W-<source> on the hub (hub-only mode). Deployed per CB (found-spoke).
 	hubPaymentOrchestratorImage = "cbweb3b/payment-orchestrator:local"
 
-	// hubRelayAuthSecret guards the hub's internal spoke self-registration
-	// endpoint (X-Relay-Auth); local-dev value, shared with the toolkit caller.
-	hubRelayAuthSecret = "cbweb3-relay-shared-secret"
+	// HubRelayAuthSecret is the X-Relay-Auth credential shared by an entity's internal
+	// endpoints and the relay's inbound routes, including the relay's own
+	// POST /api/v1/spokes, which authenticates it since finding R2-M-10. Exported because
+	// apply must hand it to the RelayRegistrar: the toolkit is that route's only caller, so
+	// the guard and the registrar have to agree on one value.
+	//
+	// Local-dev value. Deployments override it by setting INTERNAL_RELAY_AUTH_SECRET, which
+	// both the relay's compose default and the registrar read; overriding one side alone
+	// leaves spokes unable to register.
+	HubRelayAuthSecret = "cbweb3-relay-shared-secret"
 
 	// spokeFrontendImage is the per-entity (bank/CB) frontend image built for a
 	// spoke; distinct from the hub's governance frontend.
@@ -223,6 +230,16 @@ func (c HubConfig) buildImage(ctx context.Context, image, dockerfileRel, context
 	return buildImageIn(ctx, c.Runner, c.scenarioBDir(), image, dockerfileRel, contextRel)
 }
 
+// accessTokenLifespanSeconds caps how long an issued access token stays valid. Short on
+// purpose: a leaked token is only useful for that window, and the portals refresh
+// silently through the refresh cookie.
+//
+// This control used to live in deploy/local/keycloak/init.sh, guarded by
+// TestDeployLocalAccessTokenLifespanIsShort. That path was removed as a duplicate of the
+// toolkit, which set no lifespan at all — so the guard would have gone silently with the
+// scripts. Set here on every realm the toolkit creates.
+const accessTokenLifespanSeconds = 300
+
 // buildBackendImage builds the api-gateway image (context: scenario-b/backend).
 func (c HubConfig) buildBackendImage(ctx context.Context) error {
 	return c.buildImage(ctx, hubBackendImage, "backend/services/api-gateway/Dockerfile", "backend")
@@ -233,19 +250,29 @@ func (c HubConfig) buildBackendImage(ctx context.Context) error {
 func (c HubConfig) provisionKeycloakRealm(ctx context.Context) error {
 	kc := "/opt/keycloak/bin/kcadm.sh"
 	var b strings.Builder
+	// Caveat, stated rather than glossed: kcadm takes the password as an argument, so
+	// it transits the Keycloak container's process list for the duration of this exec.
+	// There is no env equivalent for `kcadm config credentials` (unlike REDISCLI_AUTH,
+	// which is why Redis is handled differently). This is not new — the value used to be
+	// the constant admin — but the exposure window is real and belongs in a follow-up
+	// once realm provisioning moves to an imported realm file, as Scenario A does it.
 	fmt.Fprintf(&b,
 		"%[1]s config credentials --server http://localhost:8080 --realm master --user %[2]s --password %[3]s && "+
 			"(%[1]s create realms -s realm=%[4]s -s enabled=true || true) && "+
 			// Local lab HTTP: relax sslRequired so the browser-direct NOC portal
 			// password grant is not rejected with "HTTPS required" (never in prod).
-			"(%[1]s update realms/%[4]s -s sslRequired=NONE || true) && "+
+			"(%[1]s update realms/%[4]s -s sslRequired=NONE -s accessTokenLifespan=%[8]d || true) && "+
 			"(%[1]s create clients -r %[4]s -s clientId=%[5]s -s secret=%[6]s -s enabled=true "+
 			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[7]s || true) && ",
-		kc, "admin", "admin", hubKeycloakRealm, hubKeycloakClient, hubKeycloakSecret, audienceMapperArg(keycloakBackendAudience))
+		kc, "admin", mustInfraSecret(secretsDirOf(c.HubEnvFile), "KC_ADMIN_PASSWORD"),
+		hubKeycloakRealm, hubKeycloakClient, hubKeycloakSecret, audienceMapperArg(keycloakBackendAudience),
+		accessTokenLifespanSeconds)
 	// Public noc-portal client so the hub's co-located NOC portal can password-grant
 	// against this realm (hub NOC operator users are a separate follow-up — found-hub
 	// does not yet provision operator accounts).
-	appendNOCPortalClient(&b, kc, hubKeycloakRealm)
+	if err := appendNOCPortalClient(&b, kc, hubKeycloakRealm, nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy())); err != nil {
+		return err
+	}
 	script := strings.TrimSuffix(b.String(), " && ")
 	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", script)
 	return err
@@ -267,8 +294,11 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"HUB_WS_PORT":          itoa(c.WSPort),
 		"HUB_P2P_PORT":         itoa(c.P2PPort),
 		// shared entity vars (infra/keycloak/backend/frontend/noc)
-		"CONTAINER_PREFIX":     c.ContainerPrefix,
-		"ENTITY":               "hub",
+		"CONTAINER_PREFIX": c.ContainerPrefix,
+		"ENTITY":           "hub",
+		// The hub is a single institution, so its own code is fixed. Participants registered on
+		// the hub registry carry THEIR institution's code, not this one.
+		"INSTITUTION_CODE":     "hub",
 		"ENTITY_NET_PREFIX":    c.NetPrefix,
 		"ENTITY_VOLUME_PREFIX": c.VolumePrefix,
 		"ENTITY_RPC_PORT":      itoa(c.RPCPort),
@@ -277,14 +307,17 @@ func (c HubConfig) renderHubComposeEnv() error {
 		// GRPC_MTLS_ENABLE is exported.
 		"SVC_TLS_VOLUME": c.svcTLSVolume(),
 		// infra: postgres + redis (single DB doubles as the keycloak DB locally)
-		"POSTGRES_USER":     "cbweb3",
-		"POSTGRES_PASSWORD": "cbweb3",
+		"POSTGRES_USER": "cbweb3",
+		// Per-entity, generated on first provisioning and read back after; the
+		// operator can override via the environment. Never a constant again.
+		"POSTGRES_PASSWORD": mustInfraSecret(secretsDirOf(c.HubEnvFile), "POSTGRES_PASSWORD"),
+		"REDIS_PASSWORD":    mustInfraSecret(secretsDirOf(c.HubEnvFile), "REDIS_PASSWORD"),
 		"POSTGRES_DB":       "keycloak",
 		"POSTGRES_PORT":     itoa(c.RPCPort + 5000),
 		"REDIS_PORT":        itoa(c.RPCPort + 6000),
 		// keycloak (joins the entity infra network; DB is the infra postgres)
 		"KC_ADMIN_USER":     "admin",
-		"KC_ADMIN_PASSWORD": "admin",
+		"KC_ADMIN_PASSWORD": mustInfraSecret(secretsDirOf(c.HubEnvFile), "KC_ADMIN_PASSWORD"),
 		"KC_DB_URL":         "jdbc:postgresql://" + e + "-hub-postgres:5432/keycloak",
 		"KEYCLOAK_PORT":     itoa(c.RPCPort + 7000),
 		// backend / frontend / relay / noc (images must be pre-built locally)
@@ -296,7 +329,7 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"COMPLIANCE_GRPC_ADDR":       e + "-hub-compliance:9093",
 		"HUB_CHAIN_ID":               itoa(int(c.ChainID)),
 		"HUB_ADMIN_PRIVATE_KEY":      devDeployerKey, // holds GOVERNANCE_ROLE on the hub registry
-		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,
+		"INTERNAL_RELAY_AUTH_SECRET": HubRelayAuthSecret,
 		"FRONTEND_IMAGE":             cbFrontendImage("governance", c.RPCPort+8000, c.frontendVariant()),
 		"FRONTEND_PORT":              itoa(c.RPCPort + 9000),
 		// Browser CORS: the single proxy origin (path routing), else the hub governance
@@ -309,17 +342,23 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"RELAY_PORT":           "7000",
 		"NOC_AGENT_BESU_RPC":   fmt.Sprintf("http://%s-hub-validator:8545", e),
 		"NOC_AGENT_ENTITY":     "hub",
-		"NOC_AGENT_VOLUME":     c.nocAgentVolume(),
-		"NOC_AGENT_IMAGE":      hubNocAgentImage,
-		"NOC_BACKEND_IMAGE":    hubNocBackendImage,
-		"NOC_BACKEND_PORT":     itoa(c.RPCPort + 11000),
-		"NOC_DB_NAME":          "noc",
-		"NOC_DB_USER":          "cbweb3",
-		"NOC_DB_PASSWORD":      "cbweb3",
-		"NOC_NET_PREFIX":       c.NetPrefix,
-		"NOC_PORTAL_IMAGE":     hubNocPortalImage,
-		"NOC_PORTAL_PORT":      itoa(c.RPCPort + 12000),
-		"NOC_VOLUME_PREFIX":    c.VolumePrefix,
+		// Supplementary group for the read-only Docker socket the agent tails logs
+		// from. The image is non-root (uid 65532) and the socket is root:docker 0660,
+		// so without this every log read is denied — silently, because the agent
+		// discards that error. Empty here → the compose default → the agent says so at
+		// startup (finding R2-M-12).
+		"NOC_DOCKER_GID":    dockerSocketGID(),
+		"NOC_AGENT_VOLUME":  c.nocAgentVolume(),
+		"NOC_AGENT_IMAGE":   hubNocAgentImage,
+		"NOC_BACKEND_IMAGE": hubNocBackendImage,
+		"NOC_BACKEND_PORT":  itoa(c.RPCPort + 11000),
+		"NOC_DB_NAME":       "noc",
+		"NOC_DB_USER":       "cbweb3",
+		"NOC_DB_PASSWORD":   "cbweb3",
+		"NOC_NET_PREFIX":    c.NetPrefix,
+		"NOC_PORTAL_IMAGE":  hubNocPortalImage,
+		"NOC_PORTAL_PORT":   itoa(c.RPCPort + 12000),
+		"NOC_VOLUME_PREFIX": c.VolumePrefix,
 	}
 	for k, v := range vars {
 		if err := addrs.AppendAddr(c.HubEnvFile, k, v); err != nil {
@@ -489,6 +528,22 @@ func FoundHubSteps(c HubConfig) []Step {
 				return volumeHasFile(ctx, c.Runner, c.svcTLSVolume(), "svc-ca.crt"), nil
 			},
 			Run: func(ctx context.Context) error { return genServiceTLS(ctx, c.Runner, c.svcTLSVolume()) },
+		},
+		{
+			// The Cacti relay's own service identity, written into ITS volume so the private key never
+			// lands on the host tree. Generated here because the relay is one per deployment, like the
+			// hub — each CB then pins the certificate half in its own PKI volume (pin-relay-cert).
+			//
+			// SOFT: the relay is deployed outside the toolkit, so its volume may not exist yet. Missing
+			// it leaves the relay on the shared secret, which is the migration state, not a failure.
+			Name: "gen-relay-identity-cacti",
+			Soft: true,
+			Check: func(ctx context.Context) (bool, error) {
+				return volumeHasFile(ctx, c.Runner, relayDataVolume(), relayPeerKeyID+".crt"), nil
+			},
+			Run: func(ctx context.Context) error {
+				return ensureRelayIdentity(ctx, c.Runner, relayDataVolume(), relayPeerKeyID)
+			},
 		},
 		{
 			// Compliance holds the GOVERNANCE signer and performs the on-chain

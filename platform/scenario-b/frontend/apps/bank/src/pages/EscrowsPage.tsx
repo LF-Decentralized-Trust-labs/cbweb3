@@ -20,6 +20,7 @@ import {
 } from "@cbweb3/ui";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { RecordsEmptyState } from "../components/common/RecordsEmptyState";
 import { usePaymentStore } from "../stores";
 import {
   EscrowStatus,
@@ -260,9 +261,7 @@ export function EscrowsPage() {
               ))}
             </TableBody>
           </Table>
-          {!total ? (
-            <p className="pt-3 text-sm text-muted-foreground">No tokenisation requests found.</p>
-          ) : null}
+          {!total ? <RecordsEmptyState emptyLabel="No tokenisation requests found." /> : null}
 
           {/* Pagination */}
           <div className="flex items-center justify-between gap-2 pt-4">

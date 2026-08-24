@@ -8,7 +8,7 @@ Operational documentation for deployment and configuration of the CBWeb3 platfor
 
 | Document | Description |
 |----------|-------------|
-| [deployment-runbook.md](deployment-runbook.md) | Complete deployment guide: `make spoke-all`, detailed phases, health checks, HTLC demo, teardown |
+| [deployment-runbook.md](deployment-runbook.md) | Complete deployment guide: `cd samples && ./deploy-all.sh`, detailed phases, health checks, HTLC demo, teardown |
 | [environment-setup.md](environment-setup.md) | Prerequisites, tool installation, complete port reference per entity |
 
 **Quick start:**
@@ -16,7 +16,7 @@ Operational documentation for deployment and configuration of the CBWeb3 platfor
 ```bash
 # 1. Prepare environment (see environment-setup.md)
 # 2. Deploy backend
-cd scenario-a && make spoke-all
+cd scenario-a/samples && ./deploy-all.sh
 # 3. Deploy frontends
 make frontend-spoke-all
 # 4. Verify endpoints
@@ -53,4 +53,9 @@ curl http://localhost:8081/realms/master | jq .realm
 | Scenario | Deployment | Configuration |
 |----------|-----------|---------------|
 | **Scenario A** (Enhanced Correspondent Banking) | Documented and runnable | Documented |
-| **Scenario B** (International Hub + AMM) | Pending — section reserved in each runbook | Pending — planned variables documented |
+| **Scenario B** (International Hub + AMM) | Implemented — documented in [`scenario-b/docs/runbooks/`](../../../scenario-b/docs/runbooks/) | Documented in Scenario B's own runbooks |
+
+> These runbooks cover **Scenario A only**. Scenario B is a separate product with its
+> own contracts, services, provisioning toolkit and runbook set; scenario isolation is
+> a constitutional rule of this repository. Each Scenario B section below points there
+> rather than duplicating it.

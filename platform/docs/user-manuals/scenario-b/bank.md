@@ -62,8 +62,8 @@ Fill in both fields and click **Sign in**:
 
 | Field | Description |
 |---|---|
-| **Client ID** | The institutional client identifier provided by the Central Bank (minimum 3 characters). |
-| **Client Secret** | The corresponding credential secret (minimum 6 characters). |
+| **Username** | The institutional service account identifier provided by the Central Bank (minimum 3 characters). |
+| **Password** | The corresponding service account secret (minimum 6 characters). |
 
 Authentication is managed via backend HTTP-only session cookies. On success you are redirected to the Dashboard.
 
@@ -98,7 +98,6 @@ The left-hand sidebar lists all screens available in Scenario B:
 **Route:** `/` · **Sidebar label:** Dashboard
 
 ![Dashboard](../img/scenario-b/bank/02-dashboard.png)
-<!-- SCREENSHOT-UPDATE: ../img/scenario-b/bank/02-dashboard.png — KPI row now shows "Available Pools" (not "Bridged to Hub"), the circuit-breaker/FX-proposals status strip and Bridge Positions panel were removed, and quick actions reduced to New Deposit / Redeem / Bridge to Hub -->
 
 The Dashboard provides a real-time summary of your institution's position. It refreshes pool availability and bridge activity every 30 seconds automatically.
 
@@ -133,7 +132,7 @@ Three bar charts summarising: **Tokenised vs Reserve** balance comparison, **Req
 
 **Route:** `/bridge` · **Sidebar label:** Bridge
 
-<!-- SCREENSHOT-NEW: ../img/scenario-b/bank/03-bridge.png — the Bridge (cross-currency) page: pool selector with fixed direction, Get Quote, and Execute Bridge steps -->
+![Bridge](../img/scenario-b/bank/03-bridge.png)
 
 This is the primary screen for sending a **cross-currency payment** over a Hub liquidity pool. The bridge combines the bridge-in, swap, and bridge-out into one operation: your sovereign tCeBM is spent on the source spoke, swapped at the Hub for the target currency, and delivered to the beneficiary's spoke.
 
@@ -209,7 +208,7 @@ If the operation fails, a **Bridge Failed** card shows a plain-language message 
 
 **Route:** `/bridge/history` · **Sidebar label:** Bridge History
 
-<!-- SCREENSHOT-NEW: ../img/scenario-b/bank/11-bridge-history.png — the Bridge History page: date filters and the paginated operations table -->
+![Bridge History](../img/scenario-b/bank/11-bridge-history.png)
 
 A **read-only** history of the cross-currency bridge operations initiated by your institution.
 
@@ -253,7 +252,7 @@ Results are paginated (20 rows per page) with **Prev** / **Next** controls.
 
 **Route:** `/pools` · **Sidebar label:** Liquidity Pools
 
-<!-- SCREENSHOT-NEW: ../img/scenario-b/bank/12-pools.png — the Liquidity Pools page: summary cards, pool list, and the selected-pool detail panel -->
+![Liquidity Pools](../img/scenario-b/bank/12-pools.png)
 
 A **read-only** view of the cross-currency pools your spoke can operate — that is, pools whose Central Bank created a corridor that includes your sovereign currency. The page polls live pool and circuit-breaker data every 15 seconds.
 
@@ -565,7 +564,7 @@ Shown as badges in the Bridge History table.
 
 ### Sign-in fails with "unauthorized"
 
-- Verify your **Client ID** and **Client Secret** are correct.
+- Verify your **Username** and **Password** are correct.
 - Confirm the spoke backend services are running and reachable (check with your infrastructure team).
 - Confirm your institution's status is `ACTIVE` — if it is not, complete onboarding first.
 

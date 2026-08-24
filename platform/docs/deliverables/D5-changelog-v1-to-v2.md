@@ -54,8 +54,10 @@ of a direct transfer; partial settlement is forbidden on production paths.
 The previously-fragmented, **unwired** specs
 `apis/openapi/amm.yaml` (v2.0.0) and
 `backend/services/api-gateway/openapi/v2/scenario-b.yaml` (v2.0.0) are
-**superseded** by the single served `docs/openapi.yaml` (v2.3.0). Tooling that
-consumed those fragment files must switch to the served `/openapi.yaml`.
+**superseded** by the single served `docs/openapi.yaml` (v2.3.0), and have now
+been **deleted** — nothing served or linted them, so they could only drift.
+Tooling that consumed those fragment files must switch to the served
+`/openapi.yaml`.
 
 ## Breaking changes — Scenario A (Enhanced Correspondent Banking)
 
@@ -75,5 +77,23 @@ description are unaware of these.
 ### Self-contained Swagger UI (offline `/docs`)
 The `/docs` page no longer loads Swagger UI assets from `unpkg.com`. Assets
 (swagger-ui-dist 5.32.6) are vendored and embedded, and served from
-`GET /docs/swagger-ui/:asset`. This is transparent to API consumers — no
-endpoint behavior or contract changed — and makes `/docs` work fully offline.
+`GET /docs/swagger-ui/:asset`, and the bundle is initialised with
+`validatorUrl: null` so the page never posts the gateway's spec URL to Swagger's
+hosted validator. This is transparent to API consumers — no endpoint behavior or
+contract changed — and makes `/docs` work fully offline on any host.
+
+### Published Postman collections
+Each scenario now ships a Postman v2.1.0 collection generated from its served
+spec: `scenario-a/apis/postman/` (83 requests) and `scenario-b/apis/postman/`
+(110 requests). They are generated artifacts, not a parallel source of truth —
+regenerate with `bash apis/postman/generate.sh` (generator versions pinned in the
+script) and let `.github/workflows/api-artifacts.yml` fail the build on drift.
+See §6 of [`D5-endpoint-specification.md`](./D5-endpoint-specification.md).
+
+### Scenario B redeem / fiat-exchange field names corrected in the spec
+The served spec described the Scenario A field names on four Scenario B schemas.
+`FiatExchangeResponse.tx_hash` and `ApproveRedeemResponse.fiat_mint_tx_hash` are
+documented as **`mint_tx_hash`**, `RedeemRecord` carries `mint_tx_hash` instead of
+`zeto_transfer_tx_hash` + `fiat_mint_tx_hash`, and `zeto_transfer_tx_hash` is no
+longer a required field of `RequestRedeemRequest` (the handler never parsed it).
+The API responses themselves are unchanged — only the documentation was wrong.

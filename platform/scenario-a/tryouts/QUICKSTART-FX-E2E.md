@@ -17,10 +17,10 @@ The `tryout-fx-agreement-e2e.sh` script validates the complete implementation of
 
 ```bash
 # Start all backend services + Cacti relay
-make dev.up
+cd samples && ./deploy-all.sh
 
 # Or individually:
-make dev.up-bank-a dev.up-bank-b dev.up-central-bank-a dev.up-central-bank-b
+cd samples && ./deploy-all.sh dev.up-bank-b dev.up-central-bank-a dev.up-central-bank-b
 make cacti-up
 ```
 
@@ -172,7 +172,7 @@ cat backend/config/.env.infra.bank-a | grep KC_CLIENT_SECRET
 # Check service status
 curl -s http://localhost:18080/health | jq .
 # Restart if needed
-make dev.down && make dev.up-bank-a
+cd samples && ./deploy-all.sh --clean
 ```
 
 ### "ERROR: timeout or failed (network)"

@@ -37,12 +37,12 @@ func IsValidTransition(current, next ParticipantStatus) bool {
 type AuditCategory string
 
 const (
-	CategorySession      AuditCategory = "SESSION"
-	CategoryCredential   AuditCategory = "CREDENTIAL"
-	CategoryFreeze       AuditCategory = "FREEZE"
+	CategorySession        AuditCategory = "SESSION"
+	CategoryCredential     AuditCategory = "CREDENTIAL"
+	CategoryFreeze         AuditCategory = "FREEZE"
 	CategoryCircuitBreaker AuditCategory = "CIRCUIT_BREAKER"
-	CategoryParameter    AuditCategory = "PARAMETER"
-	CategoryParticipant  AuditCategory = "PARTICIPANT"
+	CategoryParameter      AuditCategory = "PARAMETER"
+	CategoryParticipant    AuditCategory = "PARTICIPANT"
 )
 
 // AuditSeverity indicates the importance/risk level of an audit event.

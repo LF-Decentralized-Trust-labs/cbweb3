@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -52,7 +53,7 @@ func New(repo repository.Repository, ca *compliancepki.CA, bc registry.RegistryW
 	}
 	svc := &complianceService{repo: repo, ca: ca, blockchain: bc}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	serverOpts, err := authz.ServerOptionsFromEnv(logger, nil)
+	serverOpts, err := authz.ServerOptionsFromEnv(logger, serverPolicy())
 	if err != nil {
 		return nil, fmt.Errorf("configure gRPC security: %w", err)
 	}
@@ -257,7 +258,11 @@ func (s *complianceService) RegisterParticipantOnChain(ctx context.Context, req 
 	// Two-step onboarding (R1-10.6 / R2-10.6): register (Pending) then verify (Verified) so the
 	// wallet can transact. EnsureVerifiedParticipant is idempotent and never demotes an already
 	// transactable wallet.
-	txHash, err := registry.EnsureVerifiedParticipant(ctx, s.blockchain, wallet, req.InstitutionName, role, [32]byte{})
+	// institutionId is derived from the participant's bank code (the value shared by every wallet
+	// of that institution), so two wallets of one bank cannot present themselves to the AMM resume
+	// quorum as two institutions. See registry.InstitutionIDForParticipant.
+	institutionID := registry.InstitutionIDForParticipant(req.BankCode, req.InstitutionName)
+	txHash, err := registry.EnsureVerifiedParticipant(ctx, s.blockchain, wallet, req.InstitutionName, role, [32]byte{}, institutionID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "on-chain register+verify participant: %v", err)
 	}
@@ -281,6 +286,9 @@ type currencyRegistrar interface {
 	RegisterCurrency(ctx context.Context, tokenName, tokenSymbol, countryName, proposerCB, cbAddress string) (tokenAddr string, txHash string, err error)
 	IsCurrencyRegistered(ctx context.Context, symbol string) (bool, error)
 	CurrencyTokenAddress(ctx context.Context, symbol string) (string, error)
+	// EnsureCurrencyAuthority completes the handover of an already-registered currency's
+	// issuance authority to its central bank. Idempotent; returns "" when nothing was due.
+	EnsureCurrencyAuthority(ctx context.Context, tokenAddress, cbAddress string) (string, error)
 }
 
 // RegisterCurrencyOnChain deploys a founding central bank's bridge token
@@ -317,6 +325,16 @@ func (s *complianceService) RegisterCurrencyOnChain(ctx context.Context, req *co
 	// resolve + return the token address so callers can wire W_TOKEN_ADDRESS on re-runs.
 	if already, err := reg.IsCurrencyRegistered(ctx, symbol); err == nil && already {
 		addr, _ := reg.CurrencyTokenAddress(ctx, symbol)
+		// Registration and the handover of issuance authority to the CB are separate
+		// transactions, so a run interrupted between them leaves a currency that only the hub
+		// can mint. Converge here instead of reporting success on a half-done handover.
+		if addr != "" {
+			if txHash, hErr := reg.EnsureCurrencyAuthority(ctx, addr, cbAddress); hErr != nil {
+				return nil, status.Errorf(codes.Internal, "currency %s is registered but its issuance authority is not with %s: %v", symbol, cbAddress, hErr)
+			} else if txHash != "" {
+				log.Printf("[compliance] currency %s: completed issuance-authority handover to %s (tx=%s)", symbol, cbAddress, txHash)
+			}
+		}
 		return &compliancv1.RegisterCurrencyOnChainResponse{Symbol: symbol, TokenAddress: addr, AlreadyRegistered: true}, nil
 	}
 
@@ -370,6 +388,15 @@ func (s *complianceService) RegisterPairOnChain(ctx context.Context, req *compli
 
 	ammAddr, txHash, err := reg.RegisterPair(ctx, symbolA, symbolB, pairID)
 	if err != nil {
+		// Once each currency's issuance authority rests with its own central bank, the
+		// PairRegistry admits only those two as proposer and confirmer — the hub is neither.
+		// FailedPrecondition (not Internal) with the AMM address and the addresses that owe
+		// each act, so the caller routes the request to the CBs' own
+		// POST /api/v2/amm/pairs/{propose,confirm} instead of retrying here.
+		var awaits *registry.PairAwaitsSovereignsError
+		if errors.As(err, &awaits) {
+			return nil, status.Errorf(codes.FailedPrecondition, "%v", awaits)
+		}
 		return nil, status.Errorf(codes.Internal, "on-chain registerPair: %v", err)
 	}
 	return &compliancv1.RegisterPairOnChainResponse{
@@ -444,7 +471,12 @@ func (s *complianceService) SignParticipantCSR(ctx context.Context, req *complia
 		// (Verified). EnsureVerifiedParticipant is idempotent and never demotes — this path is
 		// re-run on repeated CSR signings ("may already be approved"), so a live, transactable
 		// wallet is left untouched rather than reset to Pending mid-flight.
-		if _, err := registry.EnsureVerifiedParticipant(ctx, s.blockchain, existing.WalletAddress, institutionName, req.Role, [32]byte{}); err != nil {
+		// Same institution derivation as every other path: the stored bank code, not the display
+		// name, decides which institution this wallet belongs to for quorum purposes.
+		if _, err := registry.EnsureVerifiedParticipant(
+			ctx, s.blockchain, existing.WalletAddress, institutionName, req.Role, [32]byte{},
+			registry.InstitutionIDForParticipant(existing.BankCode, institutionName),
+		); err != nil {
 			log.Printf("WARN: SignParticipantCSR: on-chain register+verify failed (non-fatal): %v", err)
 		}
 	}
@@ -693,20 +725,19 @@ func ipAddressFromCtx(ctx context.Context) string {
 	return ""
 }
 
-// actorFromCtx returns the caller identity for audit attribution. It prefers the
-// identity authenticated by the gRPC authz interceptor (mTLS peer certificate, or
-// the trusted metadata header in transitional mode); only when no authenticated
-// identity is present does it fall back to the legacy x-actor-subject header.
+// actorFromCtx returns the caller identity for audit attribution: the identity the
+// gRPC authz interceptor authenticated (mTLS peer certificate, or the trusted
+// metadata header when that transitional mode is explicitly opted into).
+//
+// The legacy x-actor-subject header was removed here (R2-H-8 follow-up item 3). It
+// was a fallback no gateway set, and any peer that could reach the port could set
+// it — so the one thing it could still do was let an unauthenticated caller choose
+// the name written to the compliance audit trail. Removing it costs nothing real and
+// closes an attacker-writable channel; when no identity is authenticated the caller
+// now gets no actor from the transport at all, and the audit falls back to the
+// gateway-validated payload (see actorForAudit).
 func actorFromCtx(ctx context.Context) string {
-	if a := authz.Actor(ctx); a != "" {
-		return a
-	}
-	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		if vals := md.Get("x-actor-subject"); len(vals) > 0 {
-			return vals[0]
-		}
-	}
-	return ""
+	return authz.Actor(ctx)
 }
 
 // actorForAudit derives the audit actor, preferring the authenticated caller

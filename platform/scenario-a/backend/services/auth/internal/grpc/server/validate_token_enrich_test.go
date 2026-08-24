@@ -113,7 +113,7 @@ func (s *stubNonce) GetAndDelete(_ context.Context, _ string) (string, bool, err
 // stubRegistry satisfies blockchainRegistry (unused in ValidateToken path).
 type stubRegistry struct{}
 
-func (s *stubRegistry) RegisterParticipant(_ context.Context, _, _, _ string, _ [32]byte) (string, error) {
+func (s *stubRegistry) RegisterParticipant(_ context.Context, _, _, _ string, _, _ [32]byte) (string, error) {
 	return "", nil
 }
 func (s *stubRegistry) VerifyParticipant(_ context.Context, _ string) (string, error) {
@@ -133,6 +133,9 @@ func (s *stubRegistry) IsWhitelisted(_ context.Context, _ string) (bool, error) 
 }
 func (s *stubRegistry) GetParticipant(_ context.Context, _ string) (registry.OnChainParticipant, error) {
 	return registry.OnChainParticipant{}, nil
+}
+func (s *stubRegistry) GetInstitutionID(_ context.Context, _ string) ([32]byte, error) {
+	return [32]byte{}, nil
 }
 func (s *stubRegistry) GetCertFingerprint(_ context.Context, _ string) ([32]byte, error) {
 	return [32]byte{}, nil

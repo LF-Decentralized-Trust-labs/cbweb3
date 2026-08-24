@@ -21,8 +21,12 @@ import (
 type EntityEnvData struct {
 	EntityName    string // e.g. "central-bank-brazil" / "bank-itau"
 	IsCentralBank bool
-	SpokeID       string
-	FiatSymbol    string
+	// GovernanceBankCode is the institution code the CB's services stamp on participants
+	// and hash into the on-chain institutionId. It matches the code the provisioning
+	// toolkit used when it registered the CB wallet (see step_onboard_registry.go).
+	GovernanceBankCode string
+	SpokeID            string
+	FiatSymbol         string
 
 	// Keycloak the entity authenticates against (CB's instance for CB/NOC/Governance;
 	// the bank's own when keycloak: per-entity).
@@ -44,6 +48,9 @@ type EntityEnvData struct {
 	RedisContainer    string
 	RedisPort         int
 	RedisDB           int
+	// RedisPassword is required: this Redis holds the auth service's PKI login
+	// nonces, and the service reads REDIS_PASSWORD from its environment.
+	RedisPassword string
 
 	// PKI (local dev files).
 	CACertFile string
@@ -139,6 +146,7 @@ REDIS_CONTAINER_NAME={{.RedisContainer}}
 REDIS_IMAGE_TAG=7-alpine
 REDIS_PORT={{.RedisPort}}
 REDIS_DB={{.RedisDB}}
+REDIS_PASSWORD={{.RedisPassword}}
 
 # Keycloak (CB instance for CB/NOC/Governance; own when per-entity)
 KC_BASE_PATH={{.KeycloakURL}}
@@ -157,6 +165,12 @@ KEYCLOAK_AUDIENCE={{.KCAudience}}
 # PKI (local dev)
 CA_CERT_FILE={{.CACertFile}}
 CA_KEY_FILE={{.CAKeyFile}}
+
+# Institution identity. Every wallet of this institution carries this code, and the
+# on-chain institutionId is keccak256 of it. The AMM resume quorum counts distinct
+# institutions, so a second wallet provisioned for this same central bank must be
+# registered under this exact code — a different one would read as a second institution.
+GOVERNANCE_BANK_CODE={{.GovernanceBankCode}}
 
 # Blockchain
 BLOCKCHAIN_CLIENT=besu

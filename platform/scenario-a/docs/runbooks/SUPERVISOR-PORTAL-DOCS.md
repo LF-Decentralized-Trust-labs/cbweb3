@@ -46,7 +46,7 @@ Access requires one of the following Keycloak roles:
 
 Before accessing the portal:
 
-- The spoke infrastructure must be running (`make spoke-all` or `make spoke-a`).
+- The spoke infrastructure must be running (`cd samples && ./deploy-all.sh`; there is no per-spoke bring-up target any more).
 - The supervisor has received Keycloak credentials with `REGIONAL_SUPERVISOR` or `DOMESTIC_AUDITOR` role.
 - The Supervisor Portal container is up (included in `make frontend-spoke-all`).
 
@@ -267,7 +267,7 @@ The Supervisor Portal consumes the following backend endpoints:
 | Symptom | Likely Cause | Resolution |
 |---|---|---|
 | Login fails with 401 | Missing or incorrect `REGIONAL_SUPERVISOR` / `DOMESTIC_AUDITOR` Keycloak role | Ask the governance operator to assign the correct role in Keycloak |
-| Dashboard shows all `—` | Network overview service unreachable or no data yet | Confirm `make spoke-all` completed and api-gateway containers are running |
+| Dashboard shows all `—` | Network overview service unreachable or no data yet | Confirm `cd samples && ./deploy-all.sh` completed and api-gateway containers are running |
 | Pool table is empty | AMM pool not seeded yet | Run `make contracts.seed-hub` or execute step 4b of the scenario-b tryout |
 | Decrypt button stays disabled | One or more input fields below minimum length | Ensure tx hash ≥ 8 chars, view key ≥ 8 chars, reason ≥ 5 chars |
 | Audit log is empty | No governance actions have been performed yet | Perform any compliance action (e.g., view a participant) to generate the first log entry |

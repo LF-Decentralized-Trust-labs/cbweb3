@@ -67,11 +67,18 @@ type CrossCurrencyBridgeInHandler struct {
 	// balanceChecker and walletResolver enforce Reserve Tokenisation: the payer bank must
 	// hold tCeBM before a bridge-in is allowed. Both are optional (nil = no enforcement,
 	// for CB self-service sovereign positions that set their own mint path).
-	balanceChecker PayerBalanceCheckerIface
-	walletResolver PayerWalletResolverIface
+	balanceChecker   PayerBalanceCheckerIface
+	walletResolver   PayerWalletResolverIface
 	wTokenAddress    string // W-<source> on Hub (this CB's sovereign W token, e.g. W-BRL)
 	fiatTokenAddress string // tCeBM-<source> on this CB's spoke (native asset)
 	spokeNetwork     string // "spoke-a"
+	// hubSignerAddress is this CB's own Hub address. It becomes the mint target when the
+	// caller names none, which is the case once the bank delegates the AMM swap too: the CB
+	// mints the W-<source> to itself because the CB is what spends it in Step 2. Being
+	// explicit here beats falling through to the executor's HUB_MINT_RECIPIENT default, which
+	// in some stacks points at a different address than the swap signer — the swap would then
+	// revert for insufficient balance with nothing pointing at why.
+	hubSignerAddress string
 	// activeTimeout bounds how long to wait for the lock-mint to reach ACTIVE.
 	activeTimeout time.Duration
 }
@@ -100,6 +107,13 @@ func (h *CrossCurrencyBridgeInHandler) WithReserveTokenisationEnforcement(
 ) *CrossCurrencyBridgeInHandler {
 	h.balanceChecker = balanceChecker
 	h.walletResolver = walletResolver
+	return h
+}
+
+// WithHubSignerAddress sets this CB's own Hub address, used as the mint target when the
+// delegating bank names none (the keyless-bank case).
+func (h *CrossCurrencyBridgeInHandler) WithHubSignerAddress(addr string) *CrossCurrencyBridgeInHandler {
+	h.hubSignerAddress = strings.TrimSpace(addr)
 	return h
 }
 
@@ -134,6 +148,12 @@ func (h *CrossCurrencyBridgeInHandler) HandleBridgeIn(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "correlation_id, payer_bank_id, amount are required",
 		})
+	}
+
+	// The verified caller may only bridge in for itself. Otherwise an authenticated peer names
+	// another bank and this CB debits that bank's tCeBM reserves and mints against them.
+	if ok, refusal := authorizeRelayCallerFor(c, req.PayerBankID); !ok {
+		return refusal
 	}
 
 	if h.wTokenAddress == "" || h.fiatTokenAddress == "" {
@@ -183,8 +203,8 @@ func (h *CrossCurrencyBridgeInHandler) HandleBridgeIn(c *fiber.Ctx) error {
 					"insufficient tokenized reserves: bank %s holds %s tCeBM, need %s — complete Reserve Tokenisation first",
 					req.PayerBankID, bal.String(), required.String(),
 				),
-				"code":    "INSUFFICIENT_TOKENIZED_RESERVES",
-				"balance": bal.String(),
+				"code":     "INSUFFICIENT_TOKENIZED_RESERVES",
+				"balance":  bal.String(),
 				"required": required.String(),
 			})
 		}
@@ -192,6 +212,14 @@ func (h *CrossCurrencyBridgeInHandler) HandleBridgeIn(c *fiber.Ctx) error {
 
 	// Enqueue lock-mint. extras[0] = Hub mint recipient, extras[1] = bank's spoke wallet
 	// (executor burns from here instead of auto-minting — enforces reserve backing).
+	// Where the W-<source> is minted on the Hub. A bank that also delegates the AMM swap holds
+	// no Hub key and names no address; the CB then mints to itself, since it is the one that
+	// will spend it in Step 2.
+	mintTarget := strings.TrimSpace(req.SwapSenderAddress)
+	if mintTarget == "" {
+		mintTarget = h.hubSignerAddress
+	}
+
 	pos, err := h.lockMintEnqueuer.LockAndEnqueue(
 		c.Context(),
 		req.PayerBankID,
@@ -200,8 +228,8 @@ func (h *CrossCurrencyBridgeInHandler) HandleBridgeIn(c *fiber.Ctx) error {
 		h.wTokenAddress,
 		req.Amount,
 		req.CorrelationID,
-		strings.TrimSpace(req.SwapSenderAddress), // extras[0] = mintToHubAddress
-		payerWallet,                               // extras[1] = burnFromSpokeAddress
+		mintTarget,  // extras[0] = mintToHubAddress
+		payerWallet, // extras[1] = burnFromSpokeAddress
 	)
 	if err != nil {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {PairRegistry} from "../src/PairRegistry.sol";
@@ -38,15 +38,27 @@ contract PairRegistryTest is Test {
         identityRegistry = new IdentityRegistry(admin);
         vm.startPrank(admin);
         identityRegistry.registerParticipant(
-            cbBRL, "Banco Central do Brasil", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            cbBRL,
+            "Banco Central do Brasil",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-cbBRL")
         );
         identityRegistry.verifyParticipant(cbBRL);
         identityRegistry.registerParticipant(
-            cbUSD, "Federal Reserve", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            cbUSD,
+            "Federal Reserve",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-cbUSD")
         );
         identityRegistry.verifyParticipant(cbUSD);
         identityRegistry.registerParticipant(
-            cbARS, "Banco Central de Argentina", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+            cbARS,
+            "Banco Central de Argentina",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-cbARS")
         );
         identityRegistry.verifyParticipant(cbARS);
         // Map each token to its issuing CB
