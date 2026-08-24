@@ -30,6 +30,11 @@ services:
       PARTICIPANT_REGISTRY_ADDRESS: "${SPOKE_IDENTITY_REGISTRY_ADDRESS:-}"
       CURRENCY_REGISTRY_ADDRESS: "${CURRENCY_REGISTRY_CONTRACT_ADDRESS:-}"
       CB_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
+      # Own signing identity, so this container does not share a nonce counter with the
+      # payment-orchestrator. Falls back to CB_PRIVATE_KEY when unset, which is what an
+      # already-provisioned spoke needs: its IdentityRegistry never granted this address
+      # the roles, so switching without the grant would revert every registration.
+      CB_SERVICES_PRIVATE_KEY: "${CB_SERVICES_PRIVATE_KEY:-}"
       POSTGRES_DSN: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:?}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
       BANK_CODE: "${ENTITY}"
       # Institution identity for on-chain participant registration: institutionId =
@@ -91,6 +96,11 @@ services:
       BESU_CHAIN_ID: "${SPOKE_CHAIN_ID:-1337}"
       PARTICIPANT_REGISTRY_ADDRESS: "${SPOKE_IDENTITY_REGISTRY_ADDRESS:-}"
       CB_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
+      # Own signing identity, so this container does not share a nonce counter with the
+      # payment-orchestrator. Falls back to CB_PRIVATE_KEY when unset, which is what an
+      # already-provisioned spoke needs: its IdentityRegistry never granted this address
+      # the roles, so switching without the grant would revert every registration.
+      CB_SERVICES_PRIVATE_KEY: "${CB_SERVICES_PRIVATE_KEY:-}"
       # KMS seed for governance-portal onboarding (mirrors scenario-a): the bank's
       # auth acts as the KMS; CreateOnboardingKey returns this per-bank key so the
       # bank onboards as a DISTINCT on-chain participant. Empty on a CB (no self-

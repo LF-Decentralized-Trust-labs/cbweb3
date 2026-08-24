@@ -214,6 +214,19 @@ func (c SpokeConfig) cbRelayerAddress() string {
 	return addr
 }
 
+// cbServicesKey / cbServicesAddress are the identity the CB's auth and compliance containers
+// sign the SPOKE IdentityRegistry with — a third identity for the same central bank, so those
+// two processes no longer share the deployer's nonce counter with the payment-orchestrator.
+func (c SpokeConfig) cbServicesKey() string {
+	key, _ := deriveCBServicesKey(c.SpokeID)
+	return key
+}
+
+func (c SpokeConfig) cbServicesAddress() string {
+	_, addr := deriveCBServicesKey(c.SpokeID)
+	return addr
+}
+
 func (c SpokeConfig) cbHubAddress() string {
 	if a := strings.TrimSpace(c.CBAddress); a != "" {
 		return a
@@ -728,6 +741,10 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// the Keycloak realm/client are provisioned by provision-keycloak-spoke.
 		"SPOKE_CHAIN_ID": fmt.Sprintf("%d", c.SpokeChainID),
 		"CB_PRIVATE_KEY": devDeployerKey,
+		// Signing identity for auth + compliance. Separate from CB_PRIVATE_KEY so those two
+		// containers do not share a nonce counter with the payment-orchestrator; the spoke
+		// deploy grants this address GOVERNANCE_ROLE and VERIFIER_ROLE.
+		"CB_SERVICES_PRIVATE_KEY": c.cbServicesKey(),
 		// Service-to-service authentication id (X-Relay-Key-Id). Distinct from BANK_CODE, which is
 		// the entity ROLE and identical on every CB; see SpokeConfig.RelayKeyID.
 		"RELAY_KEY_ID": c.relayKeyID(),
@@ -1081,11 +1098,15 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				// the CB's hub identity: granting it here would leave the relayer unable to
 				// mint or burn tCeBM on its own spoke. --legacy for the zero-gas chain.
 				cbAddr := devDeployerAddr
+				// SERVICES_ADDRESS gets GOVERNANCE_ROLE + VERIFIER_ROLE so auth and compliance
+				// can sign with their own identity instead of the deployer key. Sharing that key
+				// put three containers on one nonce counter, and concurrent writes replaced each
+				// other in the mempool.
 				cmd := fmt.Sprintf("cd %q && "+
-					"DEPLOYER_PRIVATE_KEY=%s ADMIN_ADDRESS=%s CENTRAL_BANK_ADDRESS=%s "+
+					"DEPLOYER_PRIVATE_KEY=%s ADMIN_ADDRESS=%s CENTRAL_BANK_ADDRESS=%s SERVICES_ADDRESS=%s "+
 					"TOKEN_NAME=%q TOKEN_SYMBOL=%q FIAT_TOKEN_NAME=%q FIAT_TOKEN_SYMBOL=%q "+
 					"forge script script/CBWeb3Spoke.s.sol:DeployCBWeb3Spoke --rpc-url %s --broadcast --legacy",
-					c.ContractsDir, devDeployerKey, devDeployerAddr, cbAddr,
+					c.ContractsDir, devDeployerKey, devDeployerAddr, cbAddr, c.cbServicesAddress(),
 					c.TokenName, c.TokenSymbol, c.FiatTokenName, c.FiatTokenSymbol, c.SpokeRPC)
 				_, err := c.Runner.Run(ctx, "sh", "-c", cmd)
 				return err

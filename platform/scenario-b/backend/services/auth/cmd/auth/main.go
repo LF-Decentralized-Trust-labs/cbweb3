@@ -137,7 +137,13 @@ func newBlockchainClient(kmsProvider kms.Provider) blockchainRegistryClient {
 
 		var signer registry.TransactionSigner
 
-		if cbKey := os.Getenv("CB_PRIVATE_KEY"); cbKey != "" {
+		// Prefer this service's own signing identity. Sharing CB_PRIVATE_KEY with compliance
+		// and the payment-orchestrator put three processes on one account, and evm's per-process
+		// nonce counter cannot serialise across containers: concurrent writes replaced each
+		// other in the mempool and their callers waited on receipts never written. Falls back to
+		// CB_PRIVATE_KEY so a spoke provisioned before the split keeps working — its
+		// IdentityRegistry never granted the services address the roles it would need.
+		if cbKey := firstNonEmptyEnv("CB_SERVICES_PRIVATE_KEY", "CB_PRIVATE_KEY"); cbKey != "" {
 			s, err := registry.NewStaticKeySigner(cbKey)
 			if err != nil {
 				log.Fatalf("blockchain: invalid CB_PRIVATE_KEY: %v", err)
@@ -185,4 +191,14 @@ func getEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+// firstNonEmptyEnv returns the value of the first of names that is set and non-empty.
+func firstNonEmptyEnv(names ...string) string {
+	for _, n := range names {
+		if v := strings.TrimSpace(os.Getenv(n)); v != "" {
+			return v
+		}
+	}
+	return ""
 }

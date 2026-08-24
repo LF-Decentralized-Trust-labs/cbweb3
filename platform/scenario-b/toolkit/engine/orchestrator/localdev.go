@@ -44,6 +44,13 @@ const (
 	// cbTokenAdminKeyDerivationSalt namespaces the CB's W-token ADMINISTRATION key — a third
 	// identity, in its own domain, and the only one never handed to a container.
 	cbTokenAdminKeyDerivationSalt = "cbweb3-scenario-b-cb-token-admin-key:"
+
+	// cbServicesKeyDerivationSalt derives the identity the CB's auth and compliance services
+	// sign the spoke IdentityRegistry with. They used the deployer key, the same account the
+	// payment-orchestrator writes with, so three containers advanced one nonce counter and
+	// concurrent writes replaced each other in the mempool. A separate identity removes the
+	// contention rather than serialising it, the way cbRelayerKey already does on the hub.
+	cbServicesKeyDerivationSalt = "cbweb3-scenario-b-cb-services-key:"
 )
 
 // deriveCBHubKey deterministically derives a per-CB secp256k1 dev key for the HUB
@@ -83,6 +90,13 @@ func deriveCBHubKey(spokeID string) (privHex, addr string) {
 // burn, which the gateway grants it at boot.
 func deriveCBRelayerKey(spokeID string) (privHex, addr string) {
 	return deriveKeyFromSalt(cbRelayerKeyDerivationSalt, spokeID)
+}
+
+// deriveCBServicesKey derives the spoke identity used by this CB's auth and compliance
+// containers. It needs GOVERNANCE_ROLE and VERIFIER_ROLE on the spoke IdentityRegistry, which
+// the spoke deploy grants to its address.
+func deriveCBServicesKey(spokeID string) (privHex, addr string) {
+	return deriveKeyFromSalt(cbServicesKeyDerivationSalt, spokeID)
 }
 
 // deriveCBTokenAdminKey derives the identity that ADMINISTERS this CB's W-token — the holder of
