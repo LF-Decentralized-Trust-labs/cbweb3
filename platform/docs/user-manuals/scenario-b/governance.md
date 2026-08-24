@@ -2,7 +2,7 @@
 
 **Audience:** Central bank governance operators.
 **Scenario:** Scenario B — International Hub (FXAgreement + AMM + Cacti relay).
-**Data source:** Mixed, controlled by a mock toggle that **defaults to mock**. The `VITE_USE_MOCKS` environment variable is read as `VITE_USE_MOCKS !== "false"`, so mock data is served unless the variable is set to exactly the string `false` — leaving it unset, or setting it to any other value, yields mock data. The shipped `.env.example` sets `VITE_USE_MOCKS=true`. The toggle affects the governance parameters and registry screens. The Circuit Breaker screen is always live: it reads on-chain state through `/api/v2` and has no mock path.
+**Data source:** Live backend on any stack the toolkit deploys. A mock toggle exists for local UI work: `VITE_USE_MOCKS` is read as `VITE_USE_MOCKS !== "false"`, so it serves mock data unless set to exactly the string `false`. The toolkit passes `VITE_USE_MOCKS=false` when it builds the portal, so a deployed portal is live. The toggle reaches only the governance parameters screen and two registry calls (credential issuance and KYC status lookup); the pending-KYC list and KYC approval never had a mock path. The Circuit Breaker screen is always live: it reads on-chain state through `/api/v2`. Running the portal outside the toolkit — `npm run dev` with the shipped `.env.example` — yields mock data unless you set the variable.
 
 ---
 

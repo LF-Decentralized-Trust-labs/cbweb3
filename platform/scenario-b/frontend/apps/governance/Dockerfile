@@ -26,6 +26,12 @@ ENV VITE_INSTITUTION_NAME=${VITE_INSTITUTION_NAME}
 ARG VITE_SCENARIO
 ENV VITE_SCENARIO=${VITE_SCENARIO}
 
+# VITE_USE_MOCKS is read as `!== "false"`, so the portal serves mock data unless this is
+# the exact string "false". Without this ARG the flag could not be set at build time at
+# all, which is why every deployed portal was mock-backed regardless of intent.
+ARG VITE_USE_MOCKS
+ENV VITE_USE_MOCKS=${VITE_USE_MOCKS}
+
 ARG VITE_BASE_PATH
 ENV VITE_BASE_PATH=${VITE_BASE_PATH}
 ARG VITE_LAUNCHER_URL

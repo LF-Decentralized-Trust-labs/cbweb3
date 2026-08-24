@@ -579,7 +579,10 @@ func FoundHubSteps(c HubConfig) []Step {
 				// built base-path-aware (VITE_BASE_PATH) under /<scn>/governance/.
 				gwPort := c.RPCPort + 8000
 				api := fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort)
-				args := map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": "hub"}
+				// VITE_USE_MOCKS is read as `!== "false"`, so it must be this exact string: a
+				// toolkit stack is chain-wired and every governance screen has a real endpoint
+				// behind it, so serving fixtures here would only hide the live system.
+				args := map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_USE_MOCKS": "false", "VITE_INSTITUTION_NAME": "hub"}
 				if c.useProxy() {
 					args["VITE_API_URL"] = proxyAPIURL(c.FrontendHost)
 					args["VITE_BASE_PATH"] = proxyPortalBase("governance")
