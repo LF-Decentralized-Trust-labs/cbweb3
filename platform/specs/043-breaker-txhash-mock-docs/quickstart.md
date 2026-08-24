@@ -21,13 +21,15 @@ go test ./backend/services/api-gateway/internal/http/handlers/... -run CircuitBr
 Expected: tests assert `tx_hash` is present and non-empty in all four V2 responses when the fake chain caller returns a hash, and **absent as a JSON key** (not `""`) when it does not.
 
 ```bash
-# Frontend — governance portal
+# Frontend — governance portal (npm workspaces; there is no pnpm in this repo)
 cd scenario-b/frontend
-pnpm --filter governance test --run     # bare `vitest`; --run avoids watch mode
-pnpm --filter governance type-check
-pnpm --filter governance lint
-pnpm --filter governance build
+npm run test --workspace=governance -- --run   # bare `vitest`; --run avoids watch mode
+npm run lint --workspace=governance
+npm run build --workspace=governance           # tsc -b && vite build — this is the real type check
 ```
+
+> `npm run type-check --workspace=governance` runs `tsc --noEmit`, which does not check this
+> project's references. Use `build` as the type gate.
 
 Expected: store-level tests show `tx_hash` reaching `cbStatus` from every response — including `proposeResume`, which rebuilds the object by hand — and the network-wide indicator derivation returning halted for any halted pair, operational for none, and never halted when the pair set is unknown.
 
@@ -45,13 +47,21 @@ cd scenario-b && make scenario-b.test-backend
 
 ### Bring the stack up
 
+`make scenario-b.up` no longer exists; the toolkit is the only bring-up path.
+
 ```bash
-cd scenario-b
-make scenario-b.up
-make frontend-scenario-b
+cd scenario-b/samples
+./deploy-all.sh              # hub + both central banks + the commercial banks
 ```
 
-Confirm an AMM is wired for the pair under test — without it the breaker runs its off-chain path and correctly produces no hash.
+The breaker needs a pair, and the sovereign corridor is opened at runtime rather than by
+provisioning: each central bank proposes/confirms it from its governance portal, or via
+`POST /api/v2/amm/pairs/propose` and `/confirm`. Confirm an AMM is wired for the pair under
+test — without it the breaker runs its off-chain path and correctly produces no hash.
+
+Two *distinct* central banks are required: the resume quorum counts institutions, so one
+operator cannot reach quorum alone. On the sample topology that is Brazil (`:41645`,
+portal `:42645`) and Argentina (`:41745`, portal `:42745`).
 
 ### Walk the breaker lifecycle
 
