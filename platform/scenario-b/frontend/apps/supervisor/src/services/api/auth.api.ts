@@ -30,6 +30,7 @@ function mapMeToUser(me: MeResponse): SupervisorUser {
   return {
     id: me.subject,
     username: me.subject,
+    roles: me.roles ?? [],
     role: roleFromClaims(me.roles),
     institutionId: me.bankId ?? "",
     institutionName: me.bankId ?? "Central Bank",

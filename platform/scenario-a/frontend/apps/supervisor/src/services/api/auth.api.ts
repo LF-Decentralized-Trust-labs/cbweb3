@@ -20,6 +20,11 @@ type MeResponse = {
   country?: string;
 };
 
+// Display label only. The final branch is a fallback, not an authorization decision: a
+// ROLE_TREASURY token used to land here and come back as CENTRAL_BANK_ADMIN — a valid-looking
+// supervisor role — while `permissions` below is a fixed list rather than anything derived
+// from the token. The portal therefore manufactured an authorised-looking profile for a
+// session the gateway refuses. Authorization now reads `roles`; see auth/authorization.ts.
 function roleFromClaims(roles: string[]): SupervisorRole {
   if (roles.includes("ROLE_SUPERVISOR")) return SupervisorRole.SUPERVISOR_ROLE;
   if (roles.includes("ROLE_NOC")) return SupervisorRole.COMPLIANCE_OFFICER;
@@ -30,6 +35,7 @@ function mapMeToUser(me: MeResponse): SupervisorUser {
   return {
     id: me.subject,
     username: me.subject,
+    roles: me.roles ?? [],
     role: roleFromClaims(me.roles),
     institutionId: me.bankId ?? "",
     institutionName: me.bankId ?? "Central Bank",

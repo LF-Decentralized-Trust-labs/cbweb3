@@ -5,9 +5,11 @@ import { clearTokens, decodeJwtPayload, ensureFreshToken, keycloakConfig, storeT
 
 function userFromToken(token: string, fallbackName: string): SysAdminUser {
   const payload = decodeJwtPayload(token);
+  const realmAccess = payload["realm_access"] as { roles?: string[] } | undefined;
   return {
     id: (payload["sub"] as string) ?? "",
     name: (payload["preferred_username"] as string) ?? fallbackName,
+    roles: realmAccess?.roles ?? [],
     role: "SYS_ADMIN",
     institutionId: (payload["bank_id"] as string) ?? "",
   };
