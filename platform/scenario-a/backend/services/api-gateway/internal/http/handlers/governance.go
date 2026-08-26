@@ -278,6 +278,37 @@ func (h *GovernanceHandler) GetAuditLogs(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"logs": logs})
 }
 
+// treasuryAuditCategory is the only category the treasury route may read. It is a constant,
+// not a parameter: the whole reason this route can exist alongside the ROLE_GOVERNANCE one is
+// that a treasury operator reads its OWN operations and nothing else.
+const treasuryAuditCategory = "TREASURY"
+
+// GetTreasuryAuditLogs handles GET /api/v1/treasury/audit/logs.
+//
+// The treasury dashboard's operations table reads the audit trail, but /api/v1/governance is
+// guarded by ROLE_GOVERNANCE, so the operator who performs mint and burn got a 403 and an empty
+// table — the entries exist, and are written under category TREASURY, but the operator who
+// created them could not read them.
+//
+// This is the narrow answer: the same log, the same bounds, restricted to the caller's own
+// category. The category is pinned here and the query parameter is deliberately NOT read —
+// honouring it would let a treasury token read GOVERNANCE or COMPLIANCE rows by asking, which
+// is exactly the widening this route is scoped to avoid.
+func (h *GovernanceHandler) GetTreasuryAuditLogs(c *fiber.Ctx) error {
+	severity := c.Query("severity")
+	fromDate := c.Query("from_date")
+	toDate := c.Query("to_date")
+	page := auditPageNumber(c.Query("page"))
+	limit := auditPageSize(c.Query("limit"))
+
+	logs, err := h.compliance.GetAuditLogs(c.UserContext(),
+		treasuryAuditCategory, severity, fromDate, toDate, page, limit)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"logs": logs})
+}
+
 // ListUsers handles GET /api/v1/governance/users.
 // Optional query params: ?role=ROLE_COMMERCIAL_BANK&status=ACTIVE
 func (h *GovernanceHandler) ListUsers(c *fiber.Ctx) error {

@@ -69,30 +69,55 @@ func parsePKIMountSource(inspectOutput []byte) string {
 	return ""
 }
 
-// boundPKIDir reports the host directory the entity's api-gateway currently binds as its PKI dir, or
-// "" when there is no such container (or docker cannot be reached — the guard then stays out of the
-// way rather than blocking a deploy over an unavailable daemon).
-func boundPKIDir(ctx context.Context, r exec.CommandRunner, composeProject string) string {
+// boundPKIDir reports the host directory the entity's api-gateway currently binds as its PKI dir.
+//
+// It returns ("", nil) only when docker answered and there is nothing to bind — no such container, or
+// a container with no PKI mount. When docker could not be asked at all it returns an error, and the
+// caller must NOT read that as "nothing is running".
+//
+// That distinction is the whole point. This used to return "" for both, and "" allows the run to
+// proceed, so any docker failure — daemon down, unreachable DOCKER_HOST, permission denied — silently
+// disabled the guard. It failed open exactly where it was needed most: on a remote or multi-host
+// daemon, the container this run would duplicate is on ANOTHER machine, and the only way to see it is
+// the call that just failed. A single-host operator loses nothing by failing closed here, because
+// apply shells out to compose moments later and would fail anyway.
+func boundPKIDir(ctx context.Context, r exec.CommandRunner, composeProject string) (string, error) {
 	names, err := r.Run(ctx, "docker", "ps", "-a",
 		"--filter", "label=com.docker.compose.project="+composeProject,
 		"--filter", "label=com.docker.compose.service=api-gateway",
 		"--format", "{{.Names}}")
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("docker ps: %w", err)
 	}
 	name := strings.TrimSpace(strings.SplitN(strings.TrimSpace(string(names)), "\n", 2)[0])
 	if name == "" {
-		return ""
+		// docker answered: this entity has no gateway container. A first join, and it must proceed.
+		return "", nil
 	}
 	mounts, err := r.Run(ctx, "docker", "inspect", name,
 		"--format", `{{range .Mounts}}{{.Source}}{{printf "\x00"}}{{.Destination}}{{println}}{{end}}`)
 	if err != nil {
-		return ""
+		// The container was listed a moment ago but cannot be read now. Still "cannot tell", not
+		// "nothing is running".
+		return "", fmt.Errorf("docker inspect %s: %w", name, err)
 	}
-	return parsePKIMountSource(mounts)
+	return parsePKIMountSource(mounts), nil
 }
 
 // ensureIdentityDirUnchanged is the guard as used by a step.
 func ensureIdentityDirUnchanged(ctx context.Context, r exec.CommandRunner, composeProject, entityID, resolvedPKIDir string) error {
-	return identityDirConflict(entityID, resolvedPKIDir, boundPKIDir(ctx, r, composeProject))
+	bound, err := boundPKIDir(ctx, r, composeProject)
+	if err != nil {
+		return fmt.Errorf(
+			"%s: cannot verify which directory this entity is already provisioned from — refusing to\n"+
+				"generate an identity.\n"+
+				"  %v\n"+
+				"This guard exists to refuse a SECOND identity for an entity that is already running from\n"+
+				"another directory. Treating an unanswerable docker as \"nothing is running\" would disable it\n"+
+				"precisely where it matters: with a remote or multi-host daemon, the container this run would\n"+
+				"duplicate is on another machine, and this is the call that would have found it.\n"+
+				"Restore access to the docker daemon and re-run.",
+			entityID, err)
+	}
+	return identityDirConflict(entityID, resolvedPKIDir, bound)
 }
