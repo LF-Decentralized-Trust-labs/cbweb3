@@ -21,7 +21,6 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/noc-backend/internal/api"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/noc-backend/internal/config"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/noc-backend/internal/keycloak"
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/noc-backend/internal/middleware"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/noc-backend/internal/repository"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/noc-backend/internal/service"
 )
@@ -112,23 +111,13 @@ func main() {
 	pushHandler := api.NewPushHandler(db, agentsRepo, componentsRepo, alertSvc)
 	dashHandler := api.NewDashboardHandler(db, spokesRepo, agentsRepo, componentsRepo, alertSvc, relayMetricsSvc)
 
-	// Routes — agent push (API key auth, no Keycloak)
-	pushHandler.Register(app)
-
-	// Routes — admin (Keycloak JWT + ROLE_NOC_ADMIN role required)
-	admin := app.Group("/api/v1/admin",
-		middleware.RequireAuth(kc),
-		middleware.RequireRole("ROLE_NOC_ADMIN"),
-	)
-	spokesHandler.Register(admin)
-	keysHandler.Register(admin)
-
-	// Routes — NOC portal read (Keycloak JWT, any NOC role)
-	portal := app.Group("/api/v1",
-		middleware.RequireAuth(kc),
-		middleware.RequireAnyRole(middleware.NOCPortalRoles...),
-	)
-	dashHandler.Register(portal)
+	// Routes and the authorization each group requires — see routes.go, which is
+	// separate so routes_test.go can assert the wiring rather than only the middleware.
+	mountRoutes(app, kc, nocRoutes{
+		Push:   pushHandler,
+		Admin:  []routeRegistrar{spokesHandler, keysHandler},
+		Portal: []routeRegistrar{dashHandler},
+	})
 
 	// Health probe
 	app.Get("/health", func(c *fiber.Ctx) error {
