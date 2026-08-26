@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -172,5 +173,96 @@ func TestSendTxDoesNotRetryUnrelatedErrors(t *testing.T) {
 	}
 	if reads != 1 {
 		t.Errorf("expected no re-read for a non-nonce error, got %d reads", reads)
+	}
+}
+
+// The lock spans send(), and that is the property this pins.
+//
+// Every other test here would still pass if the mutex were released right after the nonce is
+// assigned: the counter stays guarded either way, so the nonces would remain distinct and
+// consecutive. What changes is the order the NODE sees them in — a second goroutine could take
+// the next value and reach the node first, leaving a gap that stalls the account until it is
+// filled. Holding a lock across network I/O reads like a performance bug to anyone who has not
+// read the comment on sendTx, which is exactly why it needs a test that fails when it is
+// "optimised" away.
+//
+// The shape: pin the first broadcast inside send() and then try to start a second. A second
+// broadcast that begins while the first is still in flight means the lock was released early.
+func TestSendTxHoldsTheLockAcrossTheBroadcast(t *testing.T) {
+	b := nonceClient(11, nil)
+	from := common.HexToAddress("0xabc")
+
+	firstInFlight := make(chan struct{}) // the first broadcast has begun
+	releaseFirst := make(chan struct{})  // let the first broadcast return
+	secondCalling := make(chan struct{}) // the second goroutine is about to call sendTx
+	secondReached := make(chan struct{}) // the second broadcast has begun
+
+	var mu sync.Mutex
+	var seq []string
+	record := func(s string) {
+		mu.Lock()
+		seq = append(seq, s)
+		mu.Unlock()
+	}
+
+	go func() {
+		opts := &bind.TransactOpts{From: from}
+		_, _ = b.sendTx(context.Background(), opts, "first", func(*bind.TransactOpts) (*types.Transaction, error) {
+			record("first:start")
+			close(firstInFlight)
+			<-releaseFirst
+			record("first:end")
+			return stubTx(), nil
+		})
+	}()
+
+	<-firstInFlight
+
+	go func() {
+		opts := &bind.TransactOpts{From: from}
+		close(secondCalling)
+		_, _ = b.sendTx(context.Background(), opts, "second", func(*bind.TransactOpts) (*types.Transaction, error) {
+			record("second:start")
+			close(secondReached)
+			return stubTx(), nil
+		})
+	}()
+
+	// The second goroutine is running, so a quiet window below means it is blocked on the
+	// mutex rather than simply unscheduled.
+	<-secondCalling
+
+	select {
+	case <-secondReached:
+		t.Fatal("a second broadcast began while the first was still in flight: the lock was " +
+			"released after assigning the nonce, so the node can receive nonces out of order")
+	case <-time.After(250 * time.Millisecond):
+		// Correct — blocked on the mutex.
+	}
+
+	close(releaseFirst)
+
+	// Anti-vacuity: the second broadcast must actually happen once the lock is free. Without
+	// this the test would also pass if the second goroutine had never run at all, which would
+	// prove nothing about the lock.
+	select {
+	case <-secondReached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second broadcast never ran even after the first returned — this test " +
+			"proved nothing about the lock")
+	}
+
+	mu.Lock()
+	got := append([]string(nil), seq...)
+	mu.Unlock()
+	want := []string{"first:start", "first:end", "second:start"}
+	if len(got) != len(want) {
+		t.Fatalf("broadcast sequence = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("broadcast sequence = %v, want %v — the second broadcast must not "+
+				"interleave with the first", got, want)
+		}
 	}
 }
