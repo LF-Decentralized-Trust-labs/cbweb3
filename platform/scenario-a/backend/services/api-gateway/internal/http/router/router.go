@@ -146,6 +146,20 @@ func Setup(app *fiber.App, deps Dependencies) {
 		tlGroup.Delete("/:id", deps.TransferLimitHandler.DeleteTransferLimit)
 	}
 
+	// --- Treasury: its own audit history (Central Bank only — ROLE_TREASURY) ---
+	// The dashboard's operations table reads the audit trail, which lives under the
+	// ROLE_GOVERNANCE group above: the operator who performs mint and burn could not read
+	// the entries those operations write. This route is the same log pinned to category
+	// TREASURY (the handler ignores any category in the query), so it widens who may read
+	// the treasury's own operations and nothing else.
+	if deps.PaymentProxyHandler == nil && deps.GovernanceHandler != nil {
+		treasuryAudit := app.Group("/api/v1/treasury/audit",
+			middleware.RequireCookieAuth(deps.AuthProvider),
+			middleware.RequireRole(domain.RoleTreasury),
+		)
+		treasuryAudit.Get("/logs", deps.GovernanceHandler.GetTreasuryAuditLogs)
+	}
+
 	// --- Paladin identities (FX agreement party choices) ---
 	if deps.IdentityHandler != nil {
 		identityGroup := app.Group("/api/v1/identities", middleware.RequireCookieAuth(deps.AuthProvider))

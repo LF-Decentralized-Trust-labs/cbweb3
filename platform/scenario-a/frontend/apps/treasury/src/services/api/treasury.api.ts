@@ -23,7 +23,11 @@ export const treasuryApi = {
     // (R2-M-8), so the table was always empty.
     const response = await httpClient.get<{
       logs: Array<{ log_id: string; action: string; details?: string; timestamp: string }>;
-    }>("/governance/audit/logs", { params: { category: "TREASURY" } });
+      // /governance/audit/logs is ROLE_GOVERNANCE, so this returned 403 for the very
+      // operator who performs mint and burn: the table stayed empty even after R2-M-8
+      // started writing the entries. The treasury route serves the same log pinned to
+      // category TREASURY server-side, which is why no category is sent here.
+    }>("/treasury/audit/logs");
     return (response.data.logs ?? []).map((log) => ({
       id: log.log_id,
       kind: log.action.toUpperCase().includes("BURN") ? "BURN" : "MINT",
