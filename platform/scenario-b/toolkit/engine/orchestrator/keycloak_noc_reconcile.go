@@ -29,8 +29,15 @@ const keycloakAdminCLI = "/opt/keycloak/bin/kcadm.sh"
 // webOrigins to exactly `origins`.
 //
 // It is declarative on purpose: the manifest is the source of truth for who may read this
-// public client's token response, so an origin added by hand is removed. That is the point of
-// spec.noc.portalOrigins — a place to declare it that survives the next apply.
+// public client's token response, so an origin added by hand is removed on the next apply.
+// That is the point of spec.noc.portalOrigins — a place to declare an origin that survives.
+//
+// The Check below enforces the same thing, and must: a subset test would pass whenever every
+// declared origin is present, the step would skip, and this Run would never execute — so an
+// extra origin added out of band would survive every apply. On a public client's CORS
+// allowlist that is the difference between "re-applying revokes a rogue origin" and "it does
+// not". The toolkit is the only writer of this field (create here, update there), so
+// converging on the declared set costs no legitimate origin.
 //
 // The whole script is handed to `bash -c` as ONE argv element, so the single-quoted JSON array
 // survives intact. Origins are validated first: this is the same embedding that once produced
@@ -63,10 +70,17 @@ func nocOriginsReadScript(kc, realm, adminPassword string) string {
 		kc, adminPassword, realm, nocKeycloakClient)
 }
 
-// originsSatisfied reports whether every wanted origin is already registered. It is a subset
-// test, not equality: Keycloak returns the list in its own order, and a superset means the
-// portal works — the Run below still normalises the list when something is missing.
-func originsSatisfied(current []byte, want []string) bool {
+// originsMatchDeclared reports whether the registered origins are EXACTLY the declared set.
+//
+// Equality, not a subset test. A superset still leaves the portal working, so a subset test
+// looks harmless — but it is what would let an origin added out of band persist forever: with
+// every declared origin present the Check passes, the step skips, and the Run that normalises
+// the list never runs. This is a public client's CORS allowlist, so the set of origins that
+// may read its token response is exactly the set the manifest declares.
+//
+// Order is not identity: Keycloak returns the list in its own order, so both sides are
+// compared as sets.
+func originsMatchDeclared(current []byte, want []string) bool {
 	have := make(map[string]struct{})
 	for _, line := range strings.Split(string(current), "\n") {
 		for _, f := range strings.Split(line, ",") {
@@ -75,8 +89,17 @@ func originsSatisfied(current []byte, want []string) bool {
 			}
 		}
 	}
+	wanted := make(map[string]struct{}, len(want))
 	for _, w := range want {
-		if _, ok := have[strings.TrimSpace(w)]; !ok {
+		if w = strings.TrimSpace(w); w != "" {
+			wanted[w] = struct{}{}
+		}
+	}
+	if len(have) != len(wanted) {
+		return false
+	}
+	for w := range wanted {
+		if _, ok := have[w]; !ok {
 			return false
 		}
 	}
@@ -102,7 +125,8 @@ func reconcileNOCOrigins(ctx context.Context, r exec.CommandRunner, container, k
 	return nil
 }
 
-// nocOriginsAlreadyRegistered is the step's Check.
+// nocOriginsAlreadyRegistered is the step's Check: true only when the registered origins are
+// exactly the declared set, so the Run also converges a list that has drifted by addition.
 //
 // Any failure to ask — Keycloak not running yet, container absent, kcadm error — returns
 // (false, nil), NOT an error: the step then runs, and its Run starts Keycloak before
@@ -114,5 +138,5 @@ func nocOriginsAlreadyRegistered(ctx context.Context, r exec.CommandRunner, cont
 	if err != nil {
 		return false, nil
 	}
-	return originsSatisfied(out, origins), nil
+	return originsMatchDeclared(out, origins), nil
 }
