@@ -88,9 +88,21 @@ RUN_COMPONENTS=1
 
 export PERF_DRY_RUN API_GW_URL
 
+# The dry run is the CI-safe smoke for this orchestrator, so it keeps its output out of the
+# tree: docs/performance/ holds published measured runs, and a no-infra run has no numbers to
+# contribute. Both the artefact dir and the RESULTS file go to a temp dir instead.
+if [ "$PERF_DRY_RUN" = "1" ]; then
+  PERF_ARTIFACT_BASE="$(mktemp -d)/artifacts"
+  export PERF_ARTIFACT_BASE
+fi
+
 RUN_ID="$(perf_run_id)"
 ART="$(perf_artifact_dir)"
-RESULTS_DIR="docs/performance"
+if [ "$PERF_DRY_RUN" = "1" ]; then
+  RESULTS_DIR="$(mktemp -d)/results"
+else
+  RESULTS_DIR="docs/performance"
+fi
 RESULTS_OUT="${RESULTS_DIR}/RESULTS-$(date -u +%Y-%m-%dT%H%M%SZ).md"
 FAILED=0
 
