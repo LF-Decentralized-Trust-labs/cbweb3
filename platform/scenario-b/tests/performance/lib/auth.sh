@@ -18,8 +18,8 @@
 #   KC_BANK_A_CLIENT / KC_CENTRAL_BANK_A_CLIENT   client ids
 #   KC_BANK_A_SECRET / KC_CENTRAL_BANK_A_SECRET   secrets (else read from .env.infra.*)
 
-: "${API_GW_URL:=http://localhost:18080}"
-: "${API_GW_CENTRAL_BANK_A_URL:=http://localhost:38080}"
+: "${API_GW_URL:?API_GW_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
+: "${API_GW_CENTRAL_BANK_A_URL:?API_GW_CENTRAL_BANK_A_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
 
 # _perf_root → scenario-b/
 _perf_root() { cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd; }

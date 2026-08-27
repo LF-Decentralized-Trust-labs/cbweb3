@@ -8,8 +8,8 @@
 # populated RESULTS-<UTC>.md.  The 12h soak is a SEPARATE opt-in target.
 #
 # Everything is overridable by env var but nothing is REQUIRED:
-#   API_GW_URL     bank-a API gateway          (default http://localhost:18080)
-#   CB_GW_URL      central-bank-a API gateway  (default http://localhost:38080)
+#   API_GW_URL     originator bank API gateway  (derived from the toolkit manifests)
+#   CB_GW_URL      central-bank-a API gateway   (derived from the toolkit manifests)
 #   BANK_ENV       bank-a infra env file       (default backend/config/.env.infra.bank-a)
 #   CB_ENV         central-bank-a infra env    (default backend/config/.env.infra.central-bank-a)
 #   RECEIVER       HTLC receiver identity      (default funded_operator@spoke-a-bank-c)
@@ -27,6 +27,21 @@ set -o pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/log.sh
+# Dry-run guard: the dry run is the CI-safe smoke for this orchestrator — it contacts nothing
+# and must not need a stack, a manifest or yq on the box. Give the endpoint variables an
+# unroutable placeholder so the required-value checks downstream are satisfied without
+# reintroducing a real port that a live run could silently fall back to. `.invalid` is
+# reserved by RFC 2606 and can never resolve.
+if [ "${PERF_DRY_RUN:-0}" = "1" ]; then
+  : "${API_GW_URL:=http://dry-run.invalid}"
+  : "${CB_GW_URL:=http://dry-run.invalid}"
+  : "${API_GW_CENTRAL_BANK_A_URL:=http://dry-run.invalid}"
+  : "${API_GW_CENTRAL_BANK_B_URL:=http://dry-run.invalid}"
+  : "${API_GW_BANK_B_URL:=http://dry-run.invalid}"
+  : "${BANK_D_GW_URL:=http://dry-run.invalid}"
+  : "${PERF_CUSTODIAN_GW_URL:=http://dry-run.invalid}"
+fi
+
 . "${HERE}/lib/log.sh"
 . "${HERE}/lib/auth.sh"
 . "${HERE}/lib/stack.sh"
@@ -36,8 +51,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${HERE}/lib/provision.sh"
 
 # ── Config (all defaulted) ───────────────────────────────────────────────────
-API_GW_URL="${API_GW_URL:-http://localhost:18080}"
-CB_GW_URL="${CB_GW_URL:-http://localhost:38080}"
+# No port defaults: the retired deploy/local topology published these, and defaulting to
+# one made the harness probe a gateway nothing serves (DEF-022). scenario-a.perf-* derive
+# the real endpoints from the toolkit manifests (tests/integration/toolkit-env.sh).
+: "${API_GW_URL:?API_GW_URL is required — run through 'make scenario-a.perf-all', or derive it with tests/integration/toolkit-env.sh}"
+CB_GW_URL="${CB_GW_URL:-${API_GW_CENTRAL_BANK_A_URL:?CB_GW_URL or API_GW_CENTRAL_BANK_A_URL is required}}"
 BANK_ENV="${BANK_ENV:-backend/config/.env.infra.bank-a}"
 CB_ENV="${CB_ENV:-backend/config/.env.infra.central-bank-a}"
 RECEIVER="${RECEIVER:-funded_operator@spoke-a-bank-c}"
@@ -53,7 +71,9 @@ PERF_DRY_RUN="${PERF_DRY_RUN:-0}"
 # Full happy-path (FX + cross-spoke HTLC settlement) benchmark — the Scenario A
 # analogue of Scenario B's end-to-end cross-currency measurement. Relay-bound, so a
 # few concurrent flows (HAPPY_VUS) rather than a high TPS gate.
-BANK_D_GW_URL="${BANK_D_GW_URL:-http://localhost:58080}"
+# The custodian leg. PERF_CUSTODIAN_GW_URL is what the make target exports from the
+# manifests; BANK_D_GW_URL stays accepted so an explicit override still works.
+BANK_D_GW_URL="${BANK_D_GW_URL:-${PERF_CUSTODIAN_GW_URL:?BANK_D_GW_URL or PERF_CUSTODIAN_GW_URL is required for the happy-path leg}}"
 BANK_D_ENV="${BANK_D_ENV:-backend/config/.env.infra.bank-d}"
 # Sequential by default: the cross-spoke path is relay-bound + single-signer per
 # bank (one EVM operator key), so 1 flow gives the clean per-lifecycle D6 timing

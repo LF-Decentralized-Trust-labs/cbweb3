@@ -20,10 +20,10 @@
 #   PAYER_BANK_CODE (bank-a), BENEFICIARY_BANK_ID (bank-b)
 #   PROVISION_AMOUNT (1e24 tCeBM minted to the payer — covers any tiny-swap run)
 
-: "${API_GW_URL:=http://localhost:18080}"
-: "${API_GW_BANK_B_URL:=http://localhost:28080}"
-: "${API_GW_CENTRAL_BANK_A_URL:=http://localhost:38080}"
-: "${API_GW_CENTRAL_BANK_B_URL:=http://localhost:60080}"
+: "${API_GW_URL:?API_GW_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
+: "${API_GW_BANK_B_URL:?API_GW_BANK_B_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
+: "${API_GW_CENTRAL_BANK_A_URL:?API_GW_CENTRAL_BANK_A_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
+: "${API_GW_CENTRAL_BANK_B_URL:?API_GW_CENTRAL_BANK_B_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
 : "${PROVISION_AMOUNT:=1000000000000000000000000}"
 
 _jpost() { # URL TOKEN JSON

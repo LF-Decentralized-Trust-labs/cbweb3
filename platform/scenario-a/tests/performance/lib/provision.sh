@@ -20,8 +20,8 @@
 #   PROVISION_AMOUNT    (tCeBM minted to each operator)
 #   CB_A_TREASURY_CLIENT/SECRET, CB_B_TREASURY_CLIENT/SECRET (keycloak init defaults)
 
-: "${API_GW_CENTRAL_BANK_A_URL:=http://localhost:38080}"
-: "${API_GW_CENTRAL_BANK_B_URL:=http://localhost:60080}"
+: "${API_GW_CENTRAL_BANK_A_URL:?API_GW_CENTRAL_BANK_A_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
+: "${API_GW_CENTRAL_BANK_B_URL:?API_GW_CENTRAL_BANK_B_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
 : "${ORIGINATOR_IDENTITY:=funded_operator@spoke-a-bank-a}"
 : "${CUSTODIAN_IDENTITY:=funded_operator@spoke-b-bank-d}"
 : "${PROVISION_AMOUNT:=5000000000000}"

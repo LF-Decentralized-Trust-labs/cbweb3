@@ -13,14 +13,15 @@
 make scenario-b.perf-all
 ```
 
-That's it. With **no arguments and no manual steps** the driver
-(`tests/performance/run-all.sh`, orchestrating the helpers in `tests/performance/lib/`):
+With **no arguments** — endpoints are derived from the toolkit manifests, so there is nothing
+to configure — the driver (`tests/performance/run-all.sh`, orchestrating the helpers in
+`tests/performance/lib/`):
 
-1. **Stack** — reuses a stack already serving at `API_GW_URL`. Its fallback (`make scenario-b.up-perf`
-   via `PERF_UP_TARGET`) no longer exists, so stand the stack up first with
-   `cd samples && ./deploy-all.sh` (DEF-022)
-   (the full settlement stack **minus the NOC monitoring portal**, which is not on the perf path;
-   override the target with `PERF_UP_TARGET`).
+1. **Stack** — reuses whatever is serving at the derived `API_GW_URL`. Provisioning is the
+   operator's step: stand a stack up first with `cd samples && ./deploy-all.sh`. If nothing
+   answers, the harness stops with a message saying so instead of benchmarking nothing.
+   `PERF_ALLOW_PROVISION=1` opts into letting the harness provision through the toolkit; it
+   never passes `--clean`, so an existing environment is converged rather than wiped.
 2. **Auth** — mints a `commercial_bank` and a `central_bank` JWT via the gateway login
    `POST /api/v1/auth/login` (`{clientId,clientSecret}` → `{accessToken}`) — the same path
    `tests/integration` uses; **no direct Keycloak call** (it is blocked outside Docker).

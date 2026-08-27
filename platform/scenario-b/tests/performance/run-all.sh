@@ -43,8 +43,23 @@ PERF_SERVICE="perf-all"
 # shellcheck source=lib/provision-swap.sh
 . "$PERF_DIR/lib/provision-swap.sh"
 
-: "${API_GW_URL:=http://localhost:18080}"
-: "${API_GW_CENTRAL_BANK_A_URL:=http://localhost:38080}"
+# Dry-run guard: the dry run is the CI-safe smoke for this orchestrator — it contacts nothing
+# and must not need a stack, a manifest or yq on the box. Give the endpoint variables an
+# unroutable placeholder so the required-value checks downstream are satisfied without
+# reintroducing a real port that a live run could silently fall back to. `.invalid` is
+# reserved by RFC 2606 and can never resolve.
+if [ "${PERF_DRY_RUN:-0}" = "1" ]; then
+  : "${API_GW_URL:=http://dry-run.invalid}"
+  : "${CB_GW_URL:=http://dry-run.invalid}"
+  : "${API_GW_CENTRAL_BANK_A_URL:=http://dry-run.invalid}"
+  : "${API_GW_CENTRAL_BANK_B_URL:=http://dry-run.invalid}"
+  : "${API_GW_BANK_B_URL:=http://dry-run.invalid}"
+  : "${BANK_D_GW_URL:=http://dry-run.invalid}"
+  : "${PERF_CUSTODIAN_GW_URL:=http://dry-run.invalid}"
+fi
+
+: "${API_GW_URL:?API_GW_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
+: "${API_GW_CENTRAL_BANK_A_URL:?API_GW_CENTRAL_BANK_A_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
 : "${PAIR:=W-BRL-ARS}"
 : "${DURATION:=3m}"
 : "${SWAP_TPS:=30}"

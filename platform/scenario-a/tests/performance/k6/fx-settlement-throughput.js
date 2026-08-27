@@ -38,14 +38,14 @@
  * run-all.sh does this once via lib/provision.sh before this benchmark.
  *
  * Usage (standalone):
- *   API_GW_URL=http://localhost:18080 API_GW_BANK_D_URL=http://localhost:58080 \
+ *   API_GW_URL=$API_GW_BANK_A_URL API_GW_BANK_D_URL=$API_GW_BANK_D_URL \
  *   ORIGINATOR_TOKEN=<bank-a jwt> CUSTODIAN_TOKEN=<bank-d jwt> \
  *   HAPPY_VUS=2 DURATION=3m \
  *   k6 run tests/performance/k6/fx-settlement-throughput.js
  *
  * Environment variables:
- *   API_GW_URL          — bank-a (originator) gateway      (default http://localhost:18080)
- *   API_GW_BANK_D_URL   — bank-d (custodian) gateway        (default http://localhost:58080)
+ *   API_GW_URL          — bank-a (originator) gateway      (required; derived from the toolkit manifests)
+ *   API_GW_BANK_D_URL   — bank-d (custodian) gateway        (required; derived from the toolkit manifests)
  *   ORIGINATOR_TOKEN    — bank-a access_token JWT (REQUIRED)
  *   CUSTODIAN_TOKEN     — bank-d access_token JWT (REQUIRED)
  *   ORIGIN_RECEIVER     — origin-leg receiver  (default funded_operator@spoke-a-bank-c)
@@ -64,8 +64,25 @@ import http from "k6/http";
 import { check, sleep } from "k6";
 import { Trend, Counter, Rate } from "k6/metrics";
 
-const ORIGINATOR_GW = __ENV.API_GW_URL || "http://localhost:18080";
-const CUSTODIAN_GW = __ENV.API_GW_BANK_D_URL || "http://localhost:58080";
+// requiredEnv fails the run instead of falling back to a port.
+//
+// These used to default to the deploy/local topology (:18080 and friends). That path was
+// retired, so the default silently pointed every run at a gateway nothing serves and the
+// failure surfaced as connection errors inside the benchmark rather than as a setup problem
+// (DEF-022). The perf make targets export these from the toolkit manifests.
+function requiredEnv(name) {
+  const v = __ENV[name];
+  if (!v) {
+    throw new Error(
+      name + " is not set. Run through the perf make targets (they derive endpoints from the " +
+      "toolkit manifests), or export it yourself: eval \"$(bash tests/integration/toolkit-env.sh)\"",
+    );
+  }
+  return v;
+}
+
+const ORIGINATOR_GW = requiredEnv("API_GW_URL");
+const CUSTODIAN_GW = requiredEnv("API_GW_BANK_D_URL");
 const ORIGINATOR_TOKEN = __ENV.ORIGINATOR_TOKEN || __ENV.AUTH_TOKEN || "";
 const CUSTODIAN_TOKEN = __ENV.CUSTODIAN_TOKEN || "";
 

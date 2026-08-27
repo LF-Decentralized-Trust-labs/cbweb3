@@ -12,16 +12,16 @@
  *                        AMM 30 TPS DRAFT target (R1-12.3). Set SWAP_TPS / QUOTE_TPS.
  *
  * Usage (latency baseline):
- *   API_GW_URL=http://localhost:18080 AUTH_TOKEN=<jwt> \
+ *   API_GW_URL=$API_GW_BANK_A_URL AUTH_TOKEN=<jwt> \
  *   k6 run tests/performance/scenario-b-perf.js
  *
  * Usage (AMM 30 TPS throughput validation):
- *   API_GW_URL=http://localhost:18080 AUTH_TOKEN=<jwt> \
+ *   API_GW_URL=$API_GW_BANK_A_URL AUTH_TOKEN=<jwt> \
  *   LOAD_MODEL=rate SWAP_TPS=30 QUOTE_TPS=60 DURATION=10m \
  *   k6 run tests/performance/scenario-b-perf.js
  *
  * Environment variables:
- *   API_GW_URL   — API Gateway base URL (default: http://localhost:18080)
+ *   API_GW_URL   — API Gateway base URL (required; derived from the toolkit manifests)
  *   AUTH_TOKEN   — Bearer token with commercial_bank role (required for swap)
  *   PAIR         — Pool pair to probe (default: W-BRL-ARS)
  *   DURATION     — Test duration (default: 1m; use 12h for the soak)
@@ -56,7 +56,24 @@ import http from "k6/http";
 import { check, sleep } from "k6";
 import { Trend, Counter } from "k6/metrics";
 
-const API_GW_URL = __ENV.API_GW_URL || "http://localhost:18080";
+// requiredEnv fails the run instead of falling back to a port.
+//
+// These used to default to the deploy/local topology (:18080 and friends). That path was
+// retired, so the default silently pointed every run at a gateway nothing serves and the
+// failure surfaced as connection errors inside the benchmark rather than as a setup problem
+// (DEF-022). The perf make targets export these from the toolkit manifests.
+function requiredEnv(name) {
+  const v = __ENV[name];
+  if (!v) {
+    throw new Error(
+      name + " is not set. Run through the perf make targets (they derive endpoints from the " +
+      "toolkit manifests), or export it yourself: eval \"$(bash tests/integration/toolkit-env.sh)\"",
+    );
+  }
+  return v;
+}
+
+const API_GW_URL = requiredEnv("API_GW_URL");
 const AUTH_TOKEN = __ENV.AUTH_TOKEN || "";
 const PAIR = __ENV.PAIR || "W-BRL-ARS";
 const DURATION = __ENV.DURATION || "1m";

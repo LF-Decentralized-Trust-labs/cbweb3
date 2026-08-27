@@ -25,7 +25,7 @@
 #   PERF_MAKE_DIR              dir to run `make` from (default scenario-b root)
 #   SKIP_SEED                  "1" to skip seeding entirely (dry-run)
 
-: "${API_GW_URL:=http://localhost:18080}"
+: "${API_GW_URL:?API_GW_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
 : "${SKIP_SEED:=0}"
 
 # seed_pool_status PAIR [TOKEN]
