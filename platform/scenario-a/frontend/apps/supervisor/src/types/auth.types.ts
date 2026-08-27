@@ -21,6 +21,12 @@ export type Permission = (typeof Permission)[keyof typeof Permission];
 export interface SupervisorUser {
   id: string;
   username: string;
+  /**
+   * The realm roles the session's token actually carries, as returned by /auth/me.
+   * `role` below is a display label derived from these; authorization decisions must
+   * read `roles`, because the derivation has a fallback and cannot express "none".
+   */
+  roles: string[];
   role: SupervisorRole;
   institutionId: string;
   institutionName: string;

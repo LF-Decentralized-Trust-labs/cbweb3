@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from "zustand";
+import { SUPERVISOR_UNAUTHORIZED_MESSAGE, hasSupervisorAccess } from "../auth/authorization";
 import { authApi } from "../services/api";
 import { cancelTokenRefresh, scheduleTokenRefresh } from "../services/api/token-refresh";
 import type { SupervisorUser } from "../types";
@@ -29,7 +30,17 @@ export const useAuthStore = create<AuthState>((set) => ({
       const response = await authApi.login(username, password);
       // Keep the short-lived access token renewed for the whole session.
       scheduleTokenRefresh(response.sessionTimeoutSeconds);
-      set({ user: response.user, isAuthenticated: true, initialized: true, status: "idle" });
+      // Authenticated is not authorised: the gateway refuses every supervisor route to a
+      // session without ROLE_SUPERVISOR, so admitting it here only produces a portal that
+      // renders and then 403s on each request.
+      const authorized = hasSupervisorAccess(response.user);
+      set({
+        user: response.user,
+        isAuthenticated: authorized,
+        initialized: true,
+        status: "idle",
+        error: authorized ? null : SUPERVISOR_UNAUTHORIZED_MESSAGE,
+      });
     } catch (error) {
       set({
         status: "error",
@@ -55,7 +66,14 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ status: "loading", error: null });
     try {
       const user = await authApi.me();
-      set({ user, isAuthenticated: true, initialized: true, status: "idle" });
+      const authorized = hasSupervisorAccess(user);
+      set({
+        user,
+        isAuthenticated: authorized,
+        initialized: true,
+        status: "idle",
+        error: authorized ? null : SUPERVISOR_UNAUTHORIZED_MESSAGE,
+      });
       // Session restored on load — (re)arm proactive refresh (best-effort).
       void authApi
         .refresh()

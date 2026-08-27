@@ -425,23 +425,24 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	// which is why Redis is handled differently). This is not new — the value used to be
 	// the constant admin — but the exposure window is real and belongs in a follow-up
 	// once realm provisioning moves to an imported realm file, as Scenario A does it.
+	b.WriteString(kcadmPreamble)
 	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password %[2]s && ",
 		kc, mustInfraSecret(secretsDirOf(c.SpokeEnvFile), "KC_ADMIN_PASSWORD"))
-	fmt.Fprintf(&b, "(%[1]s create realms -s realm=%[2]s -s enabled=true || true) && ", kc, spokeKeycloakRealm)
+	fmt.Fprintf(&b, "(%[1]s create realms -s realm=%[2]s -s enabled=true || kcw 'create realm') && ", kc, spokeKeycloakRealm)
 	// Local lab uses plain HTTP; the NOC portal does a browser-direct password
 	// grant from the entity's IP, which Keycloak's default sslRequired=external
 	// rejects with "HTTPS required". Relax it for local (never in production).
-	fmt.Fprintf(&b, "(%[1]s update realms/%[2]s -s sslRequired=NONE -s accessTokenLifespan=%[3]d || true) && ",
+	fmt.Fprintf(&b, "(%[1]s update realms/%[2]s -s sslRequired=NONE -s accessTokenLifespan=%[3]d || kcw 'update realm settings') && ",
 		kc, spokeKeycloakRealm, accessTokenLifespanSeconds)
 	fmt.Fprintf(&b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s secret=%[4]s -s enabled=true "+
-		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[5]s || true) && ",
+		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[5]s || kcw 'create backend client') && ",
 		kc, spokeKeycloakRealm, spokeKeycloakClient, spokeKeycloakSecret, audienceMapperArg(keycloakBackendAudience))
 	// Grant the client's service account the realm-management roles the auth service
 	// needs: GetAdminToken uses client_credentials, and onboarding creates + manages
 	// the commercial bank's Keycloak user (manage-users) + resolves users on login
 	// (view-users). Without this the CB-side credential request 403s at create-user.
 	fmt.Fprintf(&b, "(%[1]s add-roles -r %[2]s --uusername service-account-%[3]s "+
-		"--cclientid realm-management --rolename manage-users --rolename view-users || true) && ",
+		"--cclientid realm-management --rolename manage-users --rolename view-users || kcw 'grant realm-management roles to the service account') && ",
 		kc, spokeKeycloakRealm, spokeKeycloakClient)
 	if err := appendNOCPortalClient(&b, kc, spokeKeycloakRealm, nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...)); err != nil {
 		return err
@@ -454,6 +455,7 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 		users = []AdminUser{{Role: "GOVERNANCE", Username: spokeCBUser, Password: spokeCBPass}}
 	}
 	appendKeycloakUsers(&b, kc, spokeKeycloakRealm, users)
+	appendKeycloakAssertions(&b, kc, spokeKeycloakRealm, spokeKeycloakClient, users)
 	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", b.String())
 	return err
 }
@@ -487,7 +489,7 @@ func appendNOCPortalClient(b *strings.Builder, kc, realm string, origins []strin
 	}
 	fmt.Fprintf(b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s enabled=true "+
 		"-s publicClient=true -s standardFlowEnabled=false -s directAccessGrantsEnabled=true "+
-		"-s 'webOrigins=%[5]s' %[4]s || true) && ",
+		"-s 'webOrigins=%[5]s' %[4]s || kcw 'create noc-portal client') && ",
 		kc, realm, nocKeycloakClient, audienceMapperArg(keycloakNOCAudience), webOrigins)
 	fmt.Fprintf(b, "({ %[1]s get clients -r %[2]s -q clientId=%[3]s --fields id | grep -q '\"id\"'; } "+
 		"|| { echo 'noc-portal client %[3]s was not created in realm %[2]s' >&2; exit 1; }) && ",
@@ -541,17 +543,17 @@ func appendKeycloakUsers(b *strings.Builder, kc, realm string, users []AdminUser
 		for _, r := range realmRolesForAdminRole(u.Role) {
 			if !seen[r] {
 				seen[r] = true
-				fmt.Fprintf(b, "(%[1]s create roles -r %[2]s -s name=%[3]s || true) && ", kc, realm, r)
+				fmt.Fprintf(b, "(%[1]s create roles -r %[2]s -s name=%[3]s || kcw 'create realm role') && ", kc, realm, r)
 			}
 		}
 	}
 	for _, u := range users {
 		fmt.Fprintf(b, "(%[1]s create users -r %[2]s -s username=%[3]s -s enabled=true "+
-			"-s emailVerified=true -s email=%[3]s -s firstName=%[4]s -s lastName=Operator || true) && ",
+			"-s emailVerified=true -s email=%[3]s -s firstName=%[4]s -s lastName=Operator || kcw 'create operator user') && ",
 			kc, realm, u.Username, strings.ToLower(u.Role))
-		fmt.Fprintf(b, "(%[1]s set-password -r %[2]s --username %[3]s --new-password %[4]s || true)", kc, realm, u.Username, u.Password)
+		fmt.Fprintf(b, "(%[1]s set-password -r %[2]s --username %[3]s --new-password %[4]s || kcw 'set operator password')", kc, realm, u.Username, u.Password)
 		for _, r := range realmRolesForAdminRole(u.Role) {
-			fmt.Fprintf(b, " && (%[1]s add-roles -r %[2]s --uusername %[3]s --rolename %[4]s || true)", kc, realm, u.Username, r)
+			fmt.Fprintf(b, " && (%[1]s add-roles -r %[2]s --uusername %[3]s --rolename %[4]s || kcw 'grant role to operator')", kc, realm, u.Username, r)
 		}
 		fmt.Fprintf(b, " && ")
 	}

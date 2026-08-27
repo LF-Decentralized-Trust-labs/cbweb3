@@ -47,6 +47,47 @@ func TestRequireRole(t *testing.T) {
 	}
 }
 
+// Reported from the Peru environment: the supervisor portal was reachable from an active
+// treasury session. The portal was at fault — it admitted a session this middleware refuses —
+// but the refusal is what kept it from being an authorization defect, so it is pinned here by
+// the exact pairing rather than only by the generic case above.
+//
+// Confirmed live on a Scenario A stack: a ROLE_TREASURY session gets 403 from
+// /compliance/audit/logs, /compliance/participants/summary and /oversight/network, while a
+// ROLE_SUPERVISOR session gets 200 on the same route.
+func TestRequireSupervisorRoleRefusesATreasurySession(t *testing.T) {
+	t.Parallel()
+
+	withRoles := func(roles ...string) *fiber.App {
+		app := fiber.New()
+		app.Get("/x", func(c *fiber.Ctx) error {
+			c.Locals("claims", domain.TokenClaims{Subject: "operator", Roles: roles})
+			return c.Next()
+		}, RequireSupervisorRole(), okHandler)
+		return app
+	}
+
+	// The reported case: treasury reaching a supervisor route.
+	resp, _ := withRoles(domain.RoleTreasury).Test(httptest.NewRequest(http.MethodGet, "/x", nil))
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("treasury session: want 403, got %d", resp.StatusCode)
+	}
+
+	// Neighbouring roles must not slip through either.
+	for _, role := range []string{domain.RoleGovernance, domain.RoleCommercialBank} {
+		resp, _ := withRoles(role).Test(httptest.NewRequest(http.MethodGet, "/x", nil))
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("%s session: want 403, got %d", role, resp.StatusCode)
+		}
+	}
+
+	// The control: the role the route is for still passes.
+	resp, _ = withRoles(domain.RoleSupervisor).Test(httptest.NewRequest(http.MethodGet, "/x", nil))
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("supervisor session: want 200, got %d", resp.StatusCode)
+	}
+}
+
 func TestRequireRelayAuth(t *testing.T) {
 	t.Parallel()
 

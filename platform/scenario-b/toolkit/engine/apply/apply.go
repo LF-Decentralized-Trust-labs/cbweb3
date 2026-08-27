@@ -479,6 +479,7 @@ func applyFoundHub(ctx context.Context, o Options, pd *manifest.ParticipantDeplo
 		FrontendHost:     pd.Spec.FrontendHost,
 		NOCPortalOrigins: manifestNOCPortalOrigins(pd), // extra origins for the noc-portal client
 		ProxyEnabled:     pd.Spec.Proxy == "enable",
+		AdminUsers:       toOrchestratorAdminUsers(pd.Spec.AdminUsers),
 	}
 	// No launcher on the hub: the launcher is the per-entity A/B entry point for
 	// commercial banks and central banks (found-spoke / join), not for the network

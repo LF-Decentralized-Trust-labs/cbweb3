@@ -5,6 +5,11 @@ export type Role = "SYS_ADMIN";
 export type SysAdminUser = {
   id: string;
   name: string;
+  /**
+   * The realm roles the token carries. `role` below is a fixed label, not a claim:
+   * every session mapped here became "SYS_ADMIN" whatever its token said.
+   */
+  roles: string[];
   role: Role;
   institutionId: string;
 };

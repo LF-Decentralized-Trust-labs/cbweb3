@@ -45,6 +45,32 @@ func RequireRole(role string) fiber.Handler {
 	}
 }
 
+// NOCPortalRoles are the roles that may read the NOC portal. The portal-read routes used to
+// take RequireAuth alone: their comment said "any NOC role", but nothing checked for one, so
+// every authenticated token — a treasury operator's included — was served the dashboard.
+// Local stacks run with NOC_SKIP_AUTH=true and hide this, because the no-op Keycloak client
+// hands back all three roles for any token.
+var NOCPortalRoles = []string{"ROLE_NOC_ADMIN", "ROLE_NOC_OPERATOR", "ROLE_NOC_VIEWER"}
+
+// RequireAnyRole rejects requests where the authenticated user holds none of roles. It is the
+// multi-role form of RequireRole, for a group open to a family of roles rather than one.
+func RequireAnyRole(roles ...string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		claims, ok := c.Locals(claimsKey).(keycloak.TokenClaims)
+		if !ok {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthenticated"})
+		}
+		for _, want := range roles {
+			for _, held := range claims.Roles {
+				if held == want {
+					return c.Next()
+				}
+			}
+		}
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "insufficient role"})
+	}
+}
+
 // GetClaims retrieves TokenClaims stored by RequireAuth.
 func GetClaims(c *fiber.Ctx) (keycloak.TokenClaims, bool) {
 	claims, ok := c.Locals(claimsKey).(keycloak.TokenClaims)

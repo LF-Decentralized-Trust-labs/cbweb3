@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from "zustand";
+import { NOC_UNAUTHORIZED_MESSAGE, hasNOCAccess } from "../auth/authorization";
 import { authApi } from "../services/api";
 import { setSessionExpiredHandler } from "../services/api/token";
 import type { AsyncStatus, SysAdminUser } from "../types";
@@ -26,7 +27,17 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ status: "loading", error: null });
     try {
       const response = await authApi.login(username, password);
-      set({ user: response.user, isAuthenticated: true, initialized: true, status: "idle" });
+      // Authenticated is not authorised: the NOC backend refuses its routes to a session
+      // without a NOC role, so admitting it here only produces a portal that renders and
+      // then fails every request.
+      const authorized = hasNOCAccess(response.user);
+      set({
+        user: response.user,
+        isAuthenticated: authorized,
+        initialized: true,
+        status: "idle",
+        error: authorized ? null : NOC_UNAUTHORIZED_MESSAGE,
+      });
     } catch (error) {
       set({
         status: "error",
@@ -43,7 +54,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   checkSession: async () => {
     try {
       const response = await authApi.me();
-      set({ user: response.user, isAuthenticated: true, initialized: true, status: "idle", error: null });
+      const restored = hasNOCAccess(response.user);
+      set({
+        user: response.user,
+        isAuthenticated: restored,
+        initialized: true,
+        status: "idle",
+        error: restored ? null : NOC_UNAUTHORIZED_MESSAGE,
+      });
     } catch {
       set({ user: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
     }

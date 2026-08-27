@@ -57,6 +57,11 @@ type HubConfig struct {
 	// default host.docker.internal:8090).
 	NOCBackendURL string
 	ProxyEnabled  bool // spec.proxy == enable: serve the hub governance portal + api behind the per-host reverse proxy
+	// AdminUsers are the per-role Keycloak operator accounts from spec.adminUsers,
+	// the same field found-spoke and join already honour. Without it the hub realm
+	// comes up with no users at all while the manifest declares two, so the portal it
+	// serves cannot be logged into and the declared credentials are fiction.
+	AdminUsers []AdminUser
 
 	// Injectable seams (defaults wired by WithDefaults).
 	WaitRPC          func(ctx context.Context) error
@@ -259,25 +264,39 @@ func (c HubConfig) provisionKeycloakRealm(ctx context.Context) error {
 	// which is why Redis is handled differently). This is not new — the value used to be
 	// the constant admin — but the exposure window is real and belongs in a follow-up
 	// once realm provisioning moves to an imported realm file, as Scenario A does it.
+	b.WriteString(kcadmPreamble)
 	fmt.Fprintf(&b,
 		"%[1]s config credentials --server http://localhost:8080 --realm master --user %[2]s --password %[3]s && "+
-			"(%[1]s create realms -s realm=%[4]s -s enabled=true || true) && "+
+			"(%[1]s create realms -s realm=%[4]s -s enabled=true || kcw 'create realm') && "+
 			// Local lab HTTP: relax sslRequired so the browser-direct NOC portal
 			// password grant is not rejected with "HTTPS required" (never in prod).
-			"(%[1]s update realms/%[4]s -s sslRequired=NONE -s accessTokenLifespan=%[8]d || true) && "+
+			"(%[1]s update realms/%[4]s -s sslRequired=NONE -s accessTokenLifespan=%[8]d || kcw 'update realm settings') && "+
 			"(%[1]s create clients -r %[4]s -s clientId=%[5]s -s secret=%[6]s -s enabled=true "+
-			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[7]s || true) && ",
+			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[7]s || kcw 'create backend client') && ",
 		kc, "admin", mustInfraSecret(secretsDirOf(c.HubEnvFile), "KC_ADMIN_PASSWORD"),
 		hubKeycloakRealm, hubKeycloakClient, hubKeycloakSecret, audienceMapperArg(keycloakBackendAudience),
 		accessTokenLifespanSeconds)
 	// Public noc-portal client so the hub's co-located NOC portal can password-grant
-	// against this realm (hub NOC operator users are a separate follow-up — found-hub
-	// does not yet provision operator accounts).
+	// against this realm. spec.noc.portalOrigins adds the origins of any NOC portal served
+	// from elsewhere — a standalone observe stack has its own port and host, which this
+	// entity cannot infer.
 	if err := appendNOCPortalClient(&b, kc, hubKeycloakRealm, nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...)); err != nil {
 		return err
 	}
+	// Operator accounts from spec.adminUsers. found-spoke and join have always done
+	// this; the hub did not, so its realm came up with zero users while the manifest
+	// declared two — nobody could log into the portal the hub serves, and the declared
+	// credentials described accounts that were never going to exist.
+	// appendNOCPortalClient leaves a trailing " && ", and appendKeycloakUsers appends
+	// straight onto it, so no separator is added here.
+	if len(c.AdminUsers) > 0 {
+		appendKeycloakUsers(&b, kc, hubKeycloakRealm, c.AdminUsers)
+	}
 	script := strings.TrimSuffix(b.String(), " && ")
-	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", script)
+	b.Reset()
+	b.WriteString(script)
+	appendKeycloakAssertions(&b, kc, hubKeycloakRealm, hubKeycloakClient, c.AdminUsers)
+	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", b.String())
 	return err
 }
 

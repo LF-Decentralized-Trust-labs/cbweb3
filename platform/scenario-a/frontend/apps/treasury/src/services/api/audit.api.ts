@@ -30,6 +30,13 @@ const mapSeverity = (raw: string): AuditLogEntry["severity"] => {
 };
 
 export const auditApi = {
+  // Reached only by AuditPage, which is commented out of this app's router (see
+  // docs/scenario-drift.md §7), so this is not live today. Left pointing at the
+  // governance route deliberately: that route is ROLE_GOVERNANCE and returns 403 for a
+  // treasury session, and this page asks for the WHOLE log, not the treasury's own
+  // category. Whoever re-enables the page has to decide which it wants — the pinned
+  // /treasury/audit/logs (treasury's own operations, what the dashboard uses) or a
+  // supervisor-scoped read. Switching it silently would change what the page shows.
   list: async (): Promise<AuditLogEntry[]> => {
     const response = await httpClient.get<AuditLogsResponse>("/governance/audit/logs");
     return (response.data.logs ?? []).map((log) => ({
