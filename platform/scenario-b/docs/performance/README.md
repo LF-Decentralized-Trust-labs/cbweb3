@@ -37,6 +37,19 @@ to configure — the driver (`tests/performance/run-all.sh`, orchestrating the h
 7. **Results** — writes measured numbers + verdicts into [`RESULTS.md`](./RESULTS.md) and
    **validates-or-revises the AMM 30 TPS DRAFT** against the hub-only swap (3a).
 
+### Exercising the orchestrator without a stack — `make scenario-b.perf-all-dry`
+
+```bash
+# from scenario-b/
+make scenario-b.perf-all-dry
+```
+
+`PERF_DRY_RUN=1` runs every step above against nothing: the endpoint variables get an
+unroutable `http://dry-run.invalid` placeholder (RFC 2606), the stack, auth, seed and benchmark
+phases are skipped, and `RESULTS.md` is rendered into a temp directory instead of this one. It
+needs no stack, no manifests, no `yq` and no `k6`, so it is the CI-safe way to prove the driver
+still runs end to end. DEF-022 existed because nothing exercised this path — keep it running.
+
 ### Swap throughput is measured three ways (R1-12.3 decomposition)
 
 A single "AMM swap TPS" conflates a millisecond pool operation with multi-second cross-chain

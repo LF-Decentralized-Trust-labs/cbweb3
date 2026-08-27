@@ -20,7 +20,7 @@
 #                                     $OUTDIR/ttf.json with {p50_ms,p95_ms,samples,...}
 #
 # Env:
-#   API_GW_URL   commercial-bank gateway (default http://localhost:18080)
+#   API_GW_URL   commercial-bank gateway — REQUIRED, no default (see below)
 #   TTF_TPS      transfer rate for the TTF batch (default 10 — moderate, finality-friendly)
 #   TTF_SECS     batch duration seconds (default 60)
 #   TTF_POLL_TIMEOUT  per-position finality wait, seconds (default 30)

@@ -15,7 +15,7 @@
 #   profile_apply CB_GW_URL CB_TOKEN   — clear limits + assert breaker resumed for one CB/spoke
 #
 # Env:
-#   API_GW_CENTRAL_BANK_A_URL  default http://localhost:38080
+#   API_GW_CENTRAL_BANK_A_URL  REQUIRED, no default (see below)
 #   PERF_BREAKER_RESUME        "1" to attempt resume-request/sign if paused (default 1)
 
 : "${API_GW_CENTRAL_BANK_A_URL:?API_GW_CENTRAL_BANK_A_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"

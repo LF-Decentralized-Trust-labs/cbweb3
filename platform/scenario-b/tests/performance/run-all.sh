@@ -17,9 +17,12 @@
 #
 # All steps log structured JSON to stdout. The 12h soak is a SEPARATE opt-in target.
 #
-# Knobs (all optional — sensible defaults make it zero-config):
-#   API_GW_URL (3000), API_GW_CENTRAL_BANK_A_URL (38080)
-#   PAIR (W-BRL-ARS — the sovereign pair scenario-b.up seeds), DURATION (3m for the throughput
+# Knobs:
+#   API_GW_URL, API_GW_CENTRAL_BANK_A_URL   REQUIRED, no defaults. The retired deploy/local
+#         topology published the old ports, and defaulting to one made the harness probe a
+#         gateway nothing serves (DEF-022). The scenario-b.perf-* targets derive the real
+#         endpoints from the toolkit manifests (tests/integration/toolkit-env.sh).
+#   PAIR (W-BRL-ARS — the sovereign pair the sample deployment opens), DURATION (3m for the throughput
 #         runs — shorter than the 10m manual default
 #         so the unattended suite finishes; override DURATION=10m for a publication run)
 #   SWAP_TPS (30), TRANSFER_TPS (50), ZETO_TPS (15)
@@ -28,6 +31,29 @@
 set -u
 PERF_DIR="$(cd "$(dirname "$0")" && pwd)"
 PERF_SERVICE="perf-all"
+
+# Dry-run guard: the dry run is the CI-safe smoke for this orchestrator — it contacts nothing
+# and must not need a stack, a manifest or yq on the box. Give the endpoint variables an
+# unroutable placeholder so the required-value checks downstream are satisfied without
+# reintroducing a real port that a live run could silently fall back to. `.invalid` is
+# reserved by RFC 2606 and can never resolve.
+#
+# It also turns on the no-infra path this driver already implements (SKIP_STACK / SKIP_SEED),
+# so PERF_DRY_RUN=1 means the same thing here as it does in Scenario A: the orchestrator runs
+# end to end, contacts nothing and needs no k6 on the box.
+if [ "${PERF_DRY_RUN:-0}" = "1" ]; then
+  SKIP_STACK=1
+  SKIP_SEED=1
+  export SKIP_STACK SKIP_SEED
+  : "${API_GW_URL:=http://dry-run.invalid}"
+  : "${CB_GW_URL:=http://dry-run.invalid}"
+  : "${API_GW_CENTRAL_BANK_A_URL:=http://dry-run.invalid}"
+  : "${API_GW_CENTRAL_BANK_B_URL:=http://dry-run.invalid}"
+  : "${API_GW_BANK_B_URL:=http://dry-run.invalid}"
+  : "${BANK_D_GW_URL:=http://dry-run.invalid}"
+  : "${PERF_CUSTODIAN_GW_URL:=http://dry-run.invalid}"
+fi
+
 # shellcheck source=lib/log.sh
 . "$PERF_DIR/lib/log.sh"
 # shellcheck source=lib/stack.sh
@@ -43,21 +69,6 @@ PERF_SERVICE="perf-all"
 # shellcheck source=lib/provision-swap.sh
 . "$PERF_DIR/lib/provision-swap.sh"
 
-# Dry-run guard: the dry run is the CI-safe smoke for this orchestrator — it contacts nothing
-# and must not need a stack, a manifest or yq on the box. Give the endpoint variables an
-# unroutable placeholder so the required-value checks downstream are satisfied without
-# reintroducing a real port that a live run could silently fall back to. `.invalid` is
-# reserved by RFC 2606 and can never resolve.
-if [ "${PERF_DRY_RUN:-0}" = "1" ]; then
-  : "${API_GW_URL:=http://dry-run.invalid}"
-  : "${CB_GW_URL:=http://dry-run.invalid}"
-  : "${API_GW_CENTRAL_BANK_A_URL:=http://dry-run.invalid}"
-  : "${API_GW_CENTRAL_BANK_B_URL:=http://dry-run.invalid}"
-  : "${API_GW_BANK_B_URL:=http://dry-run.invalid}"
-  : "${BANK_D_GW_URL:=http://dry-run.invalid}"
-  : "${PERF_CUSTODIAN_GW_URL:=http://dry-run.invalid}"
-fi
-
 : "${API_GW_URL:?API_GW_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
 : "${API_GW_CENTRAL_BANK_A_URL:?API_GW_CENTRAL_BANK_A_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
 : "${PAIR:=W-BRL-ARS}"
@@ -67,15 +78,28 @@ fi
 : "${ZETO_TPS:=15}"
 : "${XC_TPS:=5}"  # full cross-currency payment is bridge-bound (single-signer); probe low
 
-require_cmd k6
+# k6 is only needed when a benchmark actually runs — the dry run executes none.
+if [ "${PERF_DRY_RUN:-0}" != "1" ]; then
+  require_cmd k6
+fi
 require_cmd curl
 require_cmd awk
 
-RESULTS_DIR="$PERF_DIR/results/$(date -u +%Y%m%dT%H%M%SZ)"
+# The dry run keeps its artefacts out of the tree: docs/performance/RESULTS.md is a
+# published, version-controlled document and a no-infra run has no numbers to put in it.
+if [ "${PERF_DRY_RUN:-0}" = "1" ]; then
+  RESULTS_DIR="$(mktemp -d)/dry-run"
+else
+  RESULTS_DIR="$PERF_DIR/results/$(date -u +%Y%m%dT%H%M%SZ)"
+fi
 mkdir -p "$RESULTS_DIR"
 log_info "results directory" dir="$RESULTS_DIR"
 
-DOC_OUT="$PERF_DIR/../../docs/performance/RESULTS.md"
+if [ "${PERF_DRY_RUN:-0}" = "1" ]; then
+  DOC_OUT="$RESULTS_DIR/RESULTS.md"
+else
+  DOC_OUT="$PERF_DIR/../../docs/performance/RESULTS.md"
+fi
 # Always emit a report from whatever summaries exist — even on Ctrl-C or an early
 # failure — so a partial run is never lost. write-results.sh tolerates missing phases
 # (they render as n/a). The trap fires once on normal EXIT or on INT/TERM.
@@ -84,7 +108,7 @@ _finalize() {
   log_info "finalising — writing results from captured summaries" dir="$RESULTS_DIR"
   "$PERF_DIR/lib/write-results.sh" "$RESULTS_DIR" "$DOC_OUT" \
     || log_warn "results writer reported an issue"
-  log_info "perf-all results written" results="$RESULTS_DIR" doc="docs/performance/RESULTS.md"
+  log_info "perf-all results written" results="$RESULTS_DIR" doc="$DOC_OUT"
 }
 trap '_finalize; exit 130' INT TERM
 trap '_finalize' EXIT

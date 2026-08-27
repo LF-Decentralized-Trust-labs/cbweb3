@@ -340,6 +340,14 @@ scenario-b.perf-all:
 	@$(PERF_GW_ENV) PERF_MAKE_DIR=$(CURDIR) \
 	 bash tests/performance/run-all.sh
 
+# scenario-b.perf-all-dry — exercises the perf-all orchestrator with NO infra: no stack, no
+# manifests, no yq and no k6 on the box. The endpoints get the unroutable RFC 2606 placeholder,
+# every live phase is skipped and RESULTS.md is rendered into a temp dir. This is the target
+# that keeps the dry-run path honest — DEF-022 existed because nothing ran the bring-up branch.
+scenario-b.perf-all-dry:
+	@echo "[scenario-b] perf-all dry-run (no infra)..."
+	@PERF_DRY_RUN=1 bash tests/performance/run-all.sh
+
 scenario-b.perf-soak:
 	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
 	@echo "[scenario-b] 12-hour SOAK — dedicated infra only, NOT for CI..."
@@ -381,4 +389,4 @@ scenario-b.check-postman:
 	scenario-b.perf-baseline scenario-b.validate-openapi \
 	scenario-b.gen-postman scenario-b.check-postman \
 	scenario-b.perf-amm-throughput scenario-b.perf-transfer \
-	scenario-b.perf-zeto scenario-b.perf-soak scenario-b.perf-all scenario-b.perf-smoke
+	scenario-b.perf-zeto scenario-b.perf-soak scenario-b.perf-all scenario-b.perf-all-dry scenario-b.perf-smoke
