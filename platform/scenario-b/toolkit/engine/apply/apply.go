@@ -477,6 +477,7 @@ func applyFoundHub(ctx context.Context, o Options, pd *manifest.ParticipantDeplo
 		AdvertisedHost:  advertisedHost,
 		FrontendHost:    pd.Spec.FrontendHost,
 		ProxyEnabled:    pd.Spec.Proxy == "enable",
+		AdminUsers:      toOrchestratorAdminUsers(pd.Spec.AdminUsers),
 	}
 	// No launcher on the hub: the launcher is the per-entity A/B entry point for
 	// commercial banks and central banks (found-spoke / join), not for the network
