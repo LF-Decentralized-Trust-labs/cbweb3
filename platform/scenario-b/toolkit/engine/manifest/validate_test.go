@@ -423,3 +423,38 @@ func TestAcceptLocalEmulatorKeyProvider(t *testing.T) {
 		})
 	}
 }
+
+// spec.noc.portalOrigins is embedded in a JSON array inside a single-quoted `bash -c`
+// argument for kcadm, so only a plain scheme://host[:port] survives both layers. Checking it
+// at manifest level turns a mid-deploy step failure into an error before anything is
+// provisioned — and rejects the wildcard that finding R1-10.7 removed from this client.
+func TestNOCPortalOriginsMustBePlainOrigins(t *testing.T) {
+	for _, bad := range []string{
+		"*",
+		"http://localhost:3030/",
+		"http://localhost:3030/noc",
+		"localhost:3030",
+		"http://*.example.org:3030",
+	} {
+		pd := mustLoad(t, "found-spoke.yaml")
+		if pd.Spec.NOC == nil {
+			pd.Spec.NOC = &NOC{}
+		}
+		pd.Spec.NOC.PortalOrigins = []string{bad}
+		if res := Validate(pd); !findErr(res, "spec.noc.portalOrigins[0]") {
+			t.Errorf("portalOrigins %q was accepted; it cannot be embedded safely: %+v", bad, res.Errors)
+		}
+	}
+}
+
+func TestNOCPortalOriginsAcceptsPlainOrigins(t *testing.T) {
+	pd := mustLoad(t, "found-spoke.yaml")
+	if pd.Spec.NOC == nil {
+		pd.Spec.NOC = &NOC{}
+	}
+	pd.Spec.NOC.PortalOrigins = []string{"http://localhost:3030", "https://noc.example.org", "http://10.0.0.9:3030"}
+	if res := Validate(pd); findErr(res, "spec.noc.portalOrigins[0]") ||
+		findErr(res, "spec.noc.portalOrigins[1]") || findErr(res, "spec.noc.portalOrigins[2]") {
+		t.Fatalf("valid portal origins were rejected: %+v", res.Errors)
+	}
+}

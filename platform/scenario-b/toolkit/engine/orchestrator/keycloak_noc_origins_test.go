@@ -169,3 +169,74 @@ func TestAppendNOCPortalClient_VerifiesTheClientExists(t *testing.T) {
 		t.Errorf("the existence check runs before the create:\n%s", cmd)
 	}
 }
+
+// The blind spot this closes: found-spoke registers the origin of the portal IT serves
+// (RPC+12000), but the observe mode publishes a standalone NOC portal on its own fixed port
+// (3030), on its own docker network, possibly on another host — and observe never touches
+// Keycloak. Nothing registered that origin, so every login against the standalone portal was
+// refused by CORS before a credential was read. It presents as "Failed to fetch", which points
+// nowhere near Keycloak, and it blocks EVERY user, not just wrong-role ones.
+//
+// The test above is why it stayed invisible: it checks the command found-spoke generates
+// against the origins found-spoke itself computes. Self-consistent, and blind to the other
+// mode's port. These pin the extra origins the manifest declares.
+
+func TestNOCPortalOrigins_AppendsTheStandalonePortalOrigin(t *testing.T) {
+	got := nocPortalOrigins(33845, "localhost", false, "http://localhost:3030")
+	want := []string{"http://localhost:45845", "http://localhost:3030"}
+	if len(got) != len(want) {
+		t.Fatalf("nocPortalOrigins() = %v; want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("nocPortalOrigins() = %v; want %v", got, want)
+		}
+	}
+}
+
+// A NOC on another host is the case the co-located calculation cannot reach at all.
+func TestNOCPortalOrigins_AppendsARemoteNOCOrigin(t *testing.T) {
+	got := nocPortalOrigins(33845, "10.0.0.7", false, "http://10.0.0.9:3030")
+	if len(got) != 3 || got[2] != "http://10.0.0.9:3030" {
+		t.Fatalf("nocPortalOrigins() = %v; want the remote NOC origin appended", got)
+	}
+}
+
+// Behind the proxy the entity's own portals collapse to one origin — but a NOC stack elsewhere
+// is not fronted by that proxy, so its origin must still be added.
+func TestNOCPortalOrigins_AppendsExtrasBehindTheProxy(t *testing.T) {
+	got := nocPortalOrigins(33845, "cb.example.org", true, "http://localhost:3030")
+	if len(got) != 2 || got[1] != "http://localhost:3030" {
+		t.Fatalf("nocPortalOrigins() = %v; want the extra origin appended behind the proxy", got)
+	}
+}
+
+func TestNOCPortalOrigins_IgnoresDuplicatesAndBlanks(t *testing.T) {
+	got := nocPortalOrigins(33845, "localhost", false, "http://localhost:45845", "  ", "")
+	if len(got) != 1 {
+		t.Fatalf("nocPortalOrigins() = %v; want no duplicate or blank entries", got)
+	}
+}
+
+// The extras reach the kcadm command, which is what Keycloak actually stores.
+func TestAppendNOCPortalClient_CarriesTheStandaloneOrigin(t *testing.T) {
+	cmd := nocClientCmd(t, nocPortalOrigins(33845, "localhost", false, "http://localhost:3030"))
+	for _, o := range []string{"http://localhost:45845", "http://localhost:3030"} {
+		if !strings.Contains(cmd, o) {
+			t.Errorf("noc-portal webOrigins is missing %q:\n%s", o, cmd)
+		}
+	}
+	if strings.Contains(cmd, `"*"`) {
+		t.Errorf("a wildcard crept back in:\n%s", cmd)
+	}
+}
+
+// A malformed origin must fail the command rather than be embedded in the JSON array.
+func TestAppendNOCPortalClient_RejectsAMalformedExtraOrigin(t *testing.T) {
+	var b strings.Builder
+	err := appendNOCPortalClient(&b, "/opt/keycloak/bin/kcadm.sh", spokeKeycloakRealm,
+		[]string{"http://localhost:45845", "http://localhost:3030/"})
+	if err == nil {
+		t.Fatal("no error; a trailing slash is not a valid web origin and must not be embedded")
+	}
+}

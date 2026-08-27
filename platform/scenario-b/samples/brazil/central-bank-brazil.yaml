@@ -42,6 +42,14 @@ spec:
     # relay's container logs (the NOC's Log Viewer); the relay itself is untouched.
     containerName: cbweb3-cacti-liquidity-relay
   cbEndpoint: http://host.docker.internal:18645
+  # The standalone NOC (brazil/noc-brazil.yaml, via deploy-all-with-noc.sh) serves its
+  # portal on the fixed :3030, on its own docker network — an origin this CB does not
+  # serve and cannot infer. The NOC portal password-grants against THIS realm from the
+  # browser, and observe never touches Keycloak, so the origin has to be declared here or
+  # every NOC login is refused by CORS before a credential is read ("Failed to fetch").
+  noc:
+    portalOrigins:
+      - http://localhost:3030
   frontendHost: localhost
   # Per-entity launcher (distributed A/B entry point on this entity's host). "enable"
   # runs the generic launcher image (pre-build once with launcher/build.sh) and writes

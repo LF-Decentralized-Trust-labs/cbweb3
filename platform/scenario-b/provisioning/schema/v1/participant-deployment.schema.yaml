@@ -98,6 +98,14 @@ properties:
           # api-gateway the NOC backend reads AMM pool status from, as reachable FROM
           # THE NOC CONTAINER (own docker network → use host + published port).
           ammGatewayURL: { type: string }
+          # Extra browser origins for the public noc-portal Keycloak client: the
+          # standalone NOC portal (observe mode) this entity does not serve itself.
+          # Plain scheme://host[:port] only — no path, trailing slash or wildcard.
+          portalOrigins:
+            type: array
+            items:
+              type: string
+              pattern: "^https?://[A-Za-z0-9._-]+(:[0-9]{1,5})?$"
       frontendHost: { type: string }
       adminUsers:
         type: array

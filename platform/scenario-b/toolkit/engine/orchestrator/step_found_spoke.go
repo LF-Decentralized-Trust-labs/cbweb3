@@ -84,7 +84,10 @@ type SpokeConfig struct {
 	KeycloakEnv         []string
 	GatewayURL          string
 	NOCBackendURL       string // where this CB's noc-agent pushes (spec.noc.backendURL; default host.docker.internal:8090)
-	Registrar           relayregistrar.RelayRegistrar
+	// NOCPortalOrigins are extra browser origins for the noc-portal Keycloak client
+	// (spec.noc.portalOrigins) — the standalone NOC portal this CB does not serve itself.
+	NOCPortalOrigins []string
+	Registrar        relayregistrar.RelayRegistrar
 
 	// Injectable seams (defaults wired by WithDefaults).
 	WaitRPC          func(ctx context.Context) error
@@ -412,7 +415,7 @@ var spokeCBRoles = []string{"central_bank", "ROLE_GOVERNANCE", "ROLE_TREASURY"}
 // provisionKeycloakRealm creates the realm + confidential client inside the
 // running Keycloak container via kcadm (idempotent: create failures are ignored).
 func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
-	kc := "/opt/keycloak/bin/kcadm.sh"
+	kc := keycloakAdminCLI
 	var b strings.Builder
 	// Same password the compose env gave the Keycloak container; resolved from the
 	// entity secrets file, not a constant.
@@ -441,7 +444,7 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	fmt.Fprintf(&b, "(%[1]s add-roles -r %[2]s --uusername service-account-%[3]s "+
 		"--cclientid realm-management --rolename manage-users --rolename view-users || kcw 'grant realm-management roles to the service account') && ",
 		kc, spokeKeycloakRealm, spokeKeycloakClient)
-	if err := appendNOCPortalClient(&b, kc, spokeKeycloakRealm, nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy())); err != nil {
+	if err := appendNOCPortalClient(&b, kc, spokeKeycloakRealm, nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...)); err != nil {
 		return err
 	}
 	// Per-role operator accounts from the manifest (spec.adminUsers). Fall back to a
@@ -1162,6 +1165,35 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 					}
 				}
 				return nil
+			},
+		},
+		{
+			// provision-keycloak-spoke is skipped once KEYCLOAK_CLIENT_SECRET exists, so an
+			// origin newly declared in spec.noc.portalOrigins would never reach an entity that
+			// is already provisioned — the standalone NOC portal stays dead behind a CORS
+			// refusal until a from-scratch redeploy. Registering origins is declarative and
+			// cheap, so it converges on its own every run.
+			Name: "reconcile-noc-origins",
+			Deps: []string{"provision-keycloak-spoke"},
+			Check: func(ctx context.Context) (bool, error) {
+				return nocOriginsAlreadyRegistered(ctx, c.Runner, c.keycloakContainer(),
+					keycloakAdminCLI, spokeKeycloakRealm,
+					mustInfraSecret(secretsDirOf(c.SpokeEnvFile), "KC_ADMIN_PASSWORD"),
+					nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...))
+			},
+			Run: func(ctx context.Context) error {
+				// Self-sufficient: the Check reaches this Run when Keycloak could not be asked
+				// at all, which on a provisioned entity with its containers down is ordinary.
+				if _, err := c.Runner.Run(ctx, "docker", c.composeUpArgs("entity-keycloak")...); err != nil {
+					return err
+				}
+				if err := c.WaitKeycloak(ctx); err != nil {
+					return err
+				}
+				return reconcileNOCOrigins(ctx, c.Runner, c.keycloakContainer(),
+					keycloakAdminCLI, spokeKeycloakRealm,
+					mustInfraSecret(secretsDirOf(c.SpokeEnvFile), "KC_ADMIN_PASSWORD"),
+					nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...))
 			},
 		},
 		{

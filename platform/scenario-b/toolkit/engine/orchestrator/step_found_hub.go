@@ -50,6 +50,9 @@ type HubConfig struct {
 	// FrontendHost is the browser-facing host baked into the hub governance portal's
 	// VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost).
 	FrontendHost string
+	// NOCPortalOrigins are extra browser origins for the noc-portal Keycloak client
+	// (spec.noc.portalOrigins) — the standalone NOC portal the hub does not serve itself.
+	NOCPortalOrigins []string
 	// NOCBackendURL is where the hub's noc-agent pushes (spec.noc.backendURL;
 	// default host.docker.internal:8090).
 	NOCBackendURL string
@@ -274,8 +277,10 @@ func (c HubConfig) provisionKeycloakRealm(ctx context.Context) error {
 		hubKeycloakRealm, hubKeycloakClient, hubKeycloakSecret, audienceMapperArg(keycloakBackendAudience),
 		accessTokenLifespanSeconds)
 	// Public noc-portal client so the hub's co-located NOC portal can password-grant
-	// against this realm.
-	if err := appendNOCPortalClient(&b, kc, hubKeycloakRealm, nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy())); err != nil {
+	// against this realm. spec.noc.portalOrigins adds the origins of any NOC portal served
+	// from elsewhere — a standalone observe stack has its own port and host, which this
+	// entity cannot infer.
+	if err := appendNOCPortalClient(&b, kc, hubKeycloakRealm, nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...)); err != nil {
 		return err
 	}
 	// Operator accounts from spec.adminUsers. found-spoke and join have always done
@@ -495,6 +500,33 @@ func FoundHubSteps(c HubConfig) []Step {
 					}
 				}
 				return nil
+			},
+		},
+		{
+			// Mirrors the spoke: provision-keycloak-hub is skipped once KEYCLOAK_CLIENT_SECRET
+			// exists, so an origin newly declared in spec.noc.portalOrigins would never reach a
+			// hub that is already provisioned. Registering origins is declarative, so it
+			// converges on its own every run.
+			Name: "reconcile-noc-origins",
+			Deps: []string{"provision-keycloak-hub"},
+			Check: func(ctx context.Context) (bool, error) {
+				return nocOriginsAlreadyRegistered(ctx, c.Runner, c.keycloakContainer(),
+					keycloakAdminCLI, hubKeycloakRealm,
+					mustInfraSecret(secretsDirOf(c.HubEnvFile), "KC_ADMIN_PASSWORD"),
+					nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...))
+			},
+			Run: func(ctx context.Context) error {
+				if _, err := c.Runner.Run(ctx, "docker", "compose", "-p", c.ContainerPrefix,
+					"-f", c.template("entity-keycloak"), "--env-file", c.HubEnvFile, "up", "-d"); err != nil {
+					return err
+				}
+				if err := c.WaitKeycloak(ctx); err != nil {
+					return err
+				}
+				return reconcileNOCOrigins(ctx, c.Runner, c.keycloakContainer(),
+					keycloakAdminCLI, hubKeycloakRealm,
+					mustInfraSecret(secretsDirOf(c.HubEnvFile), "KC_ADMIN_PASSWORD"),
+					nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...))
 			},
 		},
 		{

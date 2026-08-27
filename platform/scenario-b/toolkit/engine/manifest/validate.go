@@ -318,7 +318,20 @@ func validateNOC(n *NOC, r *Result) {
 				fmt.Sprintf("invalid value %q; accepted values are: %s", c, strings.Join(NOCComponentTypes, ", ")))
 		}
 	}
+	for i, o := range n.PortalOrigins {
+		if !browserOrigin.MatchString(o) {
+			r.AddError(fmt.Sprintf("spec.noc.portalOrigins[%d]", i),
+				fmt.Sprintf("invalid value %q; must be a plain scheme://host[:port] with no path, "+
+					"trailing slash or wildcard", o))
+		}
+	}
 }
+
+// browserOrigin is the only shape an origin may take. It mirrors the orchestrator's
+// browserOriginPattern, which enforces the same rule at the point the value is embedded in a
+// JSON array inside a single-quoted `bash -c` argument for kcadm. Checking it here as well
+// turns a mid-deploy step failure into a manifest error, before anything is provisioned.
+var browserOrigin = regexp.MustCompile(`^https?://[A-Za-z0-9._-]+(:[0-9]{1,5})?$`)
 
 // NOCComponentTypes are the component types the noc-agent knows how to probe.
 // Mirrors bundle.NOCComponentTypes (kept local to avoid a manifest→bundle dep).
