@@ -67,12 +67,26 @@ contract DeployCBWeb3Spoke is Script {
 
         fiatToken = new FiatCentralBankMoney(fiatTokenName, fiatTokenSymbol, adminAddress, centralBankAddress);
 
-        // Grant GOVERNANCE_ROLE to this spoke's central bank so its auth/compliance services
-        // (which sign on-chain participant registrations with CB_PRIVATE_KEY = centralBankAddress)
-        // can register participants. DEFAULT_ADMIN_ROLE stays with adminAddress (the deployer).
+        // Grant GOVERNANCE_ROLE to this spoke's central bank so its services can register
+        // participants. DEFAULT_ADMIN_ROLE stays with adminAddress (the deployer).
         // No-op when centralBankAddress == adminAddress (already holds the role).
         if (centralBankAddress != adminAddress) {
             identityRegistry.grantRole(identityRegistry.GOVERNANCE_ROLE(), centralBankAddress);
+        }
+
+        // The auth and compliance containers sign with their own identity rather than the
+        // deployer key. Sharing that key made three processes advance one nonce counter, so
+        // concurrent writes replaced each other in the mempool and their callers waited on
+        // receipts that were never written. They need both roles they actually call with:
+        // GOVERNANCE_ROLE for registerParticipant and setCertFingerprint, VERIFIER_ROLE for
+        // verifyParticipant.
+        //
+        // Optional so an existing deployment keeps working: unset means the services fall back
+        // to the central bank key, which is the pre-split behaviour.
+        address servicesAddress = vm.envOr("SERVICES_ADDRESS", address(0));
+        if (servicesAddress != address(0) && servicesAddress != adminAddress) {
+            identityRegistry.grantRole(identityRegistry.GOVERNANCE_ROLE(), servicesAddress);
+            identityRegistry.grantRole(identityRegistry.VERIFIER_ROLE(), servicesAddress);
         }
 
         vm.stopBroadcast();

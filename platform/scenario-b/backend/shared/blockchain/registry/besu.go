@@ -17,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry/bindings"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/evm"
 )
 
 // BesuConfig holds the configuration required to connect to a Besu node and
@@ -60,6 +61,11 @@ type BesuClient struct {
 	signer   TransactionSigner
 	client   *ethclient.Client
 	contract *bindings.IdentityRegistry
+	// nonces is the shared counter for this client's signing account — see nonce.go for why
+	// leaving bind.TransactOpts.Nonce nil made concurrent writes drop each other silently.
+	nonces nonceState
+	// readNonce overrides the node lookup in tests; nil means use the live client.
+	readNonce func(context.Context, common.Address) (uint64, error)
 }
 
 // NewBesuClient creates a BesuClient connected to the given RPC URL.
@@ -137,9 +143,11 @@ func (b *BesuClient) RegisterParticipant(ctx context.Context, wallet, name, role
 	// ~40k), and gas is free on the local genesis, so over-provisioning is safe.
 	opts.GasLimit = 500000
 
-	tx, err := b.contract.RegisterParticipant(opts, account, name, solidityRole, zkPointer, institutionID)
+	tx, err := b.sendTx(ctx, opts, "registerParticipant", func(o *bind.TransactOpts) (*types.Transaction, error) {
+		return b.contract.RegisterParticipant(o, account, name, solidityRole, zkPointer, institutionID)
+	})
 	if err != nil {
-		return "", fmt.Errorf("registry: registerParticipant tx: %w", err)
+		return "", err
 	}
 	if err := b.waitMined(ctx, tx); err != nil {
 		return tx.Hash().Hex(), fmt.Errorf("registry: registerParticipant wait: %w", err)
@@ -162,7 +170,9 @@ func (b *BesuClient) VerifyParticipant(ctx context.Context, wallet string) (stri
 	// this storage-writing call on the local zero-gas QBFT chain, and gas is free.
 	opts.GasLimit = 500000
 
-	tx, err := b.contract.VerifyParticipant(opts, account)
+	tx, err := b.sendTx(ctx, opts, "verifyParticipant", func(o *bind.TransactOpts) (*types.Transaction, error) {
+		return b.contract.VerifyParticipant(o, account)
+	})
 	if err != nil {
 		return "", fmt.Errorf("registry: verifyParticipant tx: %w", err)
 	}
@@ -181,7 +191,9 @@ func (b *BesuClient) UpdateStatus(ctx context.Context, wallet string, status uin
 	}
 
 	account := common.HexToAddress(wallet)
-	tx, err := b.contract.UpdateStatus(opts, account, status)
+	tx, err := b.sendTx(ctx, opts, "updateStatus", func(o *bind.TransactOpts) (*types.Transaction, error) {
+		return b.contract.UpdateStatus(o, account, status)
+	})
 	if err != nil {
 		return "", fmt.Errorf("registry: updateStatus tx: %w", err)
 	}
@@ -200,7 +212,9 @@ func (b *BesuClient) SetCertFingerprint(ctx context.Context, wallet string, fing
 	}
 
 	account := common.HexToAddress(wallet)
-	tx, err := b.contract.SetCertFingerprint(opts, account, fingerprint)
+	tx, err := b.sendTx(ctx, opts, "setCertFingerprint", func(o *bind.TransactOpts) (*types.Transaction, error) {
+		return b.contract.SetCertFingerprint(o, account, fingerprint)
+	})
 	if err != nil {
 		return "", fmt.Errorf("registry: setCertFingerprint tx: %w", err)
 	}
@@ -301,9 +315,17 @@ func (b *BesuClient) RegisterCurrency(ctx context.Context, tokenName, tokenSymbo
 		return "", "", err
 	}
 	adminAddr := opts1.From
-	wTokenAddr, deployTx, _, err := bindings.DeployTokenizedCentralBankMoney(opts1, b.client, tokenName, tokenSymbol, adminAddr, adminAddr)
+	var wTokenAddr common.Address
+	deployTx, err := b.sendTx(ctx, opts1, "deploy W-token", func(o *bind.TransactOpts) (*types.Transaction, error) {
+		addr, tx, _, derr := bindings.DeployTokenizedCentralBankMoney(o, b.client, tokenName, tokenSymbol, adminAddr, adminAddr)
+		if derr != nil {
+			return nil, derr
+		}
+		wTokenAddr = addr
+		return tx, nil
+	})
 	if err != nil {
-		return "", "", fmt.Errorf("registry: deploy W-token: %w", err)
+		return "", "", err
 	}
 	if err := b.waitMined(ctx, deployTx); err != nil {
 		return wTokenAddr.Hex(), deployTx.Hash().Hex(), fmt.Errorf("registry: deploy W-token wait: %w", err)
@@ -314,7 +336,9 @@ func (b *BesuClient) RegisterCurrency(ctx context.Context, tokenName, tokenSymbo
 	if err != nil {
 		return wTokenAddr.Hex(), deployTx.Hash().Hex(), err
 	}
-	setCBTx, err := b.contract.SetCentralBankOf(opts2, wTokenAddr, adminAddr)
+	setCBTx, err := b.sendTx(ctx, opts2, "setCentralBankOf", func(o *bind.TransactOpts) (*types.Transaction, error) {
+		return b.contract.SetCentralBankOf(o, wTokenAddr, adminAddr)
+	})
 	if err != nil {
 		return wTokenAddr.Hex(), deployTx.Hash().Hex(), fmt.Errorf("registry: setCentralBankOf tx: %w", err)
 	}
@@ -332,9 +356,11 @@ func (b *BesuClient) RegisterCurrency(ctx context.Context, tokenName, tokenSymbo
 	if err != nil {
 		return wTokenAddr.Hex(), setCBTx.Hash().Hex(), err
 	}
-	regTx, err := currencyReg.RegisterCurrency(opts3, tokenSymbol, countryName, wTokenAddr, proposerCB)
+	regTx, err := b.sendTx(ctx, opts3, "registerCurrency", func(o *bind.TransactOpts) (*types.Transaction, error) {
+		return currencyReg.RegisterCurrency(o, tokenSymbol, countryName, wTokenAddr, proposerCB)
+	})
 	if err != nil {
-		return wTokenAddr.Hex(), setCBTx.Hash().Hex(), fmt.Errorf("registry: registerCurrency tx: %w", err)
+		return wTokenAddr.Hex(), setCBTx.Hash().Hex(), err
 	}
 	if err := b.waitMined(ctx, regTx); err != nil {
 		return wTokenAddr.Hex(), regTx.Hash().Hex(), fmt.Errorf("registry: registerCurrency wait: %w", err)
@@ -422,7 +448,9 @@ func (b *BesuClient) ensureCurrencyAuthority(ctx context.Context, token, cb comm
 		if oerr != nil {
 			return last, oerr
 		}
-		tx, gerr := wToken.GrantRole(opts, role, cb)
+		tx, gerr := b.sendTx(ctx, opts, "grantRole(CENTRAL_BANK_ROLE)", func(o *bind.TransactOpts) (*types.Transaction, error) {
+			return wToken.GrantRole(o, role, cb)
+		})
 		if gerr != nil {
 			return last, fmt.Errorf("registry: grant CENTRAL_BANK_ROLE to %s: %w", cb.Hex(), gerr)
 		}
@@ -436,7 +464,9 @@ func (b *BesuClient) ensureCurrencyAuthority(ctx context.Context, token, cb comm
 		if oerr != nil {
 			return last, oerr
 		}
-		tx, gerr := wToken.GrantRole(opts, adminRole, cb)
+		tx, gerr := b.sendTx(ctx, opts, "grantRole(DEFAULT_ADMIN_ROLE)", func(o *bind.TransactOpts) (*types.Transaction, error) {
+			return wToken.GrantRole(o, adminRole, cb)
+		})
 		if gerr != nil {
 			return last, fmt.Errorf("registry: grant DEFAULT_ADMIN_ROLE to %s: %w", cb.Hex(), gerr)
 		}
@@ -450,9 +480,11 @@ func (b *BesuClient) ensureCurrencyAuthority(ctx context.Context, token, cb comm
 		if oerr != nil {
 			return last, oerr
 		}
-		tx, serr := b.contract.SetCentralBankOf(opts, token, cb)
+		tx, serr := b.sendTx(ctx, opts, "setCentralBankOf", func(o *bind.TransactOpts) (*types.Transaction, error) {
+			return b.contract.SetCentralBankOf(o, token, cb)
+		})
 		if serr != nil {
-			return last, fmt.Errorf("registry: setCentralBankOf(%s) tx: %w", cb.Hex(), serr)
+			return last, fmt.Errorf("registry: setCentralBankOf(%s): %w", cb.Hex(), serr)
 		}
 		if werr := b.waitMined(ctx, tx); werr != nil {
 			return tx.Hash().Hex(), fmt.Errorf("registry: setCentralBankOf(%s) wait: %w", cb.Hex(), werr)
@@ -464,7 +496,9 @@ func (b *BesuClient) ensureCurrencyAuthority(ctx context.Context, token, cb comm
 		if oerr != nil {
 			return last, oerr
 		}
-		tx, rerr := wToken.RevokeRole(opts, role, signerAddr)
+		tx, rerr := b.sendTx(ctx, opts, "revokeRole(CENTRAL_BANK_ROLE)", func(o *bind.TransactOpts) (*types.Transaction, error) {
+			return wToken.RevokeRole(o, role, signerAddr)
+		})
 		if rerr != nil {
 			return last, fmt.Errorf("registry: revoke CENTRAL_BANK_ROLE from hub signer: %w", rerr)
 		}
@@ -481,7 +515,9 @@ func (b *BesuClient) ensureCurrencyAuthority(ctx context.Context, token, cb comm
 		if oerr != nil {
 			return last, oerr
 		}
-		tx, rerr := wToken.RevokeRole(opts, adminRole, signerAddr)
+		tx, rerr := b.sendTx(ctx, opts, "revokeRole(DEFAULT_ADMIN_ROLE)", func(o *bind.TransactOpts) (*types.Transaction, error) {
+			return wToken.RevokeRole(o, adminRole, signerAddr)
+		})
 		if rerr != nil {
 			return last, fmt.Errorf("registry: revoke DEFAULT_ADMIN_ROLE from hub signer: %w", rerr)
 		}
@@ -577,9 +613,17 @@ func (b *BesuClient) RegisterPair(ctx context.Context, symbolA, symbolB, pairID 
 	if err != nil {
 		return "", "", err
 	}
-	amm, deployTx, _, err := bindings.DeployAutomatedMarketMaker(opts1, b.client, tokenA, tokenB, common.HexToAddress(b.cfg.RegistryAddress))
+	var amm common.Address
+	deployTx, err := b.sendTx(ctx, opts1, "deploy AMM", func(o *bind.TransactOpts) (*types.Transaction, error) {
+		addr, tx, _, derr := bindings.DeployAutomatedMarketMaker(o, b.client, tokenA, tokenB, common.HexToAddress(b.cfg.RegistryAddress))
+		if derr != nil {
+			return nil, derr
+		}
+		amm = addr
+		return tx, nil
+	})
 	if err != nil {
-		return "", "", fmt.Errorf("registry: deploy AMM: %w", err)
+		return "", "", err
 	}
 	if err := b.waitMined(ctx, deployTx); err != nil {
 		return amm.Hex(), deployTx.Hash().Hex(), fmt.Errorf("registry: deploy AMM wait: %w", err)
@@ -622,9 +666,11 @@ func (b *BesuClient) RegisterPair(ctx context.Context, symbolA, symbolB, pairID 
 	if err != nil {
 		return amm.Hex(), deployTx.Hash().Hex(), err
 	}
-	propTx, err := pairReg.ProposePair(opts2, pairID, tokenA, tokenB, amm)
+	propTx, err := b.sendTx(ctx, opts2, "proposePair", func(o *bind.TransactOpts) (*types.Transaction, error) {
+		return pairReg.ProposePair(o, pairID, tokenA, tokenB, amm)
+	})
 	if err != nil {
-		return amm.Hex(), deployTx.Hash().Hex(), fmt.Errorf("registry: proposePair tx: %w", err)
+		return amm.Hex(), deployTx.Hash().Hex(), err
 	}
 	if err := b.waitMined(ctx, propTx); err != nil {
 		return amm.Hex(), propTx.Hash().Hex(), fmt.Errorf("registry: proposePair wait: %w", err)
@@ -635,9 +681,11 @@ func (b *BesuClient) RegisterPair(ctx context.Context, symbolA, symbolB, pairID 
 	if err != nil {
 		return amm.Hex(), propTx.Hash().Hex(), err
 	}
-	confTx, err := pairReg.ConfirmPair(opts3, pairID)
+	confTx, err := b.sendTx(ctx, opts3, "confirmPair", func(o *bind.TransactOpts) (*types.Transaction, error) {
+		return pairReg.ConfirmPair(o, pairID)
+	})
 	if err != nil {
-		return amm.Hex(), propTx.Hash().Hex(), fmt.Errorf("registry: confirmPair tx: %w", err)
+		return amm.Hex(), propTx.Hash().Hex(), err
 	}
 	if err := b.waitMined(ctx, confTx); err != nil {
 		return amm.Hex(), confTx.Hash().Hex(), fmt.Errorf("registry: confirmPair wait: %w", err)
@@ -685,13 +733,18 @@ func (b *BesuClient) IsPairRegistered(ctx context.Context, pairID string) (bool,
 // waitMined blocks until the transaction is included in a block. Returns an
 // error if the transaction reverted (receipt status != 1) or the context
 // expires before the tx is mined.
+// waitMined blocks until the transaction is mined, bounded.
+//
+// It used to call bind.WaitMined with the caller's context and nothing else, so a transaction
+// that never lands — dropped from the mempool after losing a nonce race — parked the caller
+// forever with no error and no log line. evm.WaitForReceipt applies the shared deadline policy
+// (keep the caller's if it has one, otherwise ReceiptWaitTimeout) and puts the transaction hash
+// in the error, which is what lets a retry reconcile through TxMined instead of re-submitting a
+// write that is not idempotent.
 func (b *BesuClient) waitMined(ctx context.Context, tx *types.Transaction) error {
-	receipt, err := bind.WaitMined(ctx, b.client, tx)
+	receipt, err := evm.WaitForReceipt(ctx, b.client, tx, "registry")
 	if err != nil {
-		return fmt.Errorf("waiting for tx %s: %w", tx.Hash().Hex(), err)
-	}
-	if receipt.Status == 0 {
-		return fmt.Errorf("tx %s reverted (status=0)", tx.Hash().Hex())
+		return err
 	}
 	log.Printf("registry: tx %s mined in block %s (gas=%d)", tx.Hash().Hex(), receipt.BlockNumber, receipt.GasUsed)
 	return nil
