@@ -18,6 +18,8 @@ import (
 
 type fakeResidueRetryRepo struct {
 	pending  []domain.CrossCurrencySwapOperation
+	claimed  int         // how many of pending have been handed out, one per claim
+	claimAt  []time.Time // the timestamp each claim was given, in order
 	listErr  error
 	statuses map[string]domain.ResidueReturnStatus
 	posIDs   map[string]string
@@ -35,8 +37,20 @@ func newFakeResidueRetryRepo(ops ...domain.CrossCurrencySwapOperation) *fakeResi
 	}
 }
 
-func (f *fakeResidueRetryRepo) ClaimRetryableResidues(context.Context, time.Time, int) ([]domain.CrossCurrencySwapOperation, error) {
-	return f.pending, f.listErr
+// ClaimNextRetryableResidue hands out one seeded row per call and then reports nothing due,
+// mirroring the repository: a single row is claimed and leased immediately before its own
+// dispatch, so the lease never has to cover more than one call to the issuing CB.
+func (f *fakeResidueRetryRepo) ClaimNextRetryableResidue(_ context.Context, now time.Time) (*domain.CrossCurrencySwapOperation, error) {
+	f.claimAt = append(f.claimAt, now)
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	if f.claimed >= len(f.pending) {
+		return nil, nil
+	}
+	op := f.pending[f.claimed]
+	f.claimed++
+	return &op, nil
 }
 
 func (f *fakeResidueRetryRepo) UpdateResidue(_ context.Context, swapID, _, positionID string, status domain.ResidueReturnStatus) error {
@@ -364,6 +378,37 @@ func TestResidueBackoff_ExceedsTheSweepInterval(t *testing.T) {
 		if got := residueBackoff(attempts); got < sweep {
 			t.Fatalf("backoff(%d) = %v, below the %v sweep interval — the schedule would never delay anything",
 				attempts, got, sweep)
+		}
+	}
+}
+
+// The claim must be given a CURRENT timestamp, not the one the sweep started with.
+//
+// The repository writes the lease from the timestamp it is handed, so forwarding the sweep's
+// own `now` would date every lease from the start of the sweep: by the time a long sweep
+// reaches its later rows, their leases are already spent and another sweeper can claim them.
+// That is the coupling between batch size and lease duration this design removes, reappearing
+// through the clock instead of through the batch.
+func TestRetryFailedResidueReturns_ClaimsWithACurrentTimestamp(t *testing.T) {
+	repo := newFakeResidueRetryRepo(
+		failedResidueSwap("swap-1", 0),
+		failedResidueSwap("swap-2", 0),
+	)
+	orch := retryOrchestrator(&retryResidueRelay{position: "residue-pos"})
+
+	// Deliberately stale: a sweep that began an hour ago. Any lease dated from here is already
+	// expired, so a claim handed this timestamp protects nothing.
+	sweepStart := time.Now().UTC().Add(-time.Hour)
+	orch.RetryFailedResidueReturns(context.Background(), repo, sweepStart, 10)
+
+	if len(repo.claimAt) == 0 {
+		t.Fatal("no claim was made; this test cannot say anything about the timestamp")
+	}
+	for i, at := range repo.claimAt {
+		if !at.After(sweepStart.Add(30 * time.Minute)) {
+			t.Errorf("claim %d was given %s, dated from the sweep's start (%s) rather than now: "+
+				"the lease it writes is already expired, so a long sweep hands its remaining "+
+				"rows to another sweeper", i, at.UTC(), sweepStart.UTC())
 		}
 	}
 }

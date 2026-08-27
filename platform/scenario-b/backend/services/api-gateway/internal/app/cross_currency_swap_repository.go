@@ -148,8 +148,16 @@ func (r *crossCurrencySwapRepository) UpdateResidue(ctx context.Context, swapID,
 		Updates(updates).Error
 }
 
-// ClaimRetryableResidues returns swaps whose residue return failed to ENQUEUE and whose next
-// attempt is due, oldest first — and claims them so a concurrent sweeper skips them.
+// ClaimNextRetryableResidue returns the OLDEST swap whose residue return failed to ENQUEUE and
+// whose next attempt is due — and claims it so a concurrent sweeper skips it. It returns
+// (nil, nil) when nothing is due.
+//
+// One row per call, on purpose. Claiming a batch and leasing all of it at once ties the lease
+// to the batch size: a sweeper working through 50 rows at up to one dispatch timeout each needs
+// far longer than a lease sized for a single dispatch, and once it lapses another sweeper claims
+// the rows this one has not reached yet. Claiming per row writes each lease immediately before
+// the dispatch it covers, so the lease only ever has to cover one call and the sweep's batch
+// limit is free to be whatever the operator wants.
 //
 // Only RETURN_FAILED is retryable here. RETURN_ENQUEUED already has a bridge position and is
 // driven by the relayer's own queue; NONE has nothing to return; RETURN_ESCALATED gave up and
@@ -185,10 +193,7 @@ func withResidueClaimLock(q *gorm.DB, dialect string) *gorm.DB {
 	return q.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
 }
 
-func (r *crossCurrencySwapRepository) ClaimRetryableResidues(ctx context.Context, now time.Time, limit int) ([]domain.CrossCurrencySwapOperation, error) {
-	if limit <= 0 {
-		limit = 50
-	}
+func (r *crossCurrencySwapRepository) ClaimNextRetryableResidue(ctx context.Context, now time.Time) (*domain.CrossCurrencySwapOperation, error) {
 	var ops []domain.CrossCurrencySwapOperation
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		q := tx.
@@ -201,7 +206,7 @@ func (r *crossCurrencySwapRepository) ClaimRetryableResidues(ctx context.Context
 			Where("residue_attempts < ?", services.ResidueMaxAttempts()).
 			Where("residue_next_attempt_at IS NULL OR residue_next_attempt_at <= ?", now).
 			Order("created_at ASC").
-			Limit(limit)
+			Limit(1)
 		q = withResidueClaimLock(q, tx.Dialector.Name())
 		if err := q.Find(&ops).Error; err != nil {
 			return err
@@ -209,19 +214,18 @@ func (r *crossCurrencySwapRepository) ClaimRetryableResidues(ctx context.Context
 		if len(ops) == 0 {
 			return nil
 		}
-		ids := make([]string, 0, len(ops))
-		for i := range ops {
-			ids = append(ids, ops[i].SwapID)
-		}
 		lease := now.Add(services.ResidueClaimLease())
 		return tx.Model(&domain.CrossCurrencySwapOperation{}).
-			Where("swap_id IN ?", ids).
+			Where("swap_id = ?", ops[0].SwapID).
 			Update("residue_next_attempt_at", lease).Error
 	})
 	if err != nil {
 		return nil, err
 	}
-	return ops, nil
+	if len(ops) == 0 {
+		return nil, nil
+	}
+	return &ops[0], nil
 }
 
 // RecordResidueAttempt persists the attempt counter and when the next attempt becomes due.

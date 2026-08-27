@@ -63,10 +63,15 @@ func ResidueClaimLease() time.Duration { return residueClaimLeaseSeconds * time.
 // ResidueRetryRepository is the persistence the retry loop needs. It is a narrow slice of the
 // swap repository so the worker can be tested without one.
 type ResidueRetryRepository interface {
-	// ClaimRetryableResidues returns swaps whose residue return failed to enqueue and whose
-	// next attempt is due, oldest first, bounded by limit — and CLAIMS them, so a concurrent
-	// sweeper does not pick up the same rows.
-	ClaimRetryableResidues(ctx context.Context, now time.Time, limit int) ([]domain.CrossCurrencySwapOperation, error)
+	// ClaimNextRetryableResidue returns the oldest swap whose residue return failed to enqueue
+	// and whose next attempt is due — and CLAIMS it, so a concurrent sweeper does not pick up
+	// the same row. It returns (nil, nil) when nothing is due.
+	//
+	// One row per call rather than a batch: the claim leases the row it returns, and a lease
+	// written per row covers exactly the dispatch that follows it. Leasing a whole batch at
+	// once would instead have to cover every dispatch in that batch, which is what coupled the
+	// batch size to the lease duration.
+	ClaimNextRetryableResidue(ctx context.Context, now time.Time) (*domain.CrossCurrencySwapOperation, error)
 	// UpdateResidue records the outcome of an attempt (status, amount, position).
 	UpdateResidue(ctx context.Context, swapID, amount, positionID string, status domain.ResidueReturnStatus) error
 	// RecordResidueAttempt persists the attempt counter and when the next one becomes due.
@@ -84,16 +89,18 @@ func (o *CrossCurrencySwapOrchestrator) RetryFailedResidueReturns(ctx context.Co
 	if repo == nil {
 		return 0, 0
 	}
-	// Claimed, not merely listed: with more than one gateway replica sweeping, a plain SELECT
-	// hands both the same rows and both dispatch. That does not double-refund — the endpoint is
-	// idempotent on (swap_tx_hash, RESIDUE) — but it burns two attempts against one row's
-	// ceiling and doubles the load on the issuing CB for no gain.
-	pending, err := repo.ClaimRetryableResidues(ctx, now, limit)
-	if err != nil {
-		log.Printf("[residue-retry] claim retryable residues: %v", err)
-		return 0, 0
-	}
-	for i := range pending {
+	// Claimed one at a time, not merely listed: with more than one gateway replica sweeping, a
+	// plain SELECT hands both the same rows and both dispatch. That does not double-refund —
+	// the endpoint is idempotent on (swap_tx_hash, RESIDUE) — but it burns two attempts against
+	// one row's ceiling and doubles the load on the issuing CB for no gain.
+	//
+	// Per row, because the claim leases what it returns and the lease has to outlast the work
+	// it covers. Claiming the whole batch up front leases every row at the same instant, so the
+	// lease would have to cover all of them: at one dispatch timeout each, a full batch outlives
+	// a lease sized for one dispatch and another sweeper picks up the tail. Claiming here, on
+	// each iteration, keeps the lease covering exactly the dispatch that follows it — and leaves
+	// limit free to be whatever the operator wants, since it no longer has to fit inside it.
+	for claimed := 0; claimed < limit; claimed++ {
 		// A cancelled context means the process is going away, not that the attempt failed.
 		// Counting it would burn attempts — and escalate rows sitting at the ceiling — for no
 		// reason other than a restart.
@@ -101,7 +108,17 @@ func (o *CrossCurrencySwapOrchestrator) RetryFailedResidueReturns(ctx context.Co
 			log.Printf("[residue-retry] sweep interrupted after %d attempts: %v", attempted, ctx.Err())
 			return attempted, recovered
 		}
-		op := &pending[i]
+		// time.Now(), not the sweep's now: the lease is written here and must run from here.
+		// A sweep that has already spent minutes on earlier rows would otherwise hand this row
+		// a lease that is already partly, or entirely, in the past.
+		op, err := repo.ClaimNextRetryableResidue(ctx, time.Now())
+		if err != nil {
+			log.Printf("[residue-retry] claim next retryable residue: %v", err)
+			return attempted, recovered
+		}
+		if op == nil {
+			return attempted, recovered
+		}
 		// Governance pausing a pair stops trading on it; deriving refunds from that same pair's
 		// LogSwap events while it is paused would leave the one unattended path still moving
 		// value. Reschedule without consuming an attempt — the residue is not lost by waiting.

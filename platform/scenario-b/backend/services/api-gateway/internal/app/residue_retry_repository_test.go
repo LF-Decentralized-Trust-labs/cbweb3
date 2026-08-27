@@ -41,7 +41,30 @@ func residueOp(swapID string, status domain.ResidueReturnStatus, createdAt time.
 	}
 }
 
-func TestClaimRetryableResidues_SelectsOnlyFailedAndDue(t *testing.T) {
+// claimUpTo drains the single-row claim, up to limit rows. The repository claims one row per
+// call now — each lease is written immediately before the dispatch it covers, so it never has
+// to span a whole batch — and this is the same loop the sweep runs. Tests written against the
+// old batch claim keep asserting the same selection semantics through it.
+func claimUpTo(t *testing.T, r *crossCurrencySwapRepository, ctx context.Context, now time.Time, limit int) ([]domain.CrossCurrencySwapOperation, error) {
+	t.Helper()
+	if limit <= 0 {
+		limit = 50
+	}
+	var out []domain.CrossCurrencySwapOperation
+	for i := 0; i < limit; i++ {
+		op, err := r.ClaimNextRetryableResidue(ctx, now)
+		if err != nil {
+			return out, err
+		}
+		if op == nil {
+			return out, nil
+		}
+		out = append(out, *op)
+	}
+	return out, nil
+}
+
+func TestClaimNextRetryableResidue_SelectsOnlyFailedAndDue(t *testing.T) {
 	db := repoDB(t, &domain.CrossCurrencySwapOperation{})
 	r := newCrossCurrencySwapRepository(db)
 	ctx := context.Background()
@@ -73,7 +96,7 @@ func TestClaimRetryableResidues_SelectsOnlyFailedAndDue(t *testing.T) {
 		}
 	}
 
-	got, err := r.ClaimRetryableResidues(ctx, now, 50)
+	got, err := claimUpTo(t, r, ctx, now, 50)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -93,7 +116,7 @@ func TestClaimRetryableResidues_SelectsOnlyFailedAndDue(t *testing.T) {
 	}
 }
 
-func TestClaimRetryableResidues_RespectsLimit(t *testing.T) {
+func TestClaimNextRetryableResidue_RespectsLimit(t *testing.T) {
 	db := repoDB(t, &domain.CrossCurrencySwapOperation{})
 	r := newCrossCurrencySwapRepository(db)
 	now := time.Now().UTC()
@@ -105,7 +128,7 @@ func TestClaimRetryableResidues_RespectsLimit(t *testing.T) {
 		}
 	}
 
-	got, err := r.ClaimRetryableResidues(context.Background(), now.Add(time.Hour), 2)
+	got, err := claimUpTo(t, r, context.Background(), now.Add(time.Hour), 2)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -122,7 +145,7 @@ func TestClaimRetryableResidues_RespectsLimit(t *testing.T) {
 			t.Fatalf("seed bulk: %v", err)
 		}
 	}
-	all, err := r.ClaimRetryableResidues(context.Background(), now.Add(time.Hour), 0)
+	all, err := claimUpTo(t, r, context.Background(), now.Add(time.Hour), 0)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -135,7 +158,7 @@ func TestClaimRetryableResidues_RespectsLimit(t *testing.T) {
 // statements: if the escalation write fails while the counter write lands, the row stays
 // RETURN_FAILED at the ceiling, and without this bound it would be re-dispatched to the issuing
 // CB on every sweep forever.
-func TestClaimRetryableResidues_ExcludesRowsAtTheAttemptCeiling(t *testing.T) {
+func TestClaimNextRetryableResidue_ExcludesRowsAtTheAttemptCeiling(t *testing.T) {
 	db := repoDB(t, &domain.CrossCurrencySwapOperation{})
 	r := newCrossCurrencySwapRepository(db)
 	now := time.Now().UTC()
@@ -150,7 +173,7 @@ func TestClaimRetryableResidues_ExcludesRowsAtTheAttemptCeiling(t *testing.T) {
 		}
 	}
 
-	got, err := r.ClaimRetryableResidues(context.Background(), now.Add(time.Hour), 50)
+	got, err := claimUpTo(t, r, context.Background(), now.Add(time.Hour), 50)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -219,7 +242,7 @@ func reloadSwap(t *testing.T, db *gorm.DB, swapID string) domain.CrossCurrencySw
 // SQLite cannot exercise FOR UPDATE SKIP LOCKED (single writer, and it rejects the clause, so it
 // is Postgres-only). What IS portable, and is what actually keeps the rows apart after the claim
 // transaction commits, is the lease — so that is what these pin.
-func TestClaimRetryableResidues_LeasesTheRowsItReturns(t *testing.T) {
+func TestClaimNextRetryableResidue_LeasesTheRowsItReturns(t *testing.T) {
 	db := repoDB(t, &domain.CrossCurrencySwapOperation{})
 	r := newCrossCurrencySwapRepository(db)
 	ctx := context.Background()
@@ -234,7 +257,7 @@ func TestClaimRetryableResidues_LeasesTheRowsItReturns(t *testing.T) {
 		}
 	}
 
-	first, err := r.ClaimRetryableResidues(ctx, now, 50)
+	first, err := claimUpTo(t, r, ctx, now, 50)
 	if err != nil {
 		t.Fatalf("first claim: %v", err)
 	}
@@ -243,7 +266,7 @@ func TestClaimRetryableResidues_LeasesTheRowsItReturns(t *testing.T) {
 	}
 
 	// A second sweeper, same instant: the rows are claimed, so it must find nothing to do.
-	second, err := r.ClaimRetryableResidues(ctx, now, 50)
+	second, err := claimUpTo(t, r, ctx, now, 50)
 	if err != nil {
 		t.Fatalf("second claim: %v", err)
 	}
@@ -256,7 +279,7 @@ func TestClaimRetryableResidues_LeasesTheRowsItReturns(t *testing.T) {
 	}
 
 	// And the lease is a deferral, not a disappearance: once it expires the row is due again.
-	later, err := r.ClaimRetryableResidues(ctx, now.Add(services.ResidueClaimLease()+time.Second), 50)
+	later, err := claimUpTo(t, r, ctx, now.Add(services.ResidueClaimLease()+time.Second), 50)
 	if err != nil {
 		t.Fatalf("claim after lease: %v", err)
 	}
@@ -267,7 +290,7 @@ func TestClaimRetryableResidues_LeasesTheRowsItReturns(t *testing.T) {
 
 // Claiming is not attempting. If the lease consumed an attempt, a busy sweep would walk rows to
 // the escalation ceiling without ever having dispatched anything.
-func TestClaimRetryableResidues_DoesNotConsumeAnAttempt(t *testing.T) {
+func TestClaimNextRetryableResidue_DoesNotConsumeAnAttempt(t *testing.T) {
 	db := repoDB(t, &domain.CrossCurrencySwapOperation{})
 	r := newCrossCurrencySwapRepository(db)
 	now := time.Now().UTC()
@@ -278,7 +301,7 @@ func TestClaimRetryableResidues_DoesNotConsumeAnAttempt(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	if _, err := r.ClaimRetryableResidues(context.Background(), now, 50); err != nil {
+	if _, err := claimUpTo(t, r, context.Background(), now, 50); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
@@ -314,5 +337,65 @@ func TestWithResidueClaimLock_LocksOnPostgresOnly(t *testing.T) {
 		if _, ok := plain.Statement.Clauses["FOR"]; ok {
 			t.Errorf("%q got a locking clause it may not parse", dialect)
 		}
+	}
+}
+
+// The lease runs from the moment the row is claimed, which is what lets the sweep's batch limit
+// be free.
+//
+// Claiming a batch and leasing all of it at once ties the two together: a sweeper working
+// through 50 rows at up to one dispatch timeout each needs far longer than a lease sized for a
+// single dispatch, and the rows it has not reached become claimable by another sweeper while it
+// is still working. Here the second row is claimed ten minutes after the first — a long sweep —
+// and must come away with a lease measured from then, not from when the sweep started.
+func TestClaimNextRetryableResidue_LeasesEachRowFromWhenItIsClaimed(t *testing.T) {
+	db := repoDB(t, &domain.CrossCurrencySwapOperation{})
+	r := &crossCurrencySwapRepository{db: db}
+	ctx := context.Background()
+	start := time.Now().UTC()
+
+	for _, op := range []*domain.CrossCurrencySwapOperation{
+		residueOp("a", domain.ResidueReturnFailed, start.Add(-2*time.Minute), nil),
+		residueOp("b", domain.ResidueReturnFailed, start.Add(-time.Minute), nil),
+	} {
+		if err := db.Create(op).Error; err != nil {
+			t.Fatalf("seed %s: %v", op.SwapID, err)
+		}
+	}
+
+	first, err := r.ClaimNextRetryableResidue(ctx, start)
+	if err != nil || first == nil {
+		t.Fatalf("first claim: %v (row %v)", err, first)
+	}
+	// What the sweep does before moving on: every outcome writes a real schedule over the
+	// lease. Without this the first row simply falls due again, which is the crashed-sweep
+	// path, not the one under test here.
+	settled := start.Add(time.Hour)
+	if err := r.RecordResidueAttempt(ctx, first.SwapID, 1, &settled); err != nil {
+		t.Fatalf("record outcome for %s: %v", first.SwapID, err)
+	}
+
+	// The sweep has been dispatching for ten minutes — longer than one lease.
+	late := start.Add(10 * time.Minute)
+	second, err := r.ClaimNextRetryableResidue(ctx, late)
+	if err != nil || second == nil {
+		t.Fatalf("second claim: %v (row %v)", err, second)
+	}
+	if second.SwapID == first.SwapID {
+		t.Fatalf("the second claim returned the row the first already claimed (%s)", first.SwapID)
+	}
+
+	var got domain.CrossCurrencySwapOperation
+	if err := db.Where("swap_id = ?", second.SwapID).Take(&got).Error; err != nil {
+		t.Fatalf("reload %s: %v", second.SwapID, err)
+	}
+	if got.ResidueNextAttemptAt == nil {
+		t.Fatalf("row %s was claimed without a lease", second.SwapID)
+	}
+	if !got.ResidueNextAttemptAt.After(late) {
+		t.Errorf("row %s leased until %s, which is already past at claim time %s: "+
+			"the lease is measured from the start of the sweep, so a long sweep hands its "+
+			"remaining rows to another sweeper",
+			second.SwapID, got.ResidueNextAttemptAt.UTC(), late.UTC())
 	}
 }
