@@ -35,7 +35,7 @@ func newFakeResidueRetryRepo(ops ...domain.CrossCurrencySwapOperation) *fakeResi
 	}
 }
 
-func (f *fakeResidueRetryRepo) ListRetryableResidues(context.Context, time.Time, int) ([]domain.CrossCurrencySwapOperation, error) {
+func (f *fakeResidueRetryRepo) ClaimRetryableResidues(context.Context, time.Time, int) ([]domain.CrossCurrencySwapOperation, error) {
 	return f.pending, f.listErr
 }
 

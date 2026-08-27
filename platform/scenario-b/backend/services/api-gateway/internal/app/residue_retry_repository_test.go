@@ -41,7 +41,7 @@ func residueOp(swapID string, status domain.ResidueReturnStatus, createdAt time.
 	}
 }
 
-func TestListRetryableResidues_SelectsOnlyFailedAndDue(t *testing.T) {
+func TestClaimRetryableResidues_SelectsOnlyFailedAndDue(t *testing.T) {
 	db := repoDB(t, &domain.CrossCurrencySwapOperation{})
 	r := newCrossCurrencySwapRepository(db)
 	ctx := context.Background()
@@ -73,7 +73,7 @@ func TestListRetryableResidues_SelectsOnlyFailedAndDue(t *testing.T) {
 		}
 	}
 
-	got, err := r.ListRetryableResidues(ctx, now, 50)
+	got, err := r.ClaimRetryableResidues(ctx, now, 50)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestListRetryableResidues_SelectsOnlyFailedAndDue(t *testing.T) {
 	}
 }
 
-func TestListRetryableResidues_RespectsLimit(t *testing.T) {
+func TestClaimRetryableResidues_RespectsLimit(t *testing.T) {
 	db := repoDB(t, &domain.CrossCurrencySwapOperation{})
 	r := newCrossCurrencySwapRepository(db)
 	now := time.Now().UTC()
@@ -105,7 +105,7 @@ func TestListRetryableResidues_RespectsLimit(t *testing.T) {
 		}
 	}
 
-	got, err := r.ListRetryableResidues(context.Background(), now.Add(time.Hour), 2)
+	got, err := r.ClaimRetryableResidues(context.Background(), now.Add(time.Hour), 2)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestListRetryableResidues_RespectsLimit(t *testing.T) {
 			t.Fatalf("seed bulk: %v", err)
 		}
 	}
-	all, err := r.ListRetryableResidues(context.Background(), now.Add(time.Hour), 0)
+	all, err := r.ClaimRetryableResidues(context.Background(), now.Add(time.Hour), 0)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestListRetryableResidues_RespectsLimit(t *testing.T) {
 // statements: if the escalation write fails while the counter write lands, the row stays
 // RETURN_FAILED at the ceiling, and without this bound it would be re-dispatched to the issuing
 // CB on every sweep forever.
-func TestListRetryableResidues_ExcludesRowsAtTheAttemptCeiling(t *testing.T) {
+func TestClaimRetryableResidues_ExcludesRowsAtTheAttemptCeiling(t *testing.T) {
 	db := repoDB(t, &domain.CrossCurrencySwapOperation{})
 	r := newCrossCurrencySwapRepository(db)
 	now := time.Now().UTC()
@@ -150,7 +150,7 @@ func TestListRetryableResidues_ExcludesRowsAtTheAttemptCeiling(t *testing.T) {
 		}
 	}
 
-	got, err := r.ListRetryableResidues(context.Background(), now.Add(time.Hour), 50)
+	got, err := r.ClaimRetryableResidues(context.Background(), now.Add(time.Hour), 50)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -209,4 +209,110 @@ func reloadSwap(t *testing.T, db *gorm.DB, swapID string) domain.CrossCurrencySw
 		t.Fatalf("reload %s: %v", swapID, err)
 	}
 	return got
+}
+
+// The claim is the point of this query, not a side effect. Two gateway replicas sweep on their
+// own timers; a plain SELECT hands both the same rows and both dispatch to the issuing CB. That
+// does not double-refund — the endpoint is idempotent on (swap_tx_hash, RESIDUE) — but it burns
+// two attempts against one row's ceiling and doubles the load for nothing.
+//
+// SQLite cannot exercise FOR UPDATE SKIP LOCKED (single writer, and it rejects the clause, so it
+// is Postgres-only). What IS portable, and is what actually keeps the rows apart after the claim
+// transaction commits, is the lease — so that is what these pin.
+func TestClaimRetryableResidues_LeasesTheRowsItReturns(t *testing.T) {
+	db := repoDB(t, &domain.CrossCurrencySwapOperation{})
+	r := newCrossCurrencySwapRepository(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	for _, op := range []*domain.CrossCurrencySwapOperation{
+		residueOp("a", domain.ResidueReturnFailed, now.Add(-2*time.Minute), nil),
+		residueOp("b", domain.ResidueReturnFailed, now.Add(-time.Minute), nil),
+	} {
+		if err := db.Create(op).Error; err != nil {
+			t.Fatalf("seed %s: %v", op.SwapID, err)
+		}
+	}
+
+	first, err := r.ClaimRetryableResidues(ctx, now, 50)
+	if err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	if len(first) != 2 {
+		t.Fatalf("first claim returned %d rows, want 2", len(first))
+	}
+
+	// A second sweeper, same instant: the rows are claimed, so it must find nothing to do.
+	second, err := r.ClaimRetryableResidues(ctx, now, 50)
+	if err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+	if len(second) != 0 {
+		ids := make([]string, 0, len(second))
+		for i := range second {
+			ids = append(ids, second[i].SwapID)
+		}
+		t.Fatalf("a concurrent sweeper picked up already-claimed rows: %v", ids)
+	}
+
+	// And the lease is a deferral, not a disappearance: once it expires the row is due again.
+	later, err := r.ClaimRetryableResidues(ctx, now.Add(services.ResidueClaimLease()+time.Second), 50)
+	if err != nil {
+		t.Fatalf("claim after lease: %v", err)
+	}
+	if len(later) != 2 {
+		t.Fatalf("after the lease expired the claim returned %d rows, want 2 — a crashed sweep must not park a residue forever", len(later))
+	}
+}
+
+// Claiming is not attempting. If the lease consumed an attempt, a busy sweep would walk rows to
+// the escalation ceiling without ever having dispatched anything.
+func TestClaimRetryableResidues_DoesNotConsumeAnAttempt(t *testing.T) {
+	db := repoDB(t, &domain.CrossCurrencySwapOperation{})
+	r := newCrossCurrencySwapRepository(db)
+	now := time.Now().UTC()
+
+	op := residueOp("a", domain.ResidueReturnFailed, now.Add(-time.Minute), nil)
+	op.ResidueAttempts = 2
+	if err := db.Create(op).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if _, err := r.ClaimRetryableResidues(context.Background(), now, 50); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	var got domain.CrossCurrencySwapOperation
+	if err := db.Where("swap_id = ?", "a").First(&got).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.ResidueAttempts != 2 {
+		t.Errorf("residue_attempts = %d after a claim, want 2 — the claim must not count as an attempt", got.ResidueAttempts)
+	}
+	if got.ResidueStatus != domain.ResidueReturnFailed {
+		t.Errorf("residue_status = %q after a claim, want it unchanged", got.ResidueStatus)
+	}
+}
+
+// The exclusion SQLite cannot show. FOR UPDATE SKIP LOCKED is what stops two sweepers claiming
+// the same rows inside the claim transaction, and it is Postgres-only — SQLite has a single
+// writer and rejects the clause, so an ungated version would break every repository test rather
+// than fail in production.
+//
+// This pins the gate. The SQL it produces on Postgres was verified against a real server; see
+// the PR. Opening a Postgres dialector here would dial one, which a unit test must not need.
+func TestWithResidueClaimLock_LocksOnPostgresOnly(t *testing.T) {
+	db := repoDB(t, &domain.CrossCurrencySwapOperation{})
+
+	locked := withResidueClaimLock(db.Session(&gorm.Session{}), "postgres")
+	if _, ok := locked.Statement.Clauses["FOR"]; !ok {
+		t.Error("postgres claim does not lock the rows it selects")
+	}
+
+	for _, dialect := range []string{"sqlite", "mysql", ""} {
+		plain := withResidueClaimLock(db.Session(&gorm.Session{}), dialect)
+		if _, ok := plain.Statement.Clauses["FOR"]; ok {
+			t.Errorf("%q got a locking clause it may not parse", dialect)
+		}
+	}
 }

@@ -44,18 +44,29 @@ const (
 	residueBackoffCapSeconds = 1800
 	// residueBackoffBaseSeconds is the first delay; each attempt doubles it up to the cap.
 	residueBackoffBaseSeconds = 60
+	// residueClaimLeaseSeconds is how long a claimed row is hidden from other sweepers while
+	// this one works on it. It only matters when a sweep dies mid-row: every normal outcome —
+	// success, failure, or a breaker deferral — writes a real schedule over the lease. So it
+	// wants to be long enough to cover a dispatch to the issuing CB and short enough that a
+	// crashed sweep does not park a residue for an hour.
+	residueClaimLeaseSeconds = 300
 )
 
 // ResidueMaxAttempts exposes the attempt ceiling so the persistence layer can enforce it in the
 // query itself, keeping one definition of the bound.
 func ResidueMaxAttempts() int { return residueMaxAttempts }
 
+// ResidueClaimLease exposes the claim lease for the same reason: the persistence layer writes
+// it, this package owns what it means.
+func ResidueClaimLease() time.Duration { return residueClaimLeaseSeconds * time.Second }
+
 // ResidueRetryRepository is the persistence the retry loop needs. It is a narrow slice of the
 // swap repository so the worker can be tested without one.
 type ResidueRetryRepository interface {
-	// ListRetryableResidues returns swaps whose residue return failed to enqueue and whose
-	// next attempt is due, oldest first, bounded by limit.
-	ListRetryableResidues(ctx context.Context, now time.Time, limit int) ([]domain.CrossCurrencySwapOperation, error)
+	// ClaimRetryableResidues returns swaps whose residue return failed to enqueue and whose
+	// next attempt is due, oldest first, bounded by limit — and CLAIMS them, so a concurrent
+	// sweeper does not pick up the same rows.
+	ClaimRetryableResidues(ctx context.Context, now time.Time, limit int) ([]domain.CrossCurrencySwapOperation, error)
 	// UpdateResidue records the outcome of an attempt (status, amount, position).
 	UpdateResidue(ctx context.Context, swapID, amount, positionID string, status domain.ResidueReturnStatus) error
 	// RecordResidueAttempt persists the attempt counter and when the next one becomes due.
@@ -73,9 +84,13 @@ func (o *CrossCurrencySwapOrchestrator) RetryFailedResidueReturns(ctx context.Co
 	if repo == nil {
 		return 0, 0
 	}
-	pending, err := repo.ListRetryableResidues(ctx, now, limit)
+	// Claimed, not merely listed: with more than one gateway replica sweeping, a plain SELECT
+	// hands both the same rows and both dispatch. That does not double-refund — the endpoint is
+	// idempotent on (swap_tx_hash, RESIDUE) — but it burns two attempts against one row's
+	// ceiling and doubles the load on the issuing CB for no gain.
+	pending, err := repo.ClaimRetryableResidues(ctx, now, limit)
 	if err != nil {
-		log.Printf("[residue-retry] list retryable residues: %v", err)
+		log.Printf("[residue-retry] claim retryable residues: %v", err)
 		return 0, 0
 	}
 	for i := range pending {

@@ -13,6 +13,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // crossCurrencySwapRepository persists CrossCurrencySwapOperation records.
@@ -147,29 +148,76 @@ func (r *crossCurrencySwapRepository) UpdateResidue(ctx context.Context, swapID,
 		Updates(updates).Error
 }
 
-// ListRetryableResidues returns swaps whose residue return failed to ENQUEUE and whose next
-// attempt is due, oldest first.
+// ClaimRetryableResidues returns swaps whose residue return failed to ENQUEUE and whose next
+// attempt is due, oldest first — and claims them so a concurrent sweeper skips them.
 //
 // Only RETURN_FAILED is retryable here. RETURN_ENQUEUED already has a bridge position and is
 // driven by the relayer's own queue; NONE has nothing to return; RETURN_ESCALATED gave up and
 // needs a human. A NULL next_attempt_at is due immediately — that is the state a first failure
 // leaves behind, since it predates any scheduling.
-func (r *crossCurrencySwapRepository) ListRetryableResidues(ctx context.Context, now time.Time, limit int) ([]domain.CrossCurrencySwapOperation, error) {
+//
+// The claim is two statements in ONE SHORT transaction, and deliberately does not span the
+// work:
+//
+//   - SELECT … FOR UPDATE SKIP LOCKED picks rows no other sweeper is claiming right now. It is
+//     Postgres-only; SQLite (tests) has a single writer and rejects the clause.
+//   - the same transaction writes a lease into residue_next_attempt_at, which is what keeps the
+//     rows hidden AFTER the transaction commits.
+//
+// Holding the row locks across the sweep instead would be simpler to write and wrong to run:
+// retryOne dispatches to the issuing CB over the network, so the transaction — and a pooled
+// connection — would stay open for the length of an HTTP call to another entity, for every row.
+// The lease gives the same exclusion without holding anything.
+//
+// The lease consumes no attempt. Every normal outcome (success, failure, breaker deferral)
+// writes a real schedule over it, so it only decides how long a residue waits when a sweep dies
+// mid-row.
+// withResidueClaimLock adds FOR UPDATE SKIP LOCKED where the database supports it.
+//
+// Postgres-only by necessity, not preference: SQLite (the repository tests) has a single writer
+// and rejects the clause, so an ungated version would fail every one of those tests instead of
+// failing in production. Splitting the decision out makes it testable without a server — the
+// emitted SQL is verified against a real Postgres separately.
+func withResidueClaimLock(q *gorm.DB, dialect string) *gorm.DB {
+	if dialect != "postgres" {
+		return q
+	}
+	return q.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
+}
+
+func (r *crossCurrencySwapRepository) ClaimRetryableResidues(ctx context.Context, now time.Time, limit int) ([]domain.CrossCurrencySwapOperation, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	var ops []domain.CrossCurrencySwapOperation
-	err := r.db.WithContext(ctx).
-		Where("residue_status = ?", domain.ResidueReturnFailed).
-		// The attempt ceiling is enforced by the QUERY, not only by the status write that
-		// escalates a row. Those are two separate statements: if the status write fails while
-		// the counter write succeeds, the row stays RETURN_FAILED at the ceiling, and without
-		// this bound it would be re-dispatched to the issuing CB on every sweep forever.
-		Where("residue_attempts < ?", services.ResidueMaxAttempts()).
-		Where("residue_next_attempt_at IS NULL OR residue_next_attempt_at <= ?", now).
-		Order("created_at ASC").
-		Limit(limit).
-		Find(&ops).Error
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		q := tx.
+			Where("residue_status = ?", domain.ResidueReturnFailed).
+			// The attempt ceiling is enforced by the QUERY, not only by the status write that
+			// escalates a row. Those are two separate statements: if the status write fails
+			// while the counter write succeeds, the row stays RETURN_FAILED at the ceiling, and
+			// without this bound it would be re-dispatched to the issuing CB on every sweep
+			// forever.
+			Where("residue_attempts < ?", services.ResidueMaxAttempts()).
+			Where("residue_next_attempt_at IS NULL OR residue_next_attempt_at <= ?", now).
+			Order("created_at ASC").
+			Limit(limit)
+		q = withResidueClaimLock(q, tx.Dialector.Name())
+		if err := q.Find(&ops).Error; err != nil {
+			return err
+		}
+		if len(ops) == 0 {
+			return nil
+		}
+		ids := make([]string, 0, len(ops))
+		for i := range ops {
+			ids = append(ids, ops[i].SwapID)
+		}
+		lease := now.Add(services.ResidueClaimLease())
+		return tx.Model(&domain.CrossCurrencySwapOperation{}).
+			Where("swap_id IN ?", ids).
+			Update("residue_next_attempt_at", lease).Error
+	})
 	if err != nil {
 		return nil, err
 	}
