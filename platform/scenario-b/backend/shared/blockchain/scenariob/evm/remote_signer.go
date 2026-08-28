@@ -86,10 +86,18 @@ func (s *Signer) signTx(ctx context.Context, tx *types.Transaction) (*types.Tran
 	if len(sig) != 65 {
 		return nil, fmt.Errorf("sign tx via key provider (%s): expected a 65-byte signature, got %d", s.keyID, len(sig))
 	}
-	if sig[64] >= 27 {
-		sig[64] -= 27
+	// Normalise on a COPY. `sig` belongs to the provider: it may be reusing a buffer, caching
+	// the response, or handing out a slice of a larger array, and none of that is ours to
+	// write through. Mutating it in place worked only because the local provider happens to
+	// allocate per call — a remote KMS client that pools buffers would see its own bytes
+	// changed under it, and the corruption would surface as an invalid signature far from
+	// here.
+	normalized := make([]byte, len(sig))
+	copy(normalized, sig)
+	if normalized[64] >= 27 {
+		normalized[64] -= 27
 	}
-	signed, err := tx.WithSignature(london, sig)
+	signed, err := tx.WithSignature(london, normalized)
 	if err != nil {
 		return nil, fmt.Errorf("attach signature (%s): %w", s.keyID, err)
 	}
