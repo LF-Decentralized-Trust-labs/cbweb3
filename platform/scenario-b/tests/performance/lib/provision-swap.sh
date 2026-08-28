@@ -14,16 +14,16 @@
 # so re-runs against a warm stack are cheap. Honors SKIP_STACK (dry-run) and
 # PERF_SKIP_PROVISION=1. Source after log.sh and auth.sh.
 #
-# Env (gateways default to the local entity host ports):
-#   API_GW_URL (payer/bank-a 18080), API_GW_BANK_B_URL (beneficiary/bank-b 28080),
-#   API_GW_CENTRAL_BANK_A_URL (38080), API_GW_CENTRAL_BANK_B_URL (60080)
+# Env (every gateway is REQUIRED and has no default — see below):
+#   API_GW_URL (payer/bank-a), API_GW_BANK_B_URL (beneficiary/bank-b),
+#   API_GW_CENTRAL_BANK_A_URL, API_GW_CENTRAL_BANK_B_URL
 #   PAYER_BANK_CODE (bank-a), BENEFICIARY_BANK_ID (bank-b)
 #   PROVISION_AMOUNT (1e24 tCeBM minted to the payer — covers any tiny-swap run)
 
-: "${API_GW_URL:=http://localhost:18080}"
-: "${API_GW_BANK_B_URL:=http://localhost:28080}"
-: "${API_GW_CENTRAL_BANK_A_URL:=http://localhost:38080}"
-: "${API_GW_CENTRAL_BANK_B_URL:=http://localhost:60080}"
+: "${API_GW_URL:?API_GW_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
+: "${API_GW_BANK_B_URL:?API_GW_BANK_B_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
+: "${API_GW_CENTRAL_BANK_A_URL:?API_GW_CENTRAL_BANK_A_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
+: "${API_GW_CENTRAL_BANK_B_URL:?API_GW_CENTRAL_BANK_B_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
 : "${PROVISION_AMOUNT:=1000000000000000000000000}"
 
 _jpost() { # URL TOKEN JSON

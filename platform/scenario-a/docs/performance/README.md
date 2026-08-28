@@ -16,12 +16,15 @@
 make scenario-a.perf-all        # from scenario-a/
 ```
 
-That single command needs **no arguments and no manual setup**. It:
+That single command needs **no arguments**. It expects a stack to already be running — see
+[Prerequisites](#2-prerequisites) — and derives every endpoint from the toolkit manifests, so
+there is nothing to configure. It:
 
-1. ~~**Stands up the stack** if it isn't already reachable~~ — **broken since the legacy path
-   was retired.** `lib/stack.sh` shells out to `make spoke-a` / `make spoke-all`, and neither
-   target exists. Stand the stack up first with `cd samples && ./deploy-all.sh`; the harness
-   then finds it reachable and proceeds. Tracked as DEF-022.
+1. **Finds the stack.** Reuses whatever is serving at the derived gateway URLs. If nothing
+   answers it stops with a message telling you how to stand one up, rather than benchmarking
+   nothing. Pass `PERF_ALLOW_PROVISION=1` to let the harness provision through the toolkit
+   instead; it runs `samples/deploy-all.sh` **without** `--clean`, so an existing environment
+   is converged rather than wiped.
 2. **Mints `AUTH_TOKEN`** for bank-a and central-bank-a via `/api/v1/auth/login`, reading
    `KC_CLIENT_ID`/`KC_CLIENT_SECRET` from `backend/config/.env.infra.{bank-a,central-bank-a}`
    (`lib/auth.sh`).
@@ -81,8 +84,13 @@ The sections below document the methodology and the manual single-benchmark path
 ## 2. Prerequisites
 
 - [`k6`](https://k6.io) installed (`k6 version`).
-- A running Scenario A stack, brought up **before** the harness: `cd samples && ./deploy-all.sh`
-  from `scenario-a/`. The harness's own auto-bring-up is broken (DEF-022).
+- A running Scenario A stack: `cd samples && ./deploy-all.sh` from `scenario-a/`.
+  Provisioning is the operator's step by default — the toolkit deploys every entity on the
+  host, and with `--clean` wipes containers, volumes and data dirs, which is not something a
+  benchmark should decide to do. `PERF_ALLOW_PROVISION=1` opts in (never passing `--clean`).
+- Endpoints are **derived**, not configured: the `perf-*` targets read them from the same
+  manifests the toolkit was applied with (`tests/integration/toolkit-env.sh`), which needs
+  `yq`. An explicit `API_GW_URL=...` on the make command line still wins.
 - An `AUTH_TOKEN`: a JWT from `/api/v1/auth/login` for a `commercial_bank` user on the entity
   being tested. Scenario A uses cookie-based auth; the scripts pass this value as the
   `access_token` cookie.

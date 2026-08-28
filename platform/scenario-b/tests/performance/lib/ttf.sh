@@ -20,12 +20,12 @@
 #                                     $OUTDIR/ttf.json with {p50_ms,p95_ms,samples,...}
 #
 # Env:
-#   API_GW_URL   commercial-bank gateway (default http://localhost:18080)
+#   API_GW_URL   commercial-bank gateway — REQUIRED, no default (see below)
 #   TTF_TPS      transfer rate for the TTF batch (default 10 — moderate, finality-friendly)
 #   TTF_SECS     batch duration seconds (default 60)
 #   TTF_POLL_TIMEOUT  per-position finality wait, seconds (default 30)
 
-: "${API_GW_URL:=http://localhost:18080}"
+: "${API_GW_URL:?API_GW_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
 
 # _positions_active_map TOKEN -> echoes "<position_id> <epoch_ms_now>" for every ACTIVE position.
 # We stamp "now" because the API does not expose a finalised-at timestamp; polling cadence (1s)

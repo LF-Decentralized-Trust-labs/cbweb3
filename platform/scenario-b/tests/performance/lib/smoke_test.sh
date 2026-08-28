@@ -7,7 +7,8 @@
 #   2. structured JSON logging emits parseable JSON
 #   3. write-results.sh produces correct PASS / FAIL / VALIDATED / REVISE / UNKNOWN verdicts from
 #      synthetic k6 summary-export JSON + ttf.json
-#   4. the run-all driver completes its no-infra path (SKIP_STACK=1) and writes a RESULTS doc
+#   4. the run-all driver really completes its no-infra path (PERF_DRY_RUN=1), writes a RESULTS
+#      doc, and leaves the published docs/performance/RESULTS.md untouched
 #
 # Run: bash tests/performance/lib/smoke_test.sh   (or: make scenario-b.perf-smoke)
 
@@ -53,12 +54,29 @@ bash "$HERE/write-results.sh" "$(mktemp -d)" "$TMP/R3.md" >/dev/null 2>&1
 grep -q '| 8 | Error rate (steady state) | < 1% | baseline=N/A% | UNKNOWN' "$TMP/R3.md" && pass "missing summary -> UNKNOWN" || fail "UNKNOWN handling"
 rm -rf "$TMP"
 
-# 4. driver no-infra path (shimmed k6, SKIP_STACK/SKIP_SEED)
-SHIM="$(mktemp -d)"; printf '#!/bin/sh\necho shim\n' > "$SHIM/k6"; chmod +x "$SHIM/k6"
-DOC="$(mktemp -d)/RESULTS.md"
-if PATH="$SHIM:$PATH" SKIP_STACK=1 SKIP_SEED=1 \
-   bash -c '. "'"$HERE"'/log.sh"; true' 2>/dev/null; then pass "driver deps load"; else fail "driver deps load"; fi
-rm -rf "$SHIM"
+# 4. driver no-infra path — run the real driver under PERF_DRY_RUN=1 (what make
+# scenario-b.perf-all-dry does). It needs no stack, no manifests, no yq and no k6, and it
+# renders its RESULTS doc into a temp dir. This check used to source log.sh and call it a
+# driver run, which is how a dead dry-run guard survived review (DEF-022).
+DRY_OUT="$(mktemp)"
+if env -u API_GW_URL -u API_GW_CENTRAL_BANK_A_URL PERF_DRY_RUN=1 \
+   bash "$PERF_DIR/run-all.sh" > "$DRY_OUT" 2>&1; then
+  pass "driver completes its no-infra path"
+else
+  fail "driver completes its no-infra path (see $DRY_OUT)"
+fi
+if grep -q '"msg":"perf-all results written"' "$DRY_OUT"; then
+  pass "dry run writes a RESULTS doc"
+else
+  fail "dry run writes a RESULTS doc"
+fi
+# and it must not have touched the published document
+if grep -q '"doc":"[^"]*docs/performance/RESULTS.md"' "$DRY_OUT"; then
+  fail "dry run wrote into docs/performance/RESULTS.md"
+else
+  pass "dry run leaves docs/performance/RESULTS.md alone"
+fi
+rm -f "$DRY_OUT"
 
 echo "----"
 if [ "$fails" -eq 0 ]; then echo "ALL SMOKE CHECKS PASSED"; exit 0; else echo "$fails CHECK(S) FAILED"; exit 1; fi

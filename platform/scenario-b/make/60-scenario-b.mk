@@ -277,11 +277,23 @@ evidence.e2e-b: ## Capture live on-chain evidence (tx_hash/block/gas) and regene
 	@python3 ../tools/gen_evidence_bundles.py e2e-scenario-b
 
 # ── Performance baseline (T105) ──────────────────────────────────────────────
+#
+# Endpoints come from the toolkit manifests (the same tests/integration/toolkit-env.sh the
+# integration suite uses), not from hardcoded ports. API_GW_URL used to be undefined here and
+# was defaulted inside tests/performance/lib/stack.sh to :18080 — a port of the retired
+# deploy/local topology, so every target silently probed a gateway nothing serves (DEF-022).
+#
+# PERF_GW_ENV derives them and lets an explicit override win: `make ... API_GW_URL=...` still
+# takes precedence, which is why the assignment is conditional on the make variable.
+PERF_GW_ENV = eval "$$(bash ./$(TOOLKIT_ENV))"; \
+	  API_GW_URL="$(if $(API_GW_URL),$(API_GW_URL),$$API_GW_BANK_A_URL)"; \
+	  export API_GW_URL API_GW_CENTRAL_BANK_A_URL;
+
 
 scenario-b.perf-baseline:
 	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
 	@echo "[scenario-b] running performance baseline (quote + swap p95)..."
-	@API_GW_URL=$(API_GW_URL) k6 run tests/performance/scenario-b-perf.js
+	@$(PERF_GW_ENV) k6 run tests/performance/scenario-b-perf.js
 
 # ── R1-12.3 threshold harness (see scenario-b/docs/performance) ───────────────
 # These drive the Report 1 / Finding 12.3 thresholds. AUTH_TOKEN (commercial_bank
@@ -291,21 +303,21 @@ scenario-b.perf-baseline:
 scenario-b.perf-amm-throughput:
 	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
 	@echo "[scenario-b] AMM swap throughput — validating DRAFT 30 TPS target..."
-	@API_GW_URL=$(API_GW_URL) AUTH_TOKEN=$(AUTH_TOKEN) \
+	@$(PERF_GW_ENV) AUTH_TOKEN=$(AUTH_TOKEN) \
 	  LOAD_MODEL=rate SWAP_TPS=$${SWAP_TPS:-30} QUOTE_TPS=$${QUOTE_TPS:-60} DURATION=$${DURATION:-10m} \
 	  k6 run tests/performance/scenario-b-perf.js
 
 scenario-b.perf-transfer:
 	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
 	@echo "[scenario-b] value-transfer throughput — 50 TPS target..."
-	@API_GW_URL=$(API_GW_URL) AUTH_TOKEN=$(AUTH_TOKEN) \
+	@$(PERF_GW_ENV) AUTH_TOKEN=$(AUTH_TOKEN) \
 	  TRANSFER_TPS=$${TRANSFER_TPS:-50} DURATION=$${DURATION:-10m} \
 	  k6 run tests/performance/k6/bridge-transfer-throughput.js
 
 scenario-b.perf-zeto:
 	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
 	@echo "[scenario-b] Zeto privacy-transfer throughput — 15 TPS target..."
-	@API_GW_URL=$(API_GW_URL) AUTH_TOKEN=$(AUTH_TOKEN) \
+	@$(PERF_GW_ENV) AUTH_TOKEN=$(AUTH_TOKEN) \
 	  TOKEN_KIND=zeto TRANSFER_TPS=$${TRANSFER_TPS:-15} DURATION=$${DURATION:-10m} \
 	  k6 run tests/performance/k6/bridge-transfer-throughput.js
 
@@ -325,17 +337,21 @@ scenario-b.perf-smoke:
 scenario-b.perf-all:
 	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
 	@echo "[scenario-b] R1-12.3 full perf suite (zero-config) — see docs/performance/RESULTS.md..."
-	@PERF_MAKE_DIR=$(CURDIR) \
-	 API_GW_URL=$(API_GW_URL) \
-	 API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL) \
+	@$(PERF_GW_ENV) PERF_MAKE_DIR=$(CURDIR) \
 	 bash tests/performance/run-all.sh
+
+# scenario-b.perf-all-dry — exercises the perf-all orchestrator with NO infra: no stack, no
+# manifests, no yq and no k6 on the box. The endpoints get the unroutable RFC 2606 placeholder,
+# every live phase is skipped and RESULTS.md is rendered into a temp dir. This is the target
+# that keeps the dry-run path honest — DEF-022 existed because nothing ran the bring-up branch.
+scenario-b.perf-all-dry:
+	@echo "[scenario-b] perf-all dry-run (no infra)..."
+	@PERF_DRY_RUN=1 bash tests/performance/run-all.sh
 
 scenario-b.perf-soak:
 	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
 	@echo "[scenario-b] 12-hour SOAK — dedicated infra only, NOT for CI..."
-	@PERF_MAKE_DIR=$(CURDIR) \
-	 API_GW_URL=$(API_GW_URL) \
-	 API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL) \
+	@$(PERF_GW_ENV) PERF_MAKE_DIR=$(CURDIR) \
 	 DURATION=$${DURATION:-12h} \
 	 bash tests/performance/run-soak.sh
 
@@ -373,4 +389,4 @@ scenario-b.check-postman:
 	scenario-b.perf-baseline scenario-b.validate-openapi \
 	scenario-b.gen-postman scenario-b.check-postman \
 	scenario-b.perf-amm-throughput scenario-b.perf-transfer \
-	scenario-b.perf-zeto scenario-b.perf-soak scenario-b.perf-all scenario-b.perf-smoke
+	scenario-b.perf-zeto scenario-b.perf-soak scenario-b.perf-all scenario-b.perf-all-dry scenario-b.perf-smoke

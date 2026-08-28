@@ -166,7 +166,7 @@ perf_write_results() {
 | Git commit | ${commit} |
 | Environment | ${env_note} |
 | Besu version / consensus | 25.8.0 / QBFT |
-| Stack brought up via | \`make spoke-all\` (auto, full cross-spoke; lib/stack.sh) |
+| Stack provisioned via | \`samples/deploy-all.sh\` (the toolkit; the harness reuses it) |
 | k6 version | ${k6ver} |
 | API gateway (bank-a) | ${gw} |
 | RECEIVER identity used | ${rcv} |

@@ -17,11 +17,11 @@
 #   metrics_collect_loop OUTDIR INTERVAL_SECS TOTAL_SECS  — snapshot every INTERVAL until TOTAL
 #
 # Env:
-#   API_GW_URL   gateway for pool status (default http://localhost:18080)
+#   API_GW_URL   gateway for pool status — REQUIRED, no default (see below)
 #   PERF_PAIR    pool pair for the invariant (default W-BRL-ARS)
 #   PG_CONTAINER postgres container name (default cbweb3-postgres)
 
-: "${API_GW_URL:=http://localhost:18080}"
+: "${API_GW_URL:?API_GW_URL is required — derive it with tests/integration/toolkit-env.sh (the perf make targets do this for you)}"
 : "${PERF_PAIR:=W-BRL-ARS}"
 : "${PG_CONTAINER:=cbweb3-postgres}"
 

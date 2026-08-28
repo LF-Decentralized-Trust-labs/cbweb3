@@ -33,17 +33,17 @@
  * the position ids it created to stdout so a TTF post-processor can consume them.
  *
  * Usage (50 TPS transfer throughput):
- *   API_GW_URL=http://localhost:18080 AUTH_TOKEN=<jwt> \
+ *   API_GW_URL=$API_GW_BANK_A_URL AUTH_TOKEN=<jwt> \
  *   TRANSFER_TPS=50 DURATION=10m \
  *   k6 run tests/performance/k6/bridge-transfer-throughput.js
  *
  * Usage (15 TPS Zeto/privacy throughput):
- *   API_GW_URL=http://localhost:18080 AUTH_TOKEN=<jwt> \
+ *   API_GW_URL=$API_GW_BANK_A_URL AUTH_TOKEN=<jwt> \
  *   TOKEN_KIND=zeto TRANSFER_TPS=15 DURATION=10m \
  *   k6 run tests/performance/k6/bridge-transfer-throughput.js
  *
  * Environment variables:
- *   API_GW_URL    — API Gateway base URL (default: http://localhost:18080)
+ *   API_GW_URL    — API Gateway base URL (required; derived from the toolkit manifests)
  *   AUTH_TOKEN    — Bearer token with commercial_bank role (REQUIRED)
  *   TOKEN_KIND    — "noto" | "zeto" (default: noto) — selects privacy domain for the mirrored asset
  *   TRANSFER_TPS  — target transfers/sec (default: 50; use 15 for the Zeto threshold)
@@ -58,7 +58,24 @@ import http from "k6/http";
 import { check } from "k6";
 import { Trend, Counter, Rate } from "k6/metrics";
 
-const API_GW_URL = __ENV.API_GW_URL || "http://localhost:18080";
+// requiredEnv fails the run instead of falling back to a port.
+//
+// These used to default to the deploy/local topology (:18080 and friends). That path was
+// retired, so the default silently pointed every run at a gateway nothing serves and the
+// failure surfaced as connection errors inside the benchmark rather than as a setup problem
+// (DEF-022). The perf make targets export these from the toolkit manifests.
+function requiredEnv(name) {
+  const v = __ENV[name];
+  if (!v) {
+    throw new Error(
+      name + " is not set. Run through the perf make targets (they derive endpoints from the " +
+      "toolkit manifests), or export it yourself: eval \"$(bash tests/integration/toolkit-env.sh)\"",
+    );
+  }
+  return v;
+}
+
+const API_GW_URL = requiredEnv("API_GW_URL");
 const AUTH_TOKEN = __ENV.AUTH_TOKEN || "";
 const TOKEN_KIND = (__ENV.TOKEN_KIND || "noto").toLowerCase();
 const TRANSFER_TPS = Number(__ENV.TRANSFER_TPS || 50);
