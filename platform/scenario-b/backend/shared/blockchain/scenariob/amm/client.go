@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/evm"
-	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -171,6 +170,7 @@ type Client struct {
 	tokenB     common.Address
 	approvalMu sync.Mutex
 	approved   map[common.Address]bool // tokens with an in-effect unlimited allowance
+	breaker    *breakerScanner         // incremental cursor over the breaker events
 }
 
 // Config holds the connection parameters for the AMM client.
@@ -214,6 +214,7 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 		tokenA:   common.HexToAddress(cfg.TokenAAddress),
 		tokenB:   common.HexToAddress(cfg.TokenBAddress),
 		approved: make(map[common.Address]bool),
+		breaker:  newBreakerScanner(common.HexToAddress(cfg.ContractAddress), cfg.Timeout),
 	}
 	if cfg.PrivateKeyHex != "" {
 		signer, err := evm.SharedSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
@@ -281,40 +282,31 @@ func (c *Client) ResumeSignatures(ctx context.Context, proposalID [32]byte) (*bi
 // proposal has ever been emitted for this pair's AMM.
 func (c *Client) LatestResumeProposal(ctx context.Context) ([32]byte, bool, error) {
 	var zero [32]byte
-	cctx, cancel := context.WithTimeout(ctx, c.timeout)
-	defer cancel()
-	eventSig := crypto.Keccak256Hash([]byte("LogResumeProposed(bytes32,address,uint256)"))
-	logs, err := c.ec.FilterLogs(cctx, ethereum.FilterQuery{
-		FromBlock: big.NewInt(0),
-		Addresses: []common.Address{c.contract},
-		Topics:    [][]common.Hash{{eventSig}},
-	})
-	if err != nil {
+	if err := c.breaker.refresh(ctx, c.ec); err != nil {
 		return zero, false, err
 	}
-	if len(logs) == 0 {
+	hit, ok := c.breaker.latestOf(sigResumeProposed)
+	if !ok || len(hit.topics) < 2 {
 		return zero, false, nil
 	}
-	last := logs[0]
-	for _, lg := range logs[1:] {
-		if lg.BlockNumber > last.BlockNumber || (lg.BlockNumber == last.BlockNumber && lg.Index > last.Index) {
-			last = lg
-		}
-	}
-	if len(last.Topics) < 2 {
-		return zero, false, nil
-	}
-	return last.Topics[1], true, nil
+	return hit.topics[1], true, nil
 }
 
 // breakerEventSigs are the four circuit-breaker lifecycle events the AMM emits. Any of
 // them is a breaker action worth citing, so LatestBreakerTxHash matches on all four
 // rather than on the one this Central Bank happens to have submitted.
+var (
+	sigBreakerPaused  = crypto.Keccak256Hash([]byte("LogCircuitBreakerPaused(address,uint256,string)"))
+	sigResumeProposed = crypto.Keccak256Hash([]byte("LogResumeProposed(bytes32,address,uint256)"))
+	sigResumeSigned   = crypto.Keccak256Hash([]byte("LogResumeSigned(bytes32,address,uint256)"))
+	sigBreakerResumed = crypto.Keccak256Hash([]byte("LogCircuitBreakerResumed(bytes32,uint256)"))
+)
+
 var breakerEventSigs = []common.Hash{
-	crypto.Keccak256Hash([]byte("LogCircuitBreakerPaused(address,uint256,string)")),
-	crypto.Keccak256Hash([]byte("LogResumeProposed(bytes32,address,uint256)")),
-	crypto.Keccak256Hash([]byte("LogResumeSigned(bytes32,address,uint256)")),
-	crypto.Keccak256Hash([]byte("LogCircuitBreakerResumed(bytes32,uint256)")),
+	sigBreakerPaused,
+	sigResumeProposed,
+	sigResumeSigned,
+	sigBreakerResumed,
 }
 
 // LatestBreakerTxHash returns the transaction hash of the most recent circuit-breaker
@@ -328,28 +320,14 @@ var breakerEventSigs = []common.Hash{
 // same everywhere. Sourcing it from the AMM's own events makes that claim true: every
 // gateway reduces the same log set and returns the same hash.
 func (c *Client) LatestBreakerTxHash(ctx context.Context) (string, bool, error) {
-	cctx, cancel := context.WithTimeout(ctx, c.timeout)
-	defer cancel()
-	logs, err := c.ec.FilterLogs(cctx, ethereum.FilterQuery{
-		FromBlock: big.NewInt(0),
-		Addresses: []common.Address{c.contract},
-		// A single topic0 slot holding several values is an OR, so one query covers all
-		// four events and the ordering below is across the whole breaker lifecycle.
-		Topics: [][]common.Hash{breakerEventSigs},
-	})
-	if err != nil {
+	if err := c.breaker.refresh(ctx, c.ec); err != nil {
 		return "", false, err
 	}
-	if len(logs) == 0 {
+	hit, ok := c.breaker.latestAny()
+	if !ok {
 		return "", false, nil
 	}
-	last := logs[0]
-	for _, lg := range logs[1:] {
-		if lg.BlockNumber > last.BlockNumber || (lg.BlockNumber == last.BlockNumber && lg.Index > last.Index) {
-			last = lg
-		}
-	}
-	return last.TxHash.Hex(), true, nil
+	return hit.txHash.Hex(), true, nil
 }
 
 // QuoteExactOutput retrieves the required input amount for an exact-output swap. The
