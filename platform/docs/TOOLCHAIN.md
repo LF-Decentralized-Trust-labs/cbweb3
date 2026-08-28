@@ -56,7 +56,7 @@ the mechanism that actually fails the build when the floor is violated.
 | Node 22 | CI: `actions/setup-node` with `node-version: "22"` | |
 | Besu 25.8.0 | `BESU_IMAGE` default in the compose templates | Pinned; not a developer prerequisite |
 | Alpine 3.23 | `alpine:3.23` everywhere: the shipped runtime `Dockerfile` stages, the toolkit helper-image constants (`dockervolume.HelperImage` in Scenario A, `volHelperImage` in Scenario B) and the helper `docker run`/compose services | Gated by `tools/check-alpine-version.sh`, which reads this row as the pin. Supported until 2027-11-01 |
-| Paladin v0.15.0-rc.1 | Nothing — the tag is hardcoded in six files across Scenario A | Not enforced, and Scenario B's provisioning templates still default to a floating `latest` on a different image repository. See [`docs/paladin-upgrade.md`](paladin-upgrade.md) |
+| Paladin v0.15.0-rc.1 | Nothing — the tag is hardcoded in five files across Scenario A | Not enforced, and Scenario B's provisioning templates still default to a floating `latest` on a different image repository. See [`docs/paladin-upgrade.md`](paladin-upgrade.md) |
 
 Verify the whole matrix is still self-consistent:
 

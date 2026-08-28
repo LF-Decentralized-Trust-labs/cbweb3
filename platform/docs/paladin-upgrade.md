@@ -86,19 +86,33 @@ Only the upgrade closes the remaining rows.
 
 ## The upgrade work
 
-### 1. The pin is in eight places
+### 1. The pin is in seven places
 
 `v0.15.0-rc.1` is hardcoded, not read from one variable. Every occurrence must move
 together — a missed one silently keeps part of the estate on the defective build, which
 is the failure this table exists to prevent. Verify the list before starting, with
-`grep -rn 'lfdecentralizedtrust/paladin:v' --include='*.go' --include='*.y*ml'`:
+
+```
+grep -rniE 'paladin:(v[0-9]|latest)' --include='*.go' --include='*.y*ml' --include='*.example'
+```
+
+Two details in that pattern are load-bearing. It matches `latest` as well as a `v` tag,
+and it does not name an image repository: the last two rows below live under a
+*different* organisation (`lfdt-labs`, not `lfdecentralizedtrust`) on a floating tag, so
+a pattern written around the Scenario A pin finds everything except the rows most likely
+to be forgotten. `--include='*.example'` is what reaches the `.env.example`.
+
+The grep also hits a doc comment in `scenario-a/toolkit/engine/orchestrator/deps.go`,
+which cites the tag as an example on the `PaladinImage` field. That is not a pin — the
+field carries whatever the caller passes, and the callers are the `apply.go` and
+`profile.go` rows below — so it is deliberately absent from this table. Worth updating
+when the pin moves, so the example does not go stale, but it changes no behaviour.
 
 | File | Form |
 | --- | --- |
 | `scenario-a/provisioning/spikes/spk-02-live-join/compose/stack-found.yml` | `image:` ×2 |
 | `scenario-a/provisioning/spikes/spk-02-live-join/compose/stack-join.yml` | `image:` ×1 |
 | `scenario-a/toolkit/engine/orchestrator/step_start_besu_found.go` | `defaultPaladinImage` constant |
-| `scenario-a/toolkit/engine/orchestrator/deps.go` | image constant |
 | `scenario-a/toolkit/engine/apply/profile.go` | `CBWEB3_PALADIN_IMAGE` default |
 | `scenario-a/toolkit/engine/apply/apply.go` | `CBWEB3_PALADIN_IMAGE` default |
 | `scenario-b/provisioning/templates/entity-besu.compose.yaml` | `${PALADIN_IMAGE:-lfdt-labs/paladin:latest}` — **unpinned and a different repository** |
