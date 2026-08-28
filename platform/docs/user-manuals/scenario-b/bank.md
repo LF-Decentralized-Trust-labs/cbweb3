@@ -2,7 +2,7 @@
 
 **Audience:** Commercial bank operators participating in the International Hub.
 **Scenario:** Scenario B — International Hub (FXAgreement + AMM + Bridge).
-**Data source:** Live backend (real API Gateway) for all operational screens.
+**Data source:** Live backend (real API Gateway) for all operational screens. The Bank portal has no mock mode — no source file reads a mock toggle — and it holds no WebSocket connection; screens refresh by polling the API Gateway. The portal's own Settings → Environment card states the same.
 
 ---
 

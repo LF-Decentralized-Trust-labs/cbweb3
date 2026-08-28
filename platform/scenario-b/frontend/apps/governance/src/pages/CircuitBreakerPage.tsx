@@ -10,6 +10,48 @@ import { usePolling } from "../hooks/usePolling";
 const SELECT_CLASS =
   "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
 
+// The on-chain reference of the pair's most recent breaker action, for audit. Rendered as a
+// plain selectable value rather than a link, because no block-explorer location is configured
+// for these permissioned networks; wrapping it in an anchor later is a presentation-only
+// change. Absence is stated explicitly, so "this environment records no on-chain reference"
+// cannot be misread as "a reference exists but failed to display".
+function OnChainReference({ txHash }: { txHash?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  if (!txHash) {
+    return (
+      <p className="mt-2 text-xs text-muted-foreground">
+        On-chain reference: <span className="italic">none recorded for this pair</span>
+      </p>
+    );
+  }
+
+  // Copying is a convenience only. The hash stays visible and selectable, so it remains
+  // obtainable where the clipboard is unavailable (for example a restricted browser context),
+  // and a copy failure never affects the breaker action that produced it.
+  const onCopy = () => {
+    void navigator.clipboard
+      ?.writeText(txHash)
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => setCopied(false));
+  };
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      <span>On-chain reference:</span>
+      <span className="select-all break-all font-mono text-foreground" title={txHash}>
+        {txHash}
+      </span>
+      <Button variant="outline" size="sm" className="h-6 px-2 text-xs" onClick={onCopy}>
+        {copied ? "Copied" : "Copy"}
+      </Button>
+    </div>
+  );
+}
+
 // The circuit breaker is a Central Bank control, per-pair (one AMM instance per pair),
 // with an asymmetric quorum: 1-of-N to pause, 2-of-N to resume. This portal drives the
 // real /api/v2/governance/circuit-breaker/* endpoints against the pairs the CBs created.
@@ -139,6 +181,7 @@ export function CircuitBreakerPage() {
                 : ""}
             </p>
           ) : null}
+          <OnChainReference txHash={cbStatus?.tx_hash} />
           {isStale ? (
             <p className="mt-2 text-xs text-amber-700">Showing last known state. Latest status refresh failed.</p>
           ) : null}

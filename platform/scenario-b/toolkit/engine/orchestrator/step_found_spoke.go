@@ -647,7 +647,10 @@ func (c SpokeConfig) ProxyRoutes() []ProxyRoute {
 // deliberately not passed there.
 func (c SpokeConfig) portalViteArgs(api string) (gov, tre, sup map[string]string) {
 	lu := frontendLauncherURL(c.LauncherEnabled, c.useProxy(), c.FrontendHost, c.LauncherPort)
-	gov = map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity, "VITE_LAUNCHER_URL": lu, "VITE_FIAT_SYMBOL": c.Currency}
+	// VITE_USE_MOCKS is read as `!== "false"`, so it must be this exact string: a toolkit
+	// stack is chain-wired and every governance screen has a real endpoint behind it, so
+	// serving fixtures here would only hide the live system.
+	gov = map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_USE_MOCKS": "false", "VITE_INSTITUTION_NAME": c.Entity, "VITE_LAUNCHER_URL": lu, "VITE_FIAT_SYMBOL": c.Currency}
 	tre = map[string]string{"VITE_API_BASE_URL": api, "VITE_INSTITUTION_NAME": c.Entity, "VITE_LAUNCHER_URL": lu, "VITE_FIAT_SYMBOL": c.Currency}
 	sup = map[string]string{"VITE_API_BASE_URL": api, "VITE_SPOKE_NAME": c.SpokeID, "VITE_LAUNCHER_URL": lu}
 	if c.useProxy() {

@@ -359,28 +359,31 @@ func (a *ammAdapter) PauseCircuitBreaker(ctx context.Context, pair string, signa
 	return c.PauseCircuitBreaker(ctx, reason)
 }
 
-func (a *ammAdapter) ProposeResume(ctx context.Context, pair string, sig []byte) (string, error) {
+// ProposeResume returns the proposal id together with the hash of the transaction that
+// created it, so the proposing action is auditable on-chain (FR-003).
+func (a *ammAdapter) ProposeResume(ctx context.Context, pair string, sig []byte) (string, string, error) {
 	c, err := a.clientFor(ctx, pair)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	return c.ProposeResume(ctx)
 }
 
-func (a *ammAdapter) SignResume(ctx context.Context, pair, requestID string, sig []byte) error {
+// SignResume returns the hash of the signing transaction rather than discarding it, so the
+// signature — and, when it completes quorum, the resume itself — is auditable (FR-002).
+func (a *ammAdapter) SignResume(ctx context.Context, pair, requestID string, sig []byte) (string, error) {
 	c, err := a.clientFor(ctx, pair)
 	if err != nil {
-		return err
+		return "", err
 	}
 	var proposalID [32]byte
 	trimmed := strings.TrimPrefix(requestID, "0x")
 	b, err := hex.DecodeString(trimmed)
 	if err != nil || len(b) != 32 {
-		return fmt.Errorf("amm: invalid proposalId %q: %w", requestID, err)
+		return "", fmt.Errorf("amm: invalid proposalId %q: %w", requestID, err)
 	}
 	copy(proposalID[:], b)
-	_, err = c.SignResume(ctx, proposalID)
-	return err
+	return c.SignResume(ctx, proposalID)
 }
 
 func (a *ammAdapter) ExecuteResume(ctx context.Context, pair, requestID string) error {
@@ -421,6 +424,21 @@ func (a *ammAdapter) ActiveResumeProposal(ctx context.Context, pair string) (str
 		return "", 0, 0, err
 	}
 	return "0x" + hex.EncodeToString(pid[:]), int(sigs.Int64()), int(quorum.Int64()), nil
+}
+
+// LatestBreakerTxHash returns the transaction hash of the pair's most recent circuit-breaker
+// action, by any institution, read from the AMM's own events. Empty when the pair has never
+// had one — which is not an error and must not gate a status read.
+func (a *ammAdapter) LatestBreakerTxHash(ctx context.Context, pair string) (string, error) {
+	c, err := a.clientFor(ctx, pair)
+	if err != nil {
+		return "", err
+	}
+	txHash, found, err := c.LatestBreakerTxHash(ctx)
+	if err != nil || !found {
+		return "", err
+	}
+	return txHash, nil
 }
 
 // --- tokenPrepareAdapter ---

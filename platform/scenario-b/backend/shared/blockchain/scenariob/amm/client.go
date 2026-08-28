@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/evm"
-	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -171,6 +170,7 @@ type Client struct {
 	tokenB     common.Address
 	approvalMu sync.Mutex
 	approved   map[common.Address]bool // tokens with an in-effect unlimited allowance
+	breaker    *breakerScanner         // incremental cursor over the breaker events
 }
 
 // Config holds the connection parameters for the AMM client.
@@ -214,6 +214,7 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 		tokenA:   common.HexToAddress(cfg.TokenAAddress),
 		tokenB:   common.HexToAddress(cfg.TokenBAddress),
 		approved: make(map[common.Address]bool),
+		breaker:  newBreakerScanner(common.HexToAddress(cfg.ContractAddress), cfg.Timeout),
 	}
 	if cfg.PrivateKeyHex != "" {
 		signer, err := evm.SharedSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
@@ -281,30 +282,52 @@ func (c *Client) ResumeSignatures(ctx context.Context, proposalID [32]byte) (*bi
 // proposal has ever been emitted for this pair's AMM.
 func (c *Client) LatestResumeProposal(ctx context.Context) ([32]byte, bool, error) {
 	var zero [32]byte
-	cctx, cancel := context.WithTimeout(ctx, c.timeout)
-	defer cancel()
-	eventSig := crypto.Keccak256Hash([]byte("LogResumeProposed(bytes32,address,uint256)"))
-	logs, err := c.ec.FilterLogs(cctx, ethereum.FilterQuery{
-		FromBlock: big.NewInt(0),
-		Addresses: []common.Address{c.contract},
-		Topics:    [][]common.Hash{{eventSig}},
-	})
-	if err != nil {
+	if err := c.breaker.refresh(ctx, c.ec); err != nil {
 		return zero, false, err
 	}
-	if len(logs) == 0 {
+	hit, ok := c.breaker.latestOf(sigResumeProposed)
+	if !ok || len(hit.topics) < 2 {
 		return zero, false, nil
 	}
-	last := logs[0]
-	for _, lg := range logs[1:] {
-		if lg.BlockNumber > last.BlockNumber || (lg.BlockNumber == last.BlockNumber && lg.Index > last.Index) {
-			last = lg
-		}
+	return hit.topics[1], true, nil
+}
+
+// breakerEventSigs are the four circuit-breaker lifecycle events the AMM emits. Any of
+// them is a breaker action worth citing, so LatestBreakerTxHash matches on all four
+// rather than on the one this Central Bank happens to have submitted.
+var (
+	sigBreakerPaused  = crypto.Keccak256Hash([]byte("LogCircuitBreakerPaused(address,uint256,string)"))
+	sigResumeProposed = crypto.Keccak256Hash([]byte("LogResumeProposed(bytes32,address,uint256)"))
+	sigResumeSigned   = crypto.Keccak256Hash([]byte("LogResumeSigned(bytes32,address,uint256)"))
+	sigBreakerResumed = crypto.Keccak256Hash([]byte("LogCircuitBreakerResumed(bytes32,uint256)"))
+)
+
+var breakerEventSigs = []common.Hash{
+	sigBreakerPaused,
+	sigResumeProposed,
+	sigResumeSigned,
+	sigBreakerResumed,
+}
+
+// LatestBreakerTxHash returns the transaction hash of the most recent circuit-breaker
+// action on this pair's AMM, by ANY institution, or found=false when the pair has never
+// had one.
+//
+// It reads the chain rather than a gateway's own signature table on purpose. Each Central
+// Bank only records the actions it performed itself, so a local lookup answers "my last
+// action" and two Central Banks inspecting the same pair get different hashes — while the
+// portal tells the operator the reference is read from the ledger and is therefore the
+// same everywhere. Sourcing it from the AMM's own events makes that claim true: every
+// gateway reduces the same log set and returns the same hash.
+func (c *Client) LatestBreakerTxHash(ctx context.Context) (string, bool, error) {
+	if err := c.breaker.refresh(ctx, c.ec); err != nil {
+		return "", false, err
 	}
-	if len(last.Topics) < 2 {
-		return zero, false, nil
+	hit, ok := c.breaker.latestAny()
+	if !ok {
+		return "", false, nil
 	}
-	return last.Topics[1], true, nil
+	return hit.txHash.Hex(), true, nil
 }
 
 // QuoteExactOutput retrieves the required input amount for an exact-output swap. The
@@ -728,25 +751,32 @@ func (c *Client) PauseCircuitBreaker(ctx context.Context, reason string) (string
 	return evm.SubmitTx(ctx, c.ec, c.signer, c.contract, c.abi, "pause", reason)
 }
 
-// ProposeResume submits a resume proposal and returns the resulting proposalId (hex string).
-// It extracts the proposalId from the LogResumeProposed event emitted by the AMM.
-func (c *Client) ProposeResume(ctx context.Context) (string, error) {
+// ProposeResume submits a resume proposal and returns the resulting proposalId (hex string)
+// together with the hash of the transaction that created it. It extracts the proposalId from
+// the LogResumeProposed event emitted by the AMM.
+//
+// The two values are distinct identifiers and neither substitutes for the other: proposalId
+// is what a co-signer submits to signResume, while txHash is the auditable on-chain reference
+// for the proposing action itself. The hash comes from the receipt already in hand, so
+// returning it costs no extra round-trip.
+func (c *Client) ProposeResume(ctx context.Context) (proposalIDHex string, txHash string, err error) {
 	if c.signer == nil {
-		return "", errors.New("amm: proposeResume requires a signing key")
+		return "", "", errors.New("amm: proposeResume requires a signing key")
 	}
 	// keccak256("LogResumeProposed(bytes32,address,uint256)")
 	eventSig := crypto.Keccak256Hash([]byte("LogResumeProposed(bytes32,address,uint256)"))
 	receipt, _, err := evm.SubmitTxReceipt(ctx, c.ec, c.signer, c.contract, c.abi, "proposeResume")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
+	txHash = receipt.TxHash.Hex()
 	for _, log := range receipt.Logs {
 		if len(log.Topics) >= 2 && log.Topics[0] == eventSig {
 			proposalID := log.Topics[1]
-			return "0x" + hex.EncodeToString(proposalID[:]), nil
+			return "0x" + hex.EncodeToString(proposalID[:]), txHash, nil
 		}
 	}
-	return "", errors.New("amm: LogResumeProposed event not found in receipt")
+	return "", txHash, errors.New("amm: LogResumeProposed event not found in receipt")
 }
 
 // SignResume adds a signature to an existing resume proposal. When quorum (2-of-N) is met

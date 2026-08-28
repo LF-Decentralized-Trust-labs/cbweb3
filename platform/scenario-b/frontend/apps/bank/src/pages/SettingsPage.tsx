@@ -11,10 +11,13 @@ export function SettingsPage() {
           <CardDescription>Frontend structural mode</CardDescription>
         </CardHeader>
         <CardContent>
+        {/* These statements must describe what this portal actually does. The Bank portal
+            reads no mock toggle and has no WebSocket client: every screen talks to the real
+            API Gateway over HTTP. The bank manual's data-source line must agree with this. */}
         <ul className="list-disc pl-5 text-sm">
-          <li>API mode: mock services enabled</li>
+          <li>API mode: live backend — all screens call the real API Gateway</li>
           <li>Authentication: backend-managed HTTP-only cookies</li>
-          <li>WebSocket: simulated relay events for UI flow</li>
+          <li>Updates: status is refreshed by polling the API Gateway</li>
         </ul>
         </CardContent>
       </Card>

@@ -67,12 +67,17 @@ export const useCircuitBreakerV2Store = create<CircuitBreakerV2Store>((set) => (
     set({ status: "loading", error: null });
     try {
       const response = await circuitBreakerV2Api.proposeResume(payload);
+      // This reducer rebuilds cbStatus field by field rather than replacing it wholesale
+      // (unlike pause/signResume/fetchStatus, which carry every response field for free).
+      // tx_hash must therefore be carried explicitly, or the proposal's on-chain reference is
+      // lost the instant it arrives.
       set((state) => ({
         cbStatus: state.cbStatus
           ? {
               ...state.cbStatus,
               state: response.state,
               resume_request_id: response.request_id,
+              tx_hash: response.tx_hash,
             }
           : {
               pair: payload.pair,
@@ -80,6 +85,7 @@ export const useCircuitBreakerV2Store = create<CircuitBreakerV2Store>((set) => (
               pause_initiator: null,
               pause_reason: null,
               resume_request_id: response.request_id,
+              tx_hash: response.tx_hash,
             },
         resumeRequestId: response.request_id,
         isStale: false,
