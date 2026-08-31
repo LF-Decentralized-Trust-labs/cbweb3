@@ -402,3 +402,177 @@ func TestSubmitRawTxReceipt_RequiresInput(t *testing.T) {
 		t.Fatal("expected empty calldata to be refused: it would send a bare value transfer")
 	}
 }
+
+// --- re-syncing the counter after a receipt wait dies on its deadline ---
+//
+// The regression: SharedSigner makes the counter live for the process lifetime and nonceInit is set
+// exactly once, so it is re-read only when SendTransaction returns a nonce-too-low error. Besu
+// QUEUES a future-nonce transaction instead of rejecting it, so a counter that has drifted AHEAD of
+// chain state — a nuke-and-redeploy of the Besu layer with the backend containers still up — produces
+// no broadcast error at all: every submission is accepted, none is ever mined, and each caller fails
+// after ReceiptWaitTimeout with no path back to a correct counter. Before the shared registry this
+// recovered by accident, because a freshly constructed client re-read PendingNonceAt; a process-wide
+// instance never re-initialises.
+
+type fakeNonceSource struct {
+	nonce uint64
+	calls int
+	err   error
+}
+
+func (f *fakeNonceSource) PendingNonceAt(context.Context, common.Address) (uint64, error) {
+	f.calls++
+	if f.err != nil {
+		return 0, f.err
+	}
+	return f.nonce, nil
+}
+
+func broadcastExpecting(t *testing.T, want uint64) func(uint64) (*types.Transaction, error) {
+	t.Helper()
+	return func(nonce uint64) (*types.Transaction, error) {
+		if nonce != want {
+			t.Errorf("submission used nonce %d, want %d", nonce, want)
+		}
+		return types.NewTransaction(nonce, common.HexToAddress("0x1"), big.NewInt(0), 21000, big.NewInt(0), nil), nil
+	}
+}
+
+func TestShouldResyncNonce(t *testing.T) {
+	// WaitForReceipt wraps whatever bind.WaitMined returned, so the classification has to survive
+	// wrapping — matching on the error text would not.
+	wrapped := func(err error) error {
+		return fmt.Errorf("wait mined (mint tx=0xabc): %w", err)
+	}
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+		why  string
+	}{
+		{
+			name: "receipt_arrived",
+			err:  nil,
+			want: false,
+			why:  "a mined transaction consumed its nonce; the counter is in step",
+		},
+		{
+			name: "deadline_expired",
+			err:  wrapped(context.DeadlineExceeded),
+			want: true,
+			why:  "no receipt within the deadline is the one symptom a drifted counter produces on Besu",
+		},
+		{
+			name: "caller_cancelled",
+			err:  wrapped(context.Canceled),
+			want: false,
+			why:  "a cancelled request says nothing about the counter — the transaction may mine a moment later",
+		},
+		{
+			name: "reverted_on_chain",
+			err:  errors.New("mint: transaction reverted on-chain (tx=0xabc)"),
+			want: false,
+			why:  "a revert means it mined: the nonce was spent and the counter is correct",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ShouldResyncNonce(tc.err); got != tc.want {
+				t.Fatalf("ShouldResyncNonce = %v, want %v — %s", got, tc.want, tc.why)
+			}
+		})
+	}
+}
+
+func TestSigner_MarkNonceStale_MakesTheNextSubmissionReseed(t *testing.T) {
+	s, err := NewSigner(newKeyHex(t), big.NewInt(1337))
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+	src := &fakeNonceSource{nonce: 41}
+
+	// First submission seeds the counter from the node.
+	if _, err := s.WithNonce(context.Background(), src, broadcastExpecting(t, 41)); err != nil {
+		t.Fatalf("WithNonce: %v", err)
+	}
+	if src.calls != 1 {
+		t.Fatalf("PendingNonceAt called %d times seeding the counter, want 1", src.calls)
+	}
+
+	// The second trusts the local counter: re-reading on every submission is what the shared
+	// counter exists to avoid.
+	if _, err := s.WithNonce(context.Background(), src, broadcastExpecting(t, 42)); err != nil {
+		t.Fatalf("WithNonce: %v", err)
+	}
+	if src.calls != 1 {
+		t.Fatalf("PendingNonceAt called %d times, want 1 — a healthy submission must not re-read", src.calls)
+	}
+
+	// The chain was reset under a live process: the node's pending nonce is 0 again while the local
+	// counter sits at 43. Nothing in the broadcast path reports this, so the receipt timeout marking
+	// the counter stale is the only way back.
+	src.nonce = 0
+	s.MarkNonceStale()
+
+	if _, err := s.WithNonce(context.Background(), src, broadcastExpecting(t, 0)); err != nil {
+		t.Fatalf("WithNonce: %v", err)
+	}
+	if src.calls != 2 {
+		t.Fatalf("PendingNonceAt called %d times after MarkNonceStale, want 2 — the counter never re-synced", src.calls)
+	}
+}
+
+func TestSigner_MarkNonceStale_IsIdempotentOnAHealthyNode(t *testing.T) {
+	// Not every expiry that reaches ShouldResyncNonce is a drifted counter: receiptWaitContext keeps
+	// a CALLER-supplied deadline when there is one (TestReceiptWaitContext/keeps_the_caller_deadline),
+	// so a caller that bounds its own request short marks the counter stale on a node that is fine.
+	// What makes that harmless is not luck — it is that the recovery is idempotent, which is this
+	// test. PendingNonceAt counts CONSECUTIVE pending transactions, so a healthy node reports the
+	// value the in-flight submission already advanced to: the re-seed lands where the counter
+	// already was and only costs one RPC.
+	s, err := NewSigner(newKeyHex(t), big.NewInt(1337))
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+	src := &fakeNonceSource{nonce: 41}
+
+	if _, err := s.WithNonce(context.Background(), src, broadcastExpecting(t, 41)); err != nil {
+		t.Fatalf("WithNonce: %v", err)
+	}
+
+	// The healthy node's view after that submission: nonce 41 is pending, so the next one is 42 —
+	// exactly what the local counter now holds.
+	src.nonce = 42
+	s.MarkNonceStale()
+
+	if _, err := s.WithNonce(context.Background(), src, broadcastExpecting(t, 42)); err != nil {
+		t.Fatalf("WithNonce after a spurious invalidation: %v", err)
+	}
+	if src.calls != 2 {
+		t.Fatalf("PendingNonceAt called %d times, want 2 — the re-seed is the whole cost of a spurious invalidation", src.calls)
+	}
+	if s.nonce != 43 {
+		t.Fatalf("counter at %d, want 43 — a spurious invalidation must not move it", s.nonce)
+	}
+}
+
+func TestSigner_MarkNonceStale_KeepsTheFailureOffTheHotPath(t *testing.T) {
+	s, err := NewSigner(newKeyHex(t), big.NewInt(1337))
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+	s.nonce = 7
+	s.nonceInit = true
+
+	// Marking must not itself talk to the node: it runs on a failure path where the node is, by
+	// hypothesis, already not answering in time. It only drops the claim of being in step.
+	s.MarkNonceStale()
+
+	if s.nonceInit {
+		t.Fatal("counter still claims to be in step with the chain")
+	}
+	if s.nonce != 7 {
+		t.Fatalf("nonce = %d, want 7 — marking stale must not invent a value; the next submission reads one", s.nonce)
+	}
+}
