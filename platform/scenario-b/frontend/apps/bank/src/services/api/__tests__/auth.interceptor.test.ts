@@ -95,7 +95,35 @@ describe("attachAuthInterceptor", () => {
     await expect(client.get("/payments/escrows")).rejects.toThrow();
 
     expect(reportRejection).toHaveBeenCalledOnce();
-    expect(reportRejection).toHaveBeenCalledWith("/payments/escrows");
+    // Path, method and a way to ask again. The method is what lets the store refuse to repeat a
+    // write, and the probe is what lets Recheck exercise the channel instead of only re-reading the
+    // reason — re-reading can never clear the notice, because every status classifies to one.
+    expect(reportRejection).toHaveBeenCalledWith("/payments/escrows", "get", expect.any(Function));
+  });
+
+  it("hands the store a probe that replays the refused request through the same client", async () => {
+    // Same instance matters: the replay inherits the baseURL, credentials and interceptors of the
+    // request that was refused. A request rebuilt by hand would drop them and prove nothing.
+    const { client, seen } = clientRespondingWith([
+      { status: 401, data: { code: RELAY_SIGNATURE_INVALID } },
+      { status: 200, data: { ok: true } },
+    ]);
+
+    await expect(client.get("/payments/escrows")).rejects.toThrow();
+    const probe = reportRejection.mock.calls[0]?.[2] as () => Promise<unknown>;
+    expect(probe).toBeTypeOf("function");
+
+    await probe();
+
+    expect(seen).toEqual(["/payments/escrows", "/payments/escrows"]);
+  });
+
+  it("marks a refused write as a write, so the store never replays it", async () => {
+    const { client } = clientRespondingWith([{ status: 401, data: { code: RELAY_SIGNATURE_INVALID } }]);
+
+    await expect(client.post("/payments/deposits", { amount: "100" })).rejects.toThrow();
+
+    expect(reportRejection).toHaveBeenCalledWith("/payments/deposits", "post", expect.any(Function));
   });
 
   it("tells the store about every success, letting it decide whether trust was restored", async () => {

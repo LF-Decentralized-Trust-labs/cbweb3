@@ -49,9 +49,16 @@ async function onTrustRestored(response: AxiosResponse) {
   return response;
 }
 
-async function onTrustRejected(error: AxiosError) {
+async function onTrustRejected(error: AxiosError, client: AxiosInstance) {
   const { useTrustStore } = await import("../../../stores/trust.store");
-  void useTrustStore.getState().reportRejection(pathOf(error.config?.url));
+  const config = error.config;
+  // The probe replays this exact request through the SAME instance, so it inherits the baseURL,
+  // credentials and interceptors of the request that was refused; a request rebuilt by hand would
+  // drop them and prove nothing. Whether it may be replayed at all is the store's call, which is why
+  // the method goes with it: rejected paths include writes, and repeating one of those because an
+  // operator pressed "Recheck" would move value.
+  const probe = config ? () => client.request(config) : undefined;
+  void useTrustStore.getState().reportRejection(pathOf(config?.url), config?.method, probe);
   return Promise.reject(error);
 }
 
@@ -64,7 +71,7 @@ export function attachAuthInterceptor(httpClient: AxiosInstance) {
       // branch below, ejecting the operator to the login screen over a failure that has nothing to do
       // with their session. Report it instead, so every screen can explain the real cause.
       if (isTrustRejection(error)) {
-        return onTrustRejected(error);
+        return onTrustRejected(error, httpClient);
       }
 
       if (!error.response || error.response.status !== 401) {
