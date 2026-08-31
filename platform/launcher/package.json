@@ -1,0 +1,28 @@
+{
+  "name": "cbweb3-launcher",
+  "private": true,
+  "engines": {
+    "node": ">=22",
+    "npm": ">=10"
+  },
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Neutral entry point that routes users to the Scenario A or Scenario B portals. Standalone (no scenario code) to respect scenario isolation.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "type-check": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react-swc": "^4.2.2",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.1"
+  }
+}

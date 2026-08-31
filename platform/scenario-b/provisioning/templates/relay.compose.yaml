@@ -1,0 +1,42 @@
+# relay template (TK-B4) — Cacti-based hub-and-spoke relay.
+# Derived from interop/hub-and-spoke/cacti/docker-compose.yaml. NO fixed spokes
+# (runtime spoke registration is TK-B5). Reaches the hub cross-stack.
+# Parametrized; state in a named volume; no secrets embedded.
+services:
+  relay:
+    image: "${RELAY_IMAGE:-cbweb3b/cacti-relay:local}"
+    container_name: "${RELAY_CONTAINER_NAME:?}"
+    environment:
+      # The app reads CACTI_API_PORT (config.ts), NOT RELAY_PORT. Setting only RELAY_PORT
+      # left it listening on the 4000 default while the mapping below published a different
+      # port, so the relay's REST API was unreachable from the host — which silently broke
+      # register-relay-spoke, the toolkit's only caller of POST /api/v1/spokes. Both names
+      # are set from one value so the app, the mapping and the manifest endpoint agree.
+      CACTI_API_PORT: "${RELAY_PORT:?}"
+      RELAY_PORT: "${RELAY_PORT:?}"
+      HUB_RPC_URL: "http://host.docker.internal:${HUB_RPC_PORT:?}"
+      # X-Relay-Auth credential for the relay's inbound routes, POST /api/v1/spokes
+      # included (finding R2-M-10). Required, not defaulted: the guard fails closed, so a
+      # relay started without it refuses every spoke registration — and the cross-currency
+      # bridge-out relay already refused to start without it. Compose failing here names
+      # the missing variable instead of leaving a relay that silently accepts nothing.
+      # The toolkit writes it to the hub env file; deployments override it there.
+      INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:?}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Same port inside and out: CACTI_API_PORT above makes the app listen on RELAY_PORT.
+    ports:
+      - "${RELAY_PORT:?}:${RELAY_PORT:?}"
+    volumes:
+      - relay_data:/data
+    networks:
+      - relay_network
+    restart: always
+
+networks:
+  relay_network:
+    name: "${RELAY_NET_PREFIX:?}_network"
+
+volumes:
+  relay_data:
+    name: "${RELAY_VOLUME_PREFIX:?}_relay_data"

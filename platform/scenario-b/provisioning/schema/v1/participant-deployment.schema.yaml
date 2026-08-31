@@ -1,0 +1,149 @@
+# JSON-Schema v1 (contrato de editor/CI) — ParticipantDeployment (cbweb3b/v1)
+# Fonte de verdade das regras SEMÂNTICAS é a validação Go (engine/manifest);
+# este schema cobre as regras ESTRUTURAIS para editores/CI. Nenhuma lib de
+# JSON-Schema é usada em runtime pelo toolkit. As regras estruturais (enums de
+# mode/role/environment e a matriz obrigatório/proibido por modo) são mantidas
+# em paridade com o validador Go pelo teste schema_parity_test.go (SC-004).
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://cbweb3/scenario-b/schema/v1/participant-deployment.schema.yaml"
+title: ParticipantDeployment
+type: object
+required: [apiVersion, kind, metadata, spec]
+properties:
+  apiVersion: { const: "cbweb3b/v1" }
+  kind: { const: "ParticipantDeployment" }
+  metadata:
+    type: object
+    required: [name]
+    properties:
+      name: { type: string, minLength: 1 }
+  spec:
+    type: object
+    # node/image/keyProvider/certSource/relay são obrigatórios apenas nos modos
+    # que sobem um nó Besu (found-hub/found-spoke/join) — ver allOf abaixo. O modo
+    # observe (stack de observabilidade NOC) não sobe nó, então não os exige.
+    required: [scenario, environment, mode, topology, frontendHost, adminUsers]
+    properties:
+      scenario: { const: "b" }
+      environment: { enum: [local] }          # staging/prod rejeitados nesta fase
+      mode: { enum: [found-hub, found-spoke, join, observe] }
+      topology:
+        type: object
+        required: [role]
+        properties:
+          role: { enum: [hub, central-bank, commercial-bank, noc] }
+      displayName: { type: string }
+      hub:
+        type: object
+        required: [chainId, currency]
+        properties:
+          chainId: { type: integer }
+          currency: { type: array, items: { type: string }, minItems: 1 }
+      spoke:
+        type: object
+        required: [id, chainId, currency]
+        properties:
+          id: { type: string, minLength: 1 }
+          chainId: { type: integer }
+          currency: { type: string }
+          # Overrides opcionais dos metadados ERC-20 dos tokens do spoke. Ausentes,
+          # derivam de `currency`: "Tokenized <ISO>"/"tCeBM_<ISO>" (tCeBM) e
+          # "Fiat <ISO>"/"fCeBM_<ISO>" (fCeBM). O código ISO em `currency` continua
+          # sendo a ÚNICA chave de roteamento (id do relay "spoke-<currency>",
+          # registro de moeda no hub, token espelho "W-tCeBM_<ISO>").
+          # Os símbolos exigem o formato "<prefixo>_<ISO>": portais e api-gateway
+          # derivam a moeda exibida do segmento após o último underscore. A regra
+          # semântica (segmento == currency) é validada no Go (validateSpokeTokens).
+          tokenName: { type: string, minLength: 1 }
+          tokenSymbol: { type: string, pattern: "^[^\\s]+_[^\\s_]+$" }
+          fiatTokenName: { type: string, minLength: 1 }
+          fiatTokenSymbol: { type: string, pattern: "^[^\\s]+_[^\\s_]+$" }
+      hubBundleRef: { type: string }
+      joinBundleRef: { type: string }
+      nocBundleRef: { type: string }
+      bankId: { type: string }
+      node:
+        type: object
+        required: [advertisedHost, rpc, ws, p2p, dataDir]
+        properties:
+          advertisedHost: { type: string, minLength: 1 }
+          rpc:  { type: object, required: [port], properties: { port: { type: integer } } }
+          ws:   { type: object, required: [port], properties: { port: { type: integer } } }
+          p2p:  { type: object, required: [port], properties: { port: { type: integer } } }
+          dataDir: { type: string }
+          validator: { type: boolean }        # join: true → warning (não erro)
+      image: { type: string, minLength: 1 }
+      keyProvider: { type: string, pattern: "^kms://" }
+      certSource: { type: string, pattern: "^(self-signed(://.*)?|ca://.+)$" }
+      relay:
+        type: object
+        required: [endpoint]
+        properties:
+          endpoint: { type: string }
+          advertisedHost: { type: string }
+          # Relay container on this host, used only so the noc-agent can collect its
+          # logs. Absent → the NOC reports no logs for the relay component.
+          containerName: { type: string }
+      cbEndpoint: { type: string }
+      # NOC bundle reference (obrigatório em observe; ver allOf).
+      # Bloco NOC opcional em qualquer modo (nunca carrega segredos).
+      noc:
+        type: object
+        properties:
+          backendURL: { type: string }
+          keycloakURL: { type: string }
+          launcherURL: { type: string }
+          pushIntervalSeconds: { type: integer, minimum: 0 }
+          components: { type: array, items: { enum: [BESU, CACTI_RELAY, PALADIN] } }
+          # api-gateway the NOC backend reads AMM pool status from, as reachable FROM
+          # THE NOC CONTAINER (own docker network → use host + published port).
+          ammGatewayURL: { type: string }
+          # Extra browser origins for the public noc-portal Keycloak client: the
+          # standalone NOC portal (observe mode) this entity does not serve itself.
+          # Plain scheme://host[:port] only — no path, trailing slash or wildcard.
+          portalOrigins:
+            type: array
+            items:
+              type: string
+              pattern: "^https?://[A-Za-z0-9._-]+(:[0-9]{1,5})?$"
+      frontendHost: { type: string }
+      adminUsers:
+        type: array
+        minItems: 1
+        items:
+          type: object
+          required: [role, username, password]
+          properties:
+            role: { type: string }
+            username: { type: string }
+            password: { type: string }
+      # Per-entity launcher (distributed A/B entry point). Optional.
+      launcher: { type: string, enum: [enable, disable] }
+      # Host port for this entity's launcher (one per host; distinct per entity).
+      launcherPort: { type: integer, minimum: 1, maximum: 65535 }
+    # Regras condicionais por modo (estruturais)
+    allOf:
+      # Campos de provisionamento de nó: obrigatórios apenas nos modos que sobem
+      # um nó Besu. Guardado por `enum` (não `const`) de propósito — o teste de
+      # paridade (schema_parity_test.go) só processa cláusulas com mode.const, e
+      # a matriz obrigatório/proibido por modo lá é apenas dos campos que
+      # DISCRIMINAM o modo, não destes campos estruturais.
+      - if:  { properties: { mode: { enum: [found-hub, found-spoke, join] } } }
+        then:
+          required: [node, image, keyProvider, certSource, relay]
+      - if:  { properties: { mode: { const: found-hub } } }
+        then:
+          required: [hub]
+          not: { anyOf: [ {required: [spoke]}, {required: [hubBundleRef]}, {required: [joinBundleRef]}, {required: [bankId]}, {required: [nocBundleRef]} ] }
+      - if:  { properties: { mode: { const: found-spoke } } }
+        then:
+          required: [spoke, hubBundleRef]
+          not: { anyOf: [ {required: [hub]}, {required: [joinBundleRef]}, {required: [bankId]}, {required: [nocBundleRef]} ] }
+      - if:  { properties: { mode: { const: join } } }
+        then:
+          required: [spoke, joinBundleRef, bankId]
+          not: { anyOf: [ {required: [hub]}, {required: [hubBundleRef]}, {required: [cbEndpoint]}, {required: [nocBundleRef]} ] }
+      - if:  { properties: { mode: { const: observe } } }
+        then:
+          required: [nocBundleRef]
+          not: { anyOf: [ {required: [hub]}, {required: [spoke]}, {required: [hubBundleRef]}, {required: [joinBundleRef]}, {required: [bankId]}, {required: [cbEndpoint]} ] }

@@ -1,0 +1,562 @@
+syntax = "proto3";
+
+package payment_orchestrator.v1;
+
+option go_package = "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1;paymentorchestratorv1";
+
+// ─── Enums ───────────────────────────────────────────────────────────────
+
+enum FXAgreementState {
+  FX_STATE_INVALID = 0;
+  FX_STATE_PROPOSED = 1;
+  FX_STATE_ACCEPTED = 2;
+  FX_STATE_REJECTED = 3;
+  FX_STATE_CANCELLED = 4;
+  FX_STATE_SETTLED = 5;
+}
+
+enum FXAgreementEventSource {
+  FX_EVENT_SOURCE_LOCAL_API = 0;
+  FX_EVENT_SOURCE_RELAY = 1;
+  FX_EVENT_SOURCE_SYSTEM_JOB = 2;
+  FX_EVENT_SOURCE_ON_BEHALF = 3;
+}
+
+enum HTLCState {
+  HTLC_STATE_INVALID = 0;
+  HTLC_STATE_PENDING = 1;
+  HTLC_STATE_LOCKED = 2;
+  HTLC_STATE_SETTLED = 3;
+  HTLC_STATE_REFUNDED = 4;
+  HTLC_STATE_SETTLING = 5;  // transient: on-chain settle in progress
+  HTLC_STATE_REFUNDING = 6; // transient: on-chain refund in progress
+}
+
+// ─── FX Agreement Messages ───────────────────────────────────────────────
+
+message FXAgreement {
+  string trade_id = 1;
+  string originator = 2;           // was counterparty_a — Bank A
+  string counterparty_b = 3;       // acceptance authority — Bank D locally
+  string settlement_agent = 10;    // Bank C
+  string custodian = 11;           // Bank D
+  string beneficiary = 12;         // Bank B
+  string origin_amount = 13;       // was notional
+  string counter_amount = 14;
+  string origin_currency = 15;     // ISO 4217
+  string counter_currency = 16;    // ISO 4217
+  reserved 17, 18;
+  reserved "spoke_a_receiver", "spoke_b_receiver";
+  string rate = 7;
+  uint64 expiry_date = 8;
+  FXAgreementState state = 9;
+  string group_id = 19;
+  string contract_address = 20;
+  string source_spoke_id = 21;   // Spoke ID of the initiating leg (e.g. "spoke-brl")
+  string dest_spoke_id = 22;     // Spoke ID of the receiving leg (e.g. "spoke-usd")
+  string source_receiver = 23;   // Paladin identity on source spoke (e.g. "funded_operator@spoke-brl-bank-c")
+  string dest_receiver = 24;     // Paladin identity on dest spoke (e.g. "funded_operator@spoke-usd-bank-b")
+}
+
+message ProposeFXAgreementRequest {
+  string trade_id = 1;
+  string counterparty_b = 2;
+  string originator = 10;          // explicit originator for on_behalf calls
+  string settlement_agent = 3;
+  string custodian = 4;
+  string beneficiary = 5;
+  string origin_amount = 6;
+  string counter_amount = 7;
+  string origin_currency = 8;
+  string counter_currency = 9;
+  string rate = 11;
+  uint64 expiry_date = 12;
+  bool on_behalf = 13;             // when true, calls proposeOnBehalf() via governance
+  reserved 14, 15;
+  reserved "spoke_a_receiver", "spoke_b_receiver";
+  string source_spoke_id = 16;   // Spoke ID of the initiating leg (e.g. "spoke-brl")
+  string dest_spoke_id = 17;     // Spoke ID of the receiving leg (e.g. "spoke-usd")
+  string source_receiver = 18;   // Paladin identity on source spoke
+  string dest_receiver = 19;     // Paladin identity on dest spoke
+}
+
+message ProposeFXAgreementResponse {
+  string tx_hash = 1;
+  string trade_id = 2;
+}
+
+message AcceptFXAgreementRequest {
+  string trade_id = 1;
+  bool on_behalf = 2;   // when true, calls acceptOnBehalf() via governance
+}
+
+message AcceptFXAgreementResponse {
+  string tx_hash = 1;
+}
+
+message RejectFXAgreementRequest {
+  string trade_id = 1;
+  bool on_behalf = 2;   // when true, calls rejectOnBehalf() via governance
+}
+
+message RejectFXAgreementResponse {
+  string tx_hash = 1;
+}
+
+message CancelFXAgreementRequest {
+  string trade_id = 1;
+}
+
+message CancelFXAgreementResponse {
+  string tx_hash = 1;
+}
+
+message SettleFXAgreementRequest {
+  string trade_id = 1;
+}
+
+message SettleFXAgreementResponse {
+  string tx_hash = 1;
+}
+
+message GetFXAgreementRequest {
+  string trade_id = 1;
+}
+
+message GetFXAgreementResponse {
+  FXAgreement agreement = 1;
+}
+
+message ListFXAgreementsRequest {
+  string counterparty = 1;
+  string state = 2;
+}
+
+message ListFXAgreementsResponse {
+  repeated FXAgreement agreements = 1;
+}
+
+// FXAgreementEvent represents an immutable audit trail entry.
+message FXAgreementEvent {
+  int64 id = 1;                              // bigserial auto-increment ID
+  string trade_id = 2;                       // FK: agreements(trade_id)
+  FXAgreementState from_state = 3;           // State before transition
+  FXAgreementState to_state = 4;             // State after transition
+  string actor = 5;                          // User/service identity that triggered the transition
+  int64 occurred_at_unix = 6;                // Timestamp (seconds since epoch)
+  string notes = 7;                          // Optional human-readable detail
+  string tx_hash = 8;                        // Optional on-chain tx reference
+  FXAgreementEventSource source = 9;         // Origin: LOCAL_API, RELAY, SYSTEM_JOB, ON_BEHALF
+}
+
+message ListFXAgreementEventsRequest {
+  string trade_id = 1;   // Required: trade_id to query audit trail for
+}
+
+message ListFXAgreementEventsResponse {
+  repeated FXAgreementEvent events = 1;    // Ordered by occurred_at_unix ASC
+}
+
+message ListParticipantIdentitiesRequest {}
+
+message ListParticipantIdentitiesResponse {
+  repeated string identities = 1; // distinct Paladin identities, sorted
+}
+
+// ─── HTLC Messages ──────────────────────────────────────────────────────
+
+message HTLCLock {
+  string contract_id = 1;
+  string sender = 2;
+  string receiver = 3;
+  string hash_lock = 4;
+  uint64 time_lock = 5;
+  reserved 6;
+  reserved "secret";
+  string zeto_lock_ref = 7;
+  HTLCState state = 8;
+  bool counterparty_locked = 9; // true once the relay confirms the counterparty spoke has locked its matching leg
+  string amount = 10; // locked amount, integer units (as persisted by the orchestrator)
+  string created_at = 11; // RFC3339 creation timestamp
+}
+
+message LockHTLCRequest {
+  string agreement_id = 1; // Optional: auto-generated UUID if empty
+  string receiver = 2;     // Required: Paladin identity of the token recipient
+  string amount = 3;       // Required
+  uint64 time_lock = 4;    // Optional: defaults to now+3600s (1h) — initiator must have longer timelock than responder
+}
+
+message LockHTLCResponse {
+  string contract_id = 1;
+  string hash_lock = 2;
+  string htlc_tx_hash = 3;
+  string zeto_tx_hash = 4;
+  string secret = 5; // one-time disclosure to the HTLC creator; store securely and never re-expose
+}
+
+// LockHTLCWithHashLock creates an HTLC lock using an externally provided
+// hashLock (no secret is generated). Used by the responder spoke in a
+// cross-spoke atomic swap: the initiator generates the secret and shares
+// only the hashLock with the responder.
+message LockHTLCWithHashLockRequest {
+  string agreement_id = 1; // Optional: auto-generated UUID if empty
+  string receiver = 2;     // Required: Paladin identity of the token recipient
+  string amount = 3;       // Required
+  uint64 time_lock = 4;    // Optional: defaults to now+1800s (30min) — responder must have shorter timelock than initiator
+  string hash_lock = 5;    // Required: hex-encoded SHA-256 hash received from the initiator
+}
+
+message LockHTLCWithHashLockResponse {
+  string contract_id = 1;
+  string hash_lock = 2;
+  string htlc_tx_hash = 3;
+  string zeto_tx_hash = 4;
+}
+
+message SettleHTLCRequest {
+  string contract_id = 1;
+  string secret = 2;
+}
+
+message SettleHTLCResponse {
+  string htlc_tx_hash = 1;
+  string zeto_tx_hash = 2;
+}
+
+message RefundHTLCRequest {
+  string contract_id = 1;
+}
+
+message RefundHTLCResponse {
+  string htlc_tx_hash = 1;
+  string zeto_tx_hash = 2;
+}
+
+message GetHTLCStatusRequest {
+  string contract_id = 1;
+}
+
+message GetHTLCStatusResponse {
+  HTLCLock lock = 1;
+}
+
+message SearchHTLCRequest {
+  string agreement_id = 1;
+  string sender = 2;
+  string receiver = 3;
+  string state = 4;
+}
+
+message SearchHTLCResponse {
+  repeated HTLCLock locks = 1;
+}
+
+// ─── Token Messages (Zeto via Paladin) ───────────────────────────────────
+
+message MintTokenRequest {
+  string to = 1;
+  string amount = 2;
+}
+
+message MintTokenResponse {
+  string tx_hash = 1;
+}
+
+message BurnTokenRequest {
+  string from = 1;
+  string amount = 2;
+}
+
+message BurnTokenResponse {
+  string tx_hash = 1;
+}
+
+message TransferTokenRequest {
+  string to = 1;
+  string amount = 2;
+}
+
+message TransferTokenResponse {
+  string tx_hash = 1;
+}
+
+message GetBalanceRequest {
+  // Deprecated: ignored by server; identity is resolved internally from PALADIN_IDENTITY env var.
+  string identity = 1;
+}
+
+message GetBalanceResponse {
+  string balance = 1;
+}
+
+message GetFiatBalanceRequest {}
+
+message GetFiatBalanceResponse {
+  string balance = 1;
+}
+
+// ─── Escrow Enums ────────────────────────────────────────────────────────
+
+// Status of a fiat deposit request (commercial bank → central bank).
+enum DepositStatus {
+  DEPOSIT_STATUS_PENDING     = 0;
+  DEPOSIT_STATUS_APPROVED    = 1;
+  DEPOSIT_STATUS_REJECTED    = 2;
+  DEPOSIT_STATUS_MINT_FAILED = 3;
+}
+
+// Status of a fCeBM → tCeBM escrow (tokenization) request.
+enum EscrowStatus {
+  ESCROW_STATUS_PENDING  = 0;
+  ESCROW_STATUS_APPROVED = 1;
+  ESCROW_STATUS_REJECTED = 2;
+}
+
+// Status of a tCeBM → fCeBM redeem (de-tokenization) request.
+enum RedeemStatus {
+  REDEEM_STATUS_PENDING  = 0;
+  REDEEM_STATUS_APPROVED = 1;
+  REDEEM_STATUS_REJECTED = 2;
+}
+
+// ─── Escrow Record Messages ─────────────────────────────────────────────
+
+// Persistent record for a fiat deposit request.
+message DepositRecord {
+  string id                         = 1;
+  string requester_id               = 2;
+  string requester_besu_address     = 3;
+  string requester_paladin_identity = 4;
+  string amount                     = 5;
+  DepositStatus status              = 6;
+  string mint_tx_hash               = 7;
+  string rejection_reason           = 8;
+  string created_at                 = 9;
+}
+
+// Persistent record for an escrow (tokenization) request.
+message EscrowRecord {
+  string id                         = 1;
+  string requester_id               = 2;
+  string requester_besu_address     = 3;
+  string requester_paladin_identity = 4;
+  string amount                     = 5;
+  EscrowStatus status               = 6;
+  string burn_tx_hash               = 7;
+  string mint_tx_hash               = 8;
+  string rejection_reason           = 9;
+  string created_at                 = 10;
+}
+
+// Persistent record for a redeem (de-tokenization) request.
+message RedeemRecord {
+  string id                         = 1;
+  string requester_id               = 2;
+  string requester_besu_address     = 3;
+  string requester_paladin_identity = 4;
+  string amount                     = 5;
+  RedeemStatus status               = 6;
+  string zeto_transfer_tx_hash      = 7;
+  string fiat_mint_tx_hash          = 8;
+  string rejection_reason           = 9;
+  string created_at                 = 10;
+}
+
+// ─── Deposit Messages ───────────────────────────────────────────────────
+
+// Commercial bank registers a new fiat deposit request with the central bank.
+message RegisterDepositRequest {
+  string requester_besu_address     = 1;
+  string requester_paladin_identity = 2;
+  string amount                     = 3;
+}
+
+message RegisterDepositResponse {
+  string deposit_id = 1;
+}
+
+// Central bank approves a pending deposit request.
+message ApproveDepositRequest {
+  string deposit_id = 1;
+}
+
+message ApproveDepositResponse {}
+
+// Central bank rejects a pending deposit request.
+message RejectDepositRequest {
+  string deposit_id = 1;
+  string reason     = 2;
+}
+
+message RejectDepositResponse {}
+
+// Central bank mints fCeBM to the commercial bank after deposit approval.
+message RequestFiatExchangeRequest {
+  string deposit_id = 1;
+}
+
+message RequestFiatExchangeResponse {
+  string mint_tx_hash = 1;
+}
+
+// List deposit records (filtered by requester_id when non-empty).
+message ListDepositsRequest {
+  string requester_id = 1;
+}
+
+message ListDepositsResponse {
+  repeated DepositRecord deposits = 1;
+}
+
+// ─── Escrow Messages ────────────────────────────────────────────────────
+
+// Commercial bank requests tokenization of fCeBM into tCeBM (Zeto).
+message RequestEscrowRequest {
+  string requester_besu_address     = 1;
+  string requester_paladin_identity = 2;
+  string amount                     = 3;
+}
+
+message RequestEscrowResponse {
+  string escrow_id = 1;
+}
+
+// Central bank approves escrow: burns fCeBM, mints tCeBM via Zeto.
+message ApproveEscrowRequest {
+  string escrow_id = 1;
+}
+
+message ApproveEscrowResponse {
+  string burn_tx_hash = 1;
+  string mint_tx_hash = 2;
+}
+
+// Central bank rejects an escrow request.
+message RejectEscrowRequest {
+  string escrow_id = 1;
+  string reason    = 2;
+}
+
+message RejectEscrowResponse {}
+
+// List escrow records (filtered by requester_id when non-empty).
+message ListEscrowsRequest {
+  string requester_id = 1;
+}
+
+message ListEscrowsResponse {
+  repeated EscrowRecord escrows = 1;
+}
+
+// ─── Redeem Messages ────────────────────────────────────────────────────
+
+// Commercial bank requests redemption of tCeBM back into fCeBM.
+// The zeto_transfer_tx_hash proves that the commercial bank has already
+// transferred Zeto tokens to the central bank's Paladin identity.
+message RequestRedeemRequest {
+  string requester_besu_address     = 1;
+  string requester_paladin_identity = 2;
+  string amount                     = 3;
+  string zeto_transfer_tx_hash      = 4;
+}
+
+message RequestRedeemResponse {
+  string redeem_id = 1;
+}
+
+// Central bank approves redeem: mints fCeBM to the commercial bank.
+message ApproveRedeemRequest {
+  string redeem_id = 1;
+}
+
+message ApproveRedeemResponse {
+  string fiat_mint_tx_hash = 1;
+}
+
+// Central bank rejects a redeem request (returns Zeto to commercial bank).
+message RejectRedeemRequest {
+  string redeem_id = 1;
+  string reason    = 2;
+}
+
+message RejectRedeemResponse {}
+
+// List redeem records (filtered by requester_id when non-empty).
+message ListRedeemsRequest {
+  string requester_id = 1;
+}
+
+message ListRedeemsResponse {
+  repeated RedeemRecord redeems = 1;
+}
+
+// ─── Zeto Transfer (used by commercial bank proxy before RequestRedeem) ──
+
+// Initiates a Zeto token transfer from the caller to a target identity.
+message InitiateZetoTransferRequest {
+  string to_identity = 1;
+  string amount      = 2;
+}
+
+message InitiateZetoTransferResponse {
+  string tx_hash = 1;
+}
+
+// ─── Service ─────────────────────────────────────────────────────────────
+
+service PaymentOrchestratorService {
+  // FX Agreement lifecycle (mirrors FXAgreement.sol on Besu)
+  rpc ProposeFXAgreement(ProposeFXAgreementRequest) returns (ProposeFXAgreementResponse);
+  rpc AcceptFXAgreement(AcceptFXAgreementRequest) returns (AcceptFXAgreementResponse);
+  rpc RejectFXAgreement(RejectFXAgreementRequest) returns (RejectFXAgreementResponse);
+  rpc CancelFXAgreement(CancelFXAgreementRequest) returns (CancelFXAgreementResponse);
+  rpc SettleFXAgreement(SettleFXAgreementRequest) returns (SettleFXAgreementResponse);
+  rpc GetFXAgreement(GetFXAgreementRequest) returns (GetFXAgreementResponse);
+  rpc ListFXAgreements(ListFXAgreementsRequest) returns (ListFXAgreementsResponse);
+  rpc ListFXAgreementEvents(ListFXAgreementEventsRequest) returns (ListFXAgreementEventsResponse);
+
+  // ListParticipantIdentities returns the distinct Paladin identities across all
+  // bilateral Pente groups this node belongs to — the real FX-party roster,
+  // derived from live membership rather than a static list.
+  rpc ListParticipantIdentities(ListParticipantIdentitiesRequest) returns (ListParticipantIdentitiesResponse);
+
+  // HTLC dual-layer operations (public coordination + private Zeto lock)
+  rpc LockHTLC(LockHTLCRequest) returns (LockHTLCResponse);
+  rpc LockHTLCWithHashLock(LockHTLCWithHashLockRequest) returns (LockHTLCWithHashLockResponse);
+  rpc SettleHTLC(SettleHTLCRequest) returns (SettleHTLCResponse);
+  rpc RefundHTLC(RefundHTLCRequest) returns (RefundHTLCResponse);
+  rpc GetHTLCStatus(GetHTLCStatusRequest) returns (GetHTLCStatusResponse);
+  rpc SearchHTLC(SearchHTLCRequest) returns (SearchHTLCResponse);
+
+  // Token operations (Zeto via Paladin sidecar)
+  rpc MintToken(MintTokenRequest) returns (MintTokenResponse);
+  rpc BurnToken(BurnTokenRequest) returns (BurnTokenResponse);
+  rpc TransferToken(TransferTokenRequest) returns (TransferTokenResponse);
+  rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
+  rpc GetFiatBalance(GetFiatBalanceRequest) returns (GetFiatBalanceResponse);
+
+  // ─── Escrow flow: Deposit → Escrow → Redeem ───────────────────────────
+
+  // Deposit lifecycle (fiat deposit from commercial bank)
+  rpc RegisterDeposit(RegisterDepositRequest) returns (RegisterDepositResponse);
+  rpc ApproveDeposit(ApproveDepositRequest) returns (ApproveDepositResponse);
+  rpc RejectDeposit(RejectDepositRequest) returns (RejectDepositResponse);
+  rpc RequestFiatExchange(RequestFiatExchangeRequest) returns (RequestFiatExchangeResponse);
+  rpc ListDeposits(ListDepositsRequest) returns (ListDepositsResponse);
+
+  // Escrow lifecycle (fCeBM → tCeBM tokenization)
+  rpc RequestEscrow(RequestEscrowRequest) returns (RequestEscrowResponse);
+  rpc ApproveEscrow(ApproveEscrowRequest) returns (ApproveEscrowResponse);
+  rpc RejectEscrow(RejectEscrowRequest) returns (RejectEscrowResponse);
+  rpc ListEscrows(ListEscrowsRequest) returns (ListEscrowsResponse);
+
+  // Redeem lifecycle (tCeBM → fCeBM de-tokenization)
+  rpc RequestRedeem(RequestRedeemRequest) returns (RequestRedeemResponse);
+  rpc ApproveRedeem(ApproveRedeemRequest) returns (ApproveRedeemResponse);
+  rpc RejectRedeem(RejectRedeemRequest) returns (RejectRedeemResponse);
+  rpc ListRedeems(ListRedeemsRequest) returns (ListRedeemsResponse);
+
+  // Zeto transfer (used by commercial bank before RequestRedeem)
+  rpc InitiateZetoTransfer(InitiateZetoTransferRequest) returns (InitiateZetoTransferResponse);
+}

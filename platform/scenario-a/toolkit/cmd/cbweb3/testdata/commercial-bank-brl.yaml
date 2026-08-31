@@ -1,0 +1,31 @@
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: commercial-bank-alpha
+spec:
+  scenario: a
+  environment: local
+  role: commercial-bank
+  mode: join
+  bankId: commercial-bank-alpha
+  spoke:
+    id: spoke-brl
+    chainId: 1337
+    currency: BRL
+  joinBundleRef: ./bundles/spoke-brl.bundle.yaml
+  node:
+    advertisedHost: cbweb3-spoke-brl-besu.commercial-bank-alpha
+    rpc:
+      port: 8746
+    ws:
+      port: 8756
+    p2p:
+      port: 31403
+    dataDir: /opt/cbweb3/data/commercial-bank-alpha
+  image: hyperledger/besu:25.8.0
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  adminUsers:
+    - role: ROLE_BANK
+      username: admin@bank.brl.com
+      password: bank-local

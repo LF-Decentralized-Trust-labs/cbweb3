@@ -1,0 +1,49 @@
+# yaml-language-server: $schema=../../provisioning/schema/v1/participant-deployment.schema.yaml
+#
+# Banco comercial brasileiro (ilustrativo) — junta-se ao spoke-brl.
+# mode: join  → consome o join bundle emitido pelo central-bank-brazil.
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: bank-itau
+spec:
+  scenario: a
+  environment: local
+  role: commercial-bank
+  mode: join
+  bankId: bank-itau
+  displayName: Itaú
+  spoke:
+    id: spoke-brl
+    chainId: 1337
+    currency: BRL
+  # Resolvido relativo a este arquivo de manifesto. O bundle é gravado em
+  # samples/bundles/ quando CBWEB3_OUTPUT_DIR aponta para samples/ (ver README).
+  joinBundleRef: ../bundles/spoke-brl.bundle.yaml
+  node:
+    advertisedHost: cbweb3-spoke-brl-besu.bank-itau
+    rpc:
+      port: 8646
+    ws:
+      port: 8656
+    p2p:
+      port: 31304
+    dataDir: cbweb3-data/bank-itau
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  # frontendHost (opcional): hostname/IP embutido em VITE_API_URL e VITE_KEYCLOAK_URL
+  # no build do frontend. Omitido → "localhost" (só funciona quando o browser roda na
+  # mesma máquina do host Docker). Defina um IP/DNS roteável quando o frontend for
+  # acessado de uma máquina remota (ex.: uma VM na nuvem com IP público 3.84.201.14).
+  # frontendHost: 3.84.201.14
+  # Operador do banco (login por papel via ROPC). O nome inclui o spoke (brasil).
+  launcher: enable
+  launcherPort: 5192
+  adminUsers:
+    - role: ROLE_BANK
+      username: admin@itau.brasil.com
+      password: itau-bank-local
+  # Reverse proxy off — these many-entity single-host samples are port-based via the
+  # per-entity launcher. Test the proxy separately with proxy-smoke.sh (one entity per host).
+  proxy: disable

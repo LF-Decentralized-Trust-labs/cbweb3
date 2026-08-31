@@ -1,0 +1,17 @@
+# NOC Agent Configuration — Regional Hub
+# Monitors: Hub Besu node, Hub Paladin node
+spoke_id: "b0000000-0000-0000-0000-000000000001"
+noc_backend_url: "http://cbweb3-b-noc-backend:8091"
+api_key: "noc-agent-hub-key-local"
+push_interval_seconds: 15
+
+components:
+  - name: "besu-hub"
+    type: "BESU"
+    endpoint: "http://host.docker.internal:8845"
+    container_name: "cbweb3-hub-besu.hub"
+
+  - name: "paladin-hub"
+    type: "PALADIN"
+    endpoint: "http://host.docker.internal:8548"
+    container_name: "paladin-hub-cb"

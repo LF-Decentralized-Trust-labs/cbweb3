@@ -1,0 +1,64 @@
+name: spoke-a
+
+services:
+  bank-a-frontend:
+    container_name: cbweb3-bank-a-frontend
+    build:
+      context: .
+      dockerfile: apps/bank/Dockerfile
+      args:
+        VITE_API_URL: ${API_BANK_A}
+        VITE_PORTAL_OWNER: ${BANK_A_PORTAL_OWNER}
+        VITE_FIAT_SYMBOL: ${SPOKE_A_FIAT_SYMBOL}
+        VITE_INSTITUTION_NAME: ${BANK_A_INSTITUTION_NAME}
+    ports:
+      - "${BANK_A_FRONTEND_PORT}:80"
+
+  bank-c-frontend:
+    container_name: cbweb3-bank-c-frontend
+    build:
+      context: .
+      dockerfile: apps/bank/Dockerfile
+      args:
+        VITE_API_URL: ${API_BANK_C}
+        VITE_PORTAL_OWNER: ${BANK_C_PORTAL_OWNER}
+        VITE_FIAT_SYMBOL: ${SPOKE_A_FIAT_SYMBOL}
+        VITE_INSTITUTION_NAME: ${BANK_C_INSTITUTION_NAME}
+    ports:
+      - "${BANK_C_FRONTEND_PORT}:80"
+
+  central-bank-a-frontend:
+    container_name: cbweb3-central-bank-a-frontend
+    build:
+      context: .
+      dockerfile: apps/governance/Dockerfile
+      args:
+        VITE_API_URL: ${API_CENTRAL_BANK_A}
+        VITE_PORTAL_OWNER: ${CENTRAL_BANK_A_PORTAL_OWNER}
+        VITE_FIAT_SYMBOL: ${SPOKE_A_FIAT_SYMBOL}
+        VITE_INSTITUTION_NAME: ${SPOKE_A_GOVERNANCE_INSTITUTION_NAME}
+    ports:
+      - "${CENTRAL_BANK_A_FRONTEND_PORT}:80"
+
+  central-bank-a-treasury:
+    container_name: cbweb3-central-bank-a-treasury
+    build:
+      context: .
+      dockerfile: apps/treasury/Dockerfile
+      args:
+        VITE_API_URL: ${API_CENTRAL_BANK_A}
+        VITE_PORTAL_OWNER: ${CENTRAL_BANK_A_PORTAL_OWNER}
+        VITE_FIAT_SYMBOL: ${SPOKE_A_FIAT_SYMBOL}
+        VITE_INSTITUTION_NAME: ${CENTRAL_BANK_A_INSTITUTION_NAME}
+    ports:
+      - "${CENTRAL_BANK_A_TREASURY_PORT}:80"
+
+  supervisor-spoke-a-frontend:
+    container_name: cbweb3-supervisor-spoke-a-frontend
+    build:
+      context: .
+      dockerfile: apps/supervisor/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${API_SUPERVISOR_SPOKE_A}
+    ports:
+      - "${SUPERVISOR_SPOKE_A_FRONTEND_PORT}:80"

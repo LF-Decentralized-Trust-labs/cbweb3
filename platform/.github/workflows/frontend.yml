@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Frontend CI
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ["scenario-a/frontend/**", "scenario-b/frontend/**", ".github/workflows/frontend.yml"]
+  pull_request:
+    branches: [main, develop]
+    paths: ["scenario-a/frontend/**", "scenario-b/frontend/**", ".github/workflows/frontend.yml"]
+  workflow_dispatch:
+
+jobs:
+  # Until this job existed, a frontend type error merged green: no workflow built or
+  # type-checked any app, and each app's `type-check` script ran `tsc --noEmit`, which
+  # type-checks nothing here — the root tsconfig is `{"files": [], "references": [...]}`,
+  # so without walking the references the compilation unit is empty and the command
+  # exits 0 whatever the code says. The scripts now run `tsc -b`, the same check
+  # `npm run build` and the Dockerfiles already perform.
+  #
+  # The self-test below runs first for the same reason the SPDX gate self-tests: a
+  # check that cannot fail is worse than no check, because it gets quoted as evidence.
+  build:
+    name: ${{ matrix.scenario }} — type-check and build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [scenario-a, scenario-b]
+    defaults:
+      run:
+        working-directory: ${{ matrix.scenario }}/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ${{ matrix.scenario }}/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Proves the type-check actually fails on a type error before any result from it
+      # is trusted. Restores the file whatever the outcome.
+      - name: Self-test the type-check (fail path must fail)
+        run: bash tools/check-frontend-typecheck.test.sh ${{ matrix.scenario }}
+        working-directory: .
+
+      - name: Type-check every app
+        run: npm run type-check --workspaces --if-present
+
+      # Covers what type-checking alone does not: the bundler resolving every import
+      # and asset. This is the step that would have caught a broken build reaching a
+      # review-ready PR.
+      - name: Build every app
+        run: npm run build --workspaces --if-present

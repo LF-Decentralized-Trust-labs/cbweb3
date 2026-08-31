@@ -1,0 +1,110 @@
+version: "3.9"
+
+services:
+  noc-backend:
+    build:
+      context: ../../../backend/services/noc-backend
+      dockerfile: Dockerfile
+    image: cbweb3/noc-backend:local
+    container_name: noc-backend
+    restart: unless-stopped
+    ports:
+      - "${NOC_BACKEND_PORT:-8090}:8090"
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-noc}:${POSTGRES_PASSWORD:-noc}@noc-db:5432/${POSTGRES_DB:-nocdb}?sslmode=disable"
+      NOC_BACKEND_PORT: "8090"
+      KEYCLOAK_URL: "${KEYCLOAK_URL:-http://keycloak:8080}"
+      KEYCLOAK_REALM: "${KEYCLOAK_REALM:-cbweb3}"
+      KEYCLOAK_CLIENT_ID: "${KEYCLOAK_CLIENT_ID:-cbweb3-noc}"
+      KEYCLOAK_CLIENT_SECRET: "${KEYCLOAK_CLIENT_SECRET:-}"
+      AGENT_GRACE_MULTIPLIER: "${AGENT_GRACE_MULTIPLIER:-3}"
+      NOC_FRONTEND_ORIGIN: "${NOC_FRONTEND_ORIGIN:-http://localhost:5173}"
+      NOC_SKIP_AUTH: "${NOC_SKIP_AUTH:-false}"
+    depends_on:
+      noc-db:
+        condition: service_healthy
+    networks:
+      - noc-net
+
+  noc-db:
+    image: postgres:15-alpine
+    container_name: noc-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-noc}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-noc}"
+      POSTGRES_DB: "${POSTGRES_DB:-nocdb}"
+    volumes:
+      - noc-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-noc} -d ${POSTGRES_DB:-nocdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - noc-net
+
+  noc-agent-spoke-a:
+    build:
+      context: ../../../backend/services/noc-agent
+      dockerfile: Dockerfile
+    image: cbweb3/noc-agent:local
+    container_name: noc-agent-spoke-a
+    restart: unless-stopped
+    # Supplementary group for the read-only Docker socket below. The image is non-root
+    # (uid 65532, finding R2-M-12) and the socket is root:docker mode 0660, so an
+    # unprivileged uid outside that group is denied every log read — and the agent
+    # discards that error, so the portal's Log Viewer simply goes empty with nothing in
+    # the agent's own output. The toolkit and the NOC make targets compute
+    # NOC_DOCKER_GID from the socket itself. The default is the agent's own gid, which
+    # grants nothing: the agent then reports the problem at startup rather than
+    # collecting no logs in silence.
+    group_add:
+      - "${NOC_DOCKER_GID:-65532}"
+    volumes:
+      - ./agent-configs/spoke-a/agent.yaml:/etc/noc-agent/agent.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - noc-backend
+    networks:
+      - noc-net
+      - spoke_a_besu_network
+      - cacti_default
+
+  noc-agent-spoke-b:
+    image: cbweb3/noc-agent:local
+    container_name: noc-agent-spoke-b
+    restart: unless-stopped
+    # Supplementary group for the read-only Docker socket below. The image is non-root
+    # (uid 65532, finding R2-M-12) and the socket is root:docker mode 0660, so an
+    # unprivileged uid outside that group is denied every log read — and the agent
+    # discards that error, so the portal's Log Viewer simply goes empty with nothing in
+    # the agent's own output. The toolkit and the NOC make targets compute
+    # NOC_DOCKER_GID from the socket itself. The default is the agent's own gid, which
+    # grants nothing: the agent then reports the problem at startup rather than
+    # collecting no logs in silence.
+    group_add:
+      - "${NOC_DOCKER_GID:-65532}"
+    volumes:
+      - ./agent-configs/spoke-b/agent.yaml:/etc/noc-agent/agent.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - noc-agent-spoke-a   # ensures image is built before spoke-b starts
+      - noc-backend
+    networks:
+      - noc-net
+      - spoke_b_besu_network
+      - cacti_default
+
+volumes:
+  noc-db-data:
+
+networks:
+  noc-net:
+    driver: bridge
+  spoke_a_besu_network:
+    external: true
+  spoke_b_besu_network:
+    external: true
+  cacti_default:
+    external: true

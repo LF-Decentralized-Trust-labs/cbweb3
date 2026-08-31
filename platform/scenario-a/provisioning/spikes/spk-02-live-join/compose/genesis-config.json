@@ -1,0 +1,51 @@
+{
+  "genesis": {
+    "config": {
+      "chainId": 1338,
+      "homesteadBlock": 0,
+      "eip150Block": 0,
+      "eip155Block": 0,
+      "eip158Block": 0,
+      "byzantiumBlock": 0,
+      "constantinopleBlock": 0,
+      "petersburgBlock": 0,
+      "istanbulBlock": 0,
+      "berlinBlock": 0,
+      "londonBlock": 0,
+      "preMergeForkBlock": 0,
+      "shanghaiTime": 0,
+      "cancunTime": 0,
+      "qbft": {
+        "blockperiodseconds": 2,
+        "epochlength": 30,
+        "requesttimeoutseconds": 4
+      },
+      "zeroBaseFee": true
+    },
+    "nonce": "0x0",
+    "timestamp": "0x0",
+    "gasLimit": "0x1fffffffffffff",
+    "difficulty": "0x1",
+    "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "coinbase": "0x0000000000000000000000000000000000000000",
+    "alloc": {
+      "0x0000000000000000000000000000000000000001": {
+        "balance": "0x0"
+      },
+      "0xFE3B557E8Fb62b89F4916B721be55cEb828dBd73": {
+        "privateKey": "8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63",
+        "balance": "10000000000000000000000"
+      },
+      "0x627306090abaB3A6e1400e9345bC60c78a8BEf57": {
+        "privateKey": "c87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3",
+        "balance": "10000000000000000000000"
+      }
+    }
+  },
+  "blockchain": {
+    "nodes": {
+      "generate": true,
+      "count": 4
+    }
+  }
+}

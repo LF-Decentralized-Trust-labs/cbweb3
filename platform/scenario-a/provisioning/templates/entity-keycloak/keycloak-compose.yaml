@@ -1,0 +1,67 @@
+# Per-entity Keycloak (feature 034). Backed by the entity's dedicated Postgres
+# (created by the infra step) and importing realm JSONs rendered by the engine.
+# The CB instance hosts the central-bank realm (governance + treasury) and the
+# cbweb3 realm (NOC); a commercial bank gets its own only in keycloak: per-entity.
+#
+# REQUIRED env (set by the engine):
+#   ENTITY_INFRA_PREFIX   container-name prefix (matches the infra step)
+#   ENTITY_NET_NAME       per-entity network (external; from the infra step)
+#   KEYCLOAK_HOST_PORT    host port -> 8080
+#   KC_DB_URL             jdbc url to the entity's Postgres (e.g. jdbc:postgresql://<prefix>-postgres:5432/<db>)
+#   KC_DB_USERNAME / KC_DB_PASSWORD
+#   KEYCLOAK_IMAGE        Keycloak image (pinned)
+# OPTIONAL: KC_BOOTSTRAP_ADMIN_USERNAME (default admin), KEYCLOAK_IMAGE
+# REQUIRED (generated per entity, no fallback): KC_DB_PASSWORD, KC_BOOTSTRAP_ADMIN_PASSWORD
+#
+# STORAGE: the rendered realm JSON files are seeded by the engine directly into
+# the ${ENTITY_INFRA_PREFIX}_keycloak_import named volume (engine/dockervolume,
+# step_provision_keycloak.go) — no host filesystem, no KEYCLOAK_IMPORT_DIR bind
+# mount. Deviation from the original design; see the addendum in
+# specs/026-tk4-compose-central-bank/plan.md.
+
+services:
+  keycloak:
+    image: ${KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.0}
+    container_name: ${ENTITY_INFRA_PREFIX:?ENTITY_INFRA_PREFIX is required}-keycloak
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      # Generated per entity by the engine and readable from
+      # <dataDir>/.infra-secrets.env. admin/admin used to be every entity's console
+      # login, in local labs and on VMs alike.
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?KC_BOOTSTRAP_ADMIN_PASSWORD is required}
+      KC_DB: postgres
+      KC_DB_URL: ${KC_DB_URL:?KC_DB_URL is required}
+      KC_DB_USERNAME: ${KC_DB_USERNAME:-default}
+      # Must match the password the entity's Postgres was initialised with. A default
+      # here surfaces as a five-minute readiness timeout rather than an auth error, so
+      # it is required instead.
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD:?KC_DB_PASSWORD is required}
+      KC_HEALTH_ENABLED: "true"
+      KC_HTTP_ENABLED: "true"
+    ports:
+      - "${KEYCLOAK_HOST_PORT:?KEYCLOAK_HOST_PORT is required}:8080"
+    volumes:
+      - keycloak_import:/opt/keycloak/data/import:ro
+    # Keycloak 26 (ubi9-micro) has no curl/wget; use the shell's /dev/tcp. The
+    # request MUST be HTTP/1.1 with a Host header — Keycloak rejects HTTP/1.0 with
+    # no Host (returns an error, not 200). A 200 on /realms/master means the master
+    # realm is served and the server is ready.
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && printf 'GET /realms/master HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q ' 200'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - entity_net
+
+networks:
+  entity_net:
+    name: ${ENTITY_NET_NAME:?ENTITY_NET_NAME is required}
+    external: true
+
+volumes:
+  keycloak_import:
+    name: ${ENTITY_INFRA_PREFIX}_keycloak_import

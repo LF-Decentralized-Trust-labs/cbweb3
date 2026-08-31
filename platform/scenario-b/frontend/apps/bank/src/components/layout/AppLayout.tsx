@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { Outlet } from "react-router-dom";
+import { TrustNotice } from "../common/TrustNotice";
+import { Header } from "./Header";
+import { Sidebar } from "./Sidebar";
+
+export function AppLayout() {
+  return (
+    <div className="flex h-screen flex-col overflow-hidden bg-muted/30">
+      <Header />
+      <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col overflow-hidden md:flex-row">
+        <Sidebar />
+        <main className="min-w-0 flex-1 overflow-y-auto p-4">
+          <TrustNotice />
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  );
+}

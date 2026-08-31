@@ -1,0 +1,66 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package ports
+
+import (
+	"context"
+
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/domain"
+)
+
+// FXAgreementFilter specifies filtering options for ListAgreements.
+type FXAgreementFilter struct {
+	// Counterparty matches either Originator or CounterpartyB.
+	Counterparty string
+	// State filters by exact FXState value. Empty means all states.
+	State domain.FXState
+	// Limit caps the rows returned. Zero, negative, or above MaxFXAgreementPageSize is
+	// clamped to that maximum: the query used to have no bound at all, and an optional
+	// filter meant one request could read the whole table (finding R2-M-14).
+	//
+	// Set it explicitly at the call site. Relying on the repository's clamp works, but it
+	// makes the bound invisible to anyone reading the caller, and a truncated list that
+	// nobody knows is truncated is how rows go missing without an error.
+	Limit int
+}
+
+// MaxFXAgreementPageSize is the largest page ListAgreements will return, whatever the filter
+// asks for. It lives here rather than in the repository so a caller can name the bound it is
+// accepting without importing the storage layer.
+//
+// There is no Offset yet, so this is a cap and not pagination: a node holding more agreements
+// than this returns only the newest page, and the gRPC response carries no total to say so.
+// Surfacing that needs a page-size and total on ListFXAgreementsRequest/Response, which is a
+// proto change and a separate piece of work.
+const MaxFXAgreementPageSize = 200
+
+// FXAgreementRepository provides durable storage for FX agreements and audit events.
+// Implementations must guarantee:
+//   - Idempotent CreateAgreement (unique trade_id).
+//   - Append-only CreateAuditEvent (events are never updated or deleted).
+//   - Terminal states (REJECTED, CANCELLED, SETTLED) cannot be overwritten.
+type FXAgreementRepository interface {
+	// CreateAgreement persists a new FX agreement record.
+	// Returns an error if a record with the same TradeID already exists.
+	CreateAgreement(ctx context.Context, r *domain.FXAgreementRecord) error
+
+	// GetAgreement retrieves an FX agreement by trade_id.
+	// Returns (nil, nil) when not found.
+	GetAgreement(ctx context.Context, tradeID string) (*domain.FXAgreementRecord, error)
+
+	// UpdateAgreement saves state and timestamp changes to an existing record.
+	UpdateAgreement(ctx context.Context, r *domain.FXAgreementRecord) error
+
+	// ListAgreements returns agreements matching the filter. Ordered by created_at DESC.
+	ListAgreements(ctx context.Context, f FXAgreementFilter) ([]*domain.FXAgreementRecord, error)
+
+	// CreateAuditEvent appends an immutable lifecycle event for the given trade_id.
+	CreateAuditEvent(ctx context.Context, e *domain.FXAgreementEvent) error
+
+	// ListAuditEvents returns all events for a trade_id, ordered by occurred_at ASC.
+	ListAuditEvents(ctx context.Context, tradeID string) ([]*domain.FXAgreementEvent, error)
+
+	// ListExpiredNonTerminal returns all agreements whose expiry_date is before the
+	// provided unix-seconds timestamp and whose state is not terminal.
+	ListExpiredNonTerminal(ctx context.Context, nowUnix int64) ([]*domain.FXAgreementRecord, error)
+}
