@@ -328,6 +328,13 @@ func submitRawInternal(
 	}
 	receipt, err := WaitForReceipt(ctx, ec, signed, label)
 	if err != nil {
+		// A wait that died on its deadline may mean this account's counter has drifted ahead of the
+		// chain, in which case every later submission would queue behind a nonce that will never be
+		// reached. Marking it stale costs one PendingNonceAt on the next submission and is the only
+		// signal available: the broadcast itself succeeded.
+		if ShouldResyncNonce(err) {
+			signer.MarkNonceStale()
+		}
 		return nil, "", err
 	}
 	return receipt, signed.Hash().Hex(), nil
@@ -365,6 +372,19 @@ func WaitForReceipt(ctx context.Context, ec *ethclient.Client, tx *types.Transac
 // time (2–4 s locally) so it never fires on a merely busy chain.
 var ReceiptWaitTimeout = 90 * time.Second
 
+// ShouldResyncNonce reports whether a failed receipt wait is a reason to distrust the nonce counter.
+//
+// Only a deadline expiry is. A caller cancellation says nothing about the counter — the transaction
+// may well mine a moment later — and a reverted receipt means it did mine, so its nonce was spent
+// and the counter is correct. The check is on the wrapped error because WaitForReceipt wraps
+// whatever bind.WaitMined returned.
+func ShouldResyncNonce(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	return errors.Is(err, context.DeadlineExceeded)
+}
+
 // receiptWaitContext derives the context WaitMined runs under. Exposed as a helper so the deadline
 // policy — inherit the caller's, otherwise impose ReceiptWaitTimeout — is testable on its own.
 func receiptWaitContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -372,6 +392,56 @@ func receiptWaitContext(ctx context.Context) (context.Context, context.CancelFun
 		return ctx, func() {}
 	}
 	return context.WithTimeout(ctx, ReceiptWaitTimeout)
+}
+
+// nonceSource is the one thing the counter needs from a node: the account's pending nonce.
+// Narrowing the parameter to it keeps the re-seed path testable without a chain; *ethclient.Client
+// satisfies it, so callers pass what they always passed.
+type nonceSource interface {
+	PendingNonceAt(ctx context.Context, account common.Address) (uint64, error)
+}
+
+// ensureNonce seeds the counter from the node unless it already claims to be in step with the
+// chain. The caller holds s.mu.
+func (s *Signer) ensureNonce(ctx context.Context, src nonceSource) error {
+	if s.nonceInit {
+		return nil
+	}
+	n, err := src.PendingNonceAt(ctx, s.Address())
+	if err != nil {
+		return fmt.Errorf("nonce: %w", err)
+	}
+	s.nonce = n
+	s.nonceInit = true
+	return nil
+}
+
+// MarkNonceStale drops the counter's claim to be in step with the chain, so the next submission from
+// this account re-seeds it from PendingNonceAt.
+//
+// It exists because a counter that has drifted AHEAD of chain state produces no broadcast error on
+// Besu: a future-nonce transaction is queued, not rejected, so isNonceTooLow never fires and the
+// only symptom is that no submission is ever mined. A chain reset without a service restart — a
+// nuke-and-redeploy of the Besu layer while the backends stay up — is how that happens here. Before
+// the counter became process-wide this recovered by accident, because a freshly constructed client
+// read PendingNonceAt again.
+//
+// It only clears the flag. Re-reading the nonce here would put a blocking RPC on a failure path
+// where the node is, by hypothesis, already not answering in time, and would do it while a stalled
+// caller holds the lock every other submission needs.
+//
+// Deferring the read is also what makes it correct: PendingNonceAt counts CONSECUTIVE pending
+// transactions, so on a healthy node it returns the value an in-flight submission already advanced
+// to, while on a reset node the gapped future-nonce transaction leaves a gap and the account's real
+// nonce is returned. Either way the re-seed lands on the right value rather than on the drift.
+//
+// Callers that broadcast through their own bindings and wait via the exported WaitForReceipt must
+// call this themselves when ShouldResyncNonce says the wait died on its deadline; submissions that
+// go through SubmitRawTx/SubmitRawTxReceipt get it for free.
+func (s *Signer) MarkNonceStale() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nonceInit = false
 }
 
 // signAndSend assigns a unique nonce, signs, and broadcasts the transaction while holding
@@ -392,13 +462,8 @@ func (s *Signer) signAndSend(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if !s.nonceInit {
-		n, err := ec.PendingNonceAt(ctx, s.Address())
-		if err != nil {
-			return nil, fmt.Errorf("nonce: %w", err)
-		}
-		s.nonce = n
-		s.nonceInit = true
+	if err := s.ensureNonce(ctx, ec); err != nil {
+		return nil, err
 	}
 
 	for attempt := 0; attempt < 2; attempt++ {
@@ -436,19 +501,14 @@ func (s *Signer) signAndSend(
 // broadcast is retried once.
 func (s *Signer) WithNonce(
 	ctx context.Context,
-	ec *ethclient.Client,
+	src nonceSource,
 	broadcast func(nonce uint64) (*types.Transaction, error),
 ) (*types.Transaction, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if !s.nonceInit {
-		n, err := ec.PendingNonceAt(ctx, s.Address())
-		if err != nil {
-			return nil, fmt.Errorf("nonce: %w", err)
-		}
-		s.nonce = n
-		s.nonceInit = true
+	if err := s.ensureNonce(ctx, src); err != nil {
+		return nil, err
 	}
 
 	for attempt := 0; attempt < 2; attempt++ {
@@ -458,7 +518,7 @@ func (s *Signer) WithNonce(
 			return tx, nil
 		}
 		if attempt == 0 && isNonceTooLow(err) {
-			n, rerr := ec.PendingNonceAt(ctx, s.Address())
+			n, rerr := src.PendingNonceAt(ctx, s.Address())
 			if rerr != nil {
 				return nil, fmt.Errorf("broadcast: %w (nonce re-sync: %v)", err, rerr)
 			}
