@@ -374,10 +374,18 @@ var ReceiptWaitTimeout = 90 * time.Second
 
 // ShouldResyncNonce reports whether a failed receipt wait is a reason to distrust the nonce counter.
 //
-// Only a deadline expiry is. A caller cancellation says nothing about the counter — the transaction
+// Only a deadline expiry is. A caller CANCELLATION says nothing about the counter — the transaction
 // may well mine a moment later — and a reverted receipt means it did mine, so its nonce was spent
 // and the counter is correct. The check is on the wrapped error because WaitForReceipt wraps
 // whatever bind.WaitMined returned.
+//
+// The deadline that expires is not necessarily ReceiptWaitTimeout: receiptWaitContext keeps a
+// caller-supplied deadline when there is one, so a caller with a short deadline of its own also
+// lands here and marks the counter stale on a perfectly healthy node. That is harmless rather than
+// merely tolerable, and for a reason worth stating: the recovery is idempotent. Marking stale only
+// defers a PendingNonceAt, and PendingNonceAt counts CONSECUTIVE pending transactions, so on a
+// healthy node it returns the value the in-flight submission already advanced to — the same value
+// the counter holds. The cost is one extra RPC on the next submission; the outcome is unchanged.
 func ShouldResyncNonce(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false

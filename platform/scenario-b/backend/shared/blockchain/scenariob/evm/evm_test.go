@@ -523,6 +523,40 @@ func TestSigner_MarkNonceStale_MakesTheNextSubmissionReseed(t *testing.T) {
 	}
 }
 
+func TestSigner_MarkNonceStale_IsIdempotentOnAHealthyNode(t *testing.T) {
+	// Not every expiry that reaches ShouldResyncNonce is a drifted counter: receiptWaitContext keeps
+	// a CALLER-supplied deadline when there is one (TestReceiptWaitContext/keeps_the_caller_deadline),
+	// so a caller that bounds its own request short marks the counter stale on a node that is fine.
+	// What makes that harmless is not luck — it is that the recovery is idempotent, which is this
+	// test. PendingNonceAt counts CONSECUTIVE pending transactions, so a healthy node reports the
+	// value the in-flight submission already advanced to: the re-seed lands where the counter
+	// already was and only costs one RPC.
+	s, err := NewSigner(newKeyHex(t), big.NewInt(1337))
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+	src := &fakeNonceSource{nonce: 41}
+
+	if _, err := s.WithNonce(context.Background(), src, broadcastExpecting(t, 41)); err != nil {
+		t.Fatalf("WithNonce: %v", err)
+	}
+
+	// The healthy node's view after that submission: nonce 41 is pending, so the next one is 42 —
+	// exactly what the local counter now holds.
+	src.nonce = 42
+	s.MarkNonceStale()
+
+	if _, err := s.WithNonce(context.Background(), src, broadcastExpecting(t, 42)); err != nil {
+		t.Fatalf("WithNonce after a spurious invalidation: %v", err)
+	}
+	if src.calls != 2 {
+		t.Fatalf("PendingNonceAt called %d times, want 2 — the re-seed is the whole cost of a spurious invalidation", src.calls)
+	}
+	if s.nonce != 43 {
+		t.Fatalf("counter at %d, want 43 — a spurious invalidation must not move it", s.nonce)
+	}
+}
+
 func TestSigner_MarkNonceStale_KeepsTheFailureOffTheHotPath(t *testing.T) {
 	s, err := NewSigner(newKeyHex(t), big.NewInt(1337))
 	if err != nil {
