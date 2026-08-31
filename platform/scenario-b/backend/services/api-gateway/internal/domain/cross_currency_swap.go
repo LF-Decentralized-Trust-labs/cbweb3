@@ -87,6 +87,16 @@ type CrossCurrencySwapOperation struct {
 	// scanning the table on every sweep, at a cost that grows with payment volume.
 	ResidueAttempts      int        `gorm:"column:residue_attempts;not null;default:0"`
 	ResidueNextAttemptAt *time.Time `gorm:"column:residue_next_attempt_at;index:idx_swap_residue_retry,priority:2"`
+	// ResidueDeferredSince is when the CURRENT deferral window opened: the first sweep that
+	// found this row's pair halted by governance. It stays put across later deferrals and is
+	// cleared by any real attempt, so it measures the whole pause rather than the gap since the
+	// last sweep looked.
+	//
+	// Deferring deliberately does not consume an attempt, so ResidueAttempts cannot bound a
+	// pause. Without this column an indefinitely paused pair defers the refund forever: the
+	// payer stays over-debited, the value sits on the issuing CB's Hub address, and a log line
+	// is the only trace. NULL means the row is not currently deferred.
+	ResidueDeferredSince *time.Time `gorm:"column:residue_deferred_since"`
 	CreatedAt            time.Time  `gorm:"column:created_at;autoCreateTime;index"`
 	CompletedAt          *time.Time `gorm:"column:completed_at"`
 }
