@@ -36,20 +36,30 @@ const (
 	// the same point. Beyond it the value still sits on the CB's Hub address and needs a
 	// human, which is what RETURN_ESCALATED records.
 	residueMaxAttempts = 5
-	// residueBackoffCapSeconds caps the exponential backoff. It has to sit WELL above the
-	// sweep interval (60s by default) or the schedule never delays anything and the whole
-	// budget is spent in one attempt per tick: a CB restart of a few minutes would then
-	// escalate every pending residue, which is supposed to mean "a human is needed", not "the
-	// CB was redeployed".
+	// residueBackoffCapSeconds caps the exponential backoff — but nothing reaches it today, and
+	// the cap is kept as a guard rather than as a working part.
+	//
+	// 60s doubling gives 60, 120, 240, 480, 960 across the five attempts the ceiling allows; the
+	// cap would first bind at attempt 6 (1920s), and escalation fires at attempt 5. So the longest
+	// delay this loop can actually schedule is residueBackoff(residueMaxAttempts) = 960s, and the
+	// cap only starts mattering if someone raises residueMaxAttempts — which is exactly when it
+	// should. A test pins that, so this comment cannot quietly go stale.
+	//
+	// What the cap must never become is small: it has to sit WELL above the sweep interval (60s by
+	// default) or the schedule never delays anything and the whole budget is spent one attempt per
+	// tick, so a CB restart of a few minutes would escalate every pending residue — which is
+	// supposed to mean "a human is needed", not "the CB was redeployed".
 	residueBackoffCapSeconds = 1800
 	// residueBackoffBaseSeconds is the first delay; each attempt doubles it up to the cap.
 	residueBackoffBaseSeconds = 60
 	// residueMaxDeferralSeconds bounds how long a pair halted by governance may hold a refund
-	// before it needs a human. It has to sit WELL above residueBackoffCapSeconds, or a routine
-	// incident-length pause would escalate every pending refund instead of waiting it out — the
-	// same trap the backoff cap comment describes, one level up. A day is chosen because a pause
-	// that outlives a business day has stopped being an incident and become a decision, and a
-	// decision to keep a pair closed is not a decision to keep a payer over-debited.
+	// before it needs a human. It has to sit WELL above the longest delay the retry loop can
+	// schedule — residueBackoff(residueMaxAttempts), 960s today, not the 1800s cap, which nothing
+	// reaches — or a routine incident-length pause would escalate every pending refund instead of
+	// waiting it out, the same trap the backoff cap comment describes one level up. A day is
+	// chosen because a pause that outlives a business day has stopped being an incident and become
+	// a decision, and a decision to keep a pair closed is not a decision to keep a payer
+	// over-debited.
 	residueMaxDeferralSeconds = 86400
 	// residueClaimLeaseSeconds is how long a claimed row is hidden from other sweepers while
 	// this one works on it. It only matters when a sweep dies mid-row: every normal outcome —

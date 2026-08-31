@@ -540,6 +540,18 @@ func TestRetryFailedResidueReturns_EscalatesAHaltThatOutlastsTheBound(t *testing
 	}
 }
 
+// The cap is documented as unreachable, and a comment that says so has to be checked or it rots.
+// This is the check: if someone raises residueMaxAttempts far enough for the cap to start binding,
+// this fails and the comment beside residueBackoffCapSeconds needs revisiting — which is the moment
+// it should be revisited, not later.
+func TestResidueBackoffCap_IsUnreachableAtTheCurrentAttemptCeiling(t *testing.T) {
+	longest := residueBackoff(residueMaxAttempts)
+	if longest >= residueBackoffCapSeconds*time.Second {
+		t.Fatalf("the longest schedulable delay is %v, which now reaches the %ds cap — the cap has stopped being dead code and its comment says otherwise",
+			longest, residueBackoffCapSeconds)
+	}
+}
+
 func TestResidueMaxDeferral_SitsAboveTheBackoffCap(t *testing.T) {
 	// If the bound were near the backoff cap, the first or second deferral would already exceed
 	// it and a routine pause would escalate every pending refund.
