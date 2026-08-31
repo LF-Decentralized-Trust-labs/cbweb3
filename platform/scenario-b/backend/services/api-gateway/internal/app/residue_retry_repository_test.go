@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -397,5 +398,140 @@ func TestClaimNextRetryableResidue_LeasesEachRowFromWhenItIsClaimed(t *testing.T
 			"the lease is measured from the start of the sweep, so a long sweep hands its "+
 			"remaining rows to another sweeper",
 			second.SwapID, got.ResidueNextAttemptAt.UTC(), late.UTC())
+	}
+}
+
+// --- the deferral window ---
+//
+// Deferring a halted pair does not consume an attempt, so the attempt ceiling cannot end the wait.
+// residue_deferred_since is what bounds it, and the bound is only as good as the stamp: if a later
+// sweep can move the start of the pause forward, the bound recedes with every sweep and the wait is
+// unbounded again — which is the defect this closes.
+
+func TestDeferResidue_KeepsTheFirstStampAcrossLaterDeferrals(t *testing.T) {
+	db := repoDB(t, &domain.CrossCurrencySwapOperation{})
+	r := newCrossCurrencySwapRepository(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	op := residueOp("halted-row", domain.ResidueReturnFailed, now.Add(-48*time.Hour), nil)
+	if err := db.Create(op).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	firstPause := now.Add(-6 * time.Hour)
+	if err := r.DeferResidue(ctx, "halted-row", now.Add(time.Minute), firstPause); err != nil {
+		t.Fatalf("first defer: %v", err)
+	}
+	// A second sweep, hours later, finds the same pair still halted.
+	if err := r.DeferResidue(ctx, "halted-row", now.Add(30*time.Minute), now); err != nil {
+		t.Fatalf("second defer: %v", err)
+	}
+
+	var got domain.CrossCurrencySwapOperation
+	if err := db.Where("swap_id = ?", "halted-row").First(&got).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.ResidueDeferredSince == nil {
+		t.Fatal("the deferral window was never opened")
+	}
+	if diff := got.ResidueDeferredSince.Sub(firstPause); diff > time.Second || diff < -time.Second {
+		t.Fatalf("deferred_since = %v, want the first stamp %v — a moving stamp pushes the bound out of reach forever",
+			got.ResidueDeferredSince, firstPause)
+	}
+	// Deferring is not an attempt.
+	if got.ResidueAttempts != 0 {
+		t.Fatalf("residue_attempts = %d, want 0: deferring must not consume the budget", got.ResidueAttempts)
+	}
+	// The schedule itself still advances on every deferral.
+	if got.ResidueNextAttemptAt == nil || !got.ResidueNextAttemptAt.After(now.Add(20*time.Minute)) {
+		t.Fatalf("residue_next_attempt_at = %v, want the latest deferral's schedule", got.ResidueNextAttemptAt)
+	}
+}
+
+func TestRecordResidueAttempt_ClosesTheDeferralWindow(t *testing.T) {
+	db := repoDB(t, &domain.CrossCurrencySwapOperation{})
+	r := newCrossCurrencySwapRepository(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	op := residueOp("resumed-row", domain.ResidueReturnFailed, now.Add(-48*time.Hour), nil)
+	if err := db.Create(op).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := r.DeferResidue(ctx, "resumed-row", now.Add(time.Minute), now.Add(-2*time.Hour)); err != nil {
+		t.Fatalf("defer: %v", err)
+	}
+
+	// The pair is resumed and the row is actually attempted. The window has to close with it:
+	// a stamp left behind would make a pause months from now escalate on its first sweep.
+	next := now.Add(time.Hour)
+	if err := r.RecordResidueAttempt(ctx, "resumed-row", 1, &next); err != nil {
+		t.Fatalf("record attempt: %v", err)
+	}
+
+	var got domain.CrossCurrencySwapOperation
+	if err := db.Where("swap_id = ?", "resumed-row").First(&got).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.ResidueDeferredSince != nil {
+		t.Fatalf("deferral window still open at %v after a real attempt", got.ResidueDeferredSince)
+	}
+	if got.ResidueAttempts != 1 {
+		t.Fatalf("residue_attempts = %d, want 1", got.ResidueAttempts)
+	}
+}
+
+// The upgrade itself: residue_deferred_since arrives by AutoMigrate on a table that already holds
+// swaps, including rows mid-retry. Adding a nullable timestamp is the safe shape of that change,
+// but "safe" is a claim about the engine, so it is checked on the engine — this only runs when
+// TEST_POSTGRES_DSN is set (see repoDB), because sqlite's ALTER TABLE is not the one production
+// executes.
+func TestAutoMigrate_AddsTheDeferralColumnToAPopulatedTable(t *testing.T) {
+	if os.Getenv("TEST_POSTGRES_DSN") == "" {
+		t.Skip("warning: TEST_POSTGRES_DSN not set — skipping the PostgreSQL migration check for residue_deferred_since")
+	}
+	db := repoDB(t, &domain.CrossCurrencySwapOperation{})
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Back to the pre-change schema, then populate it: a row already waiting on a retry is
+	// exactly what a deployed CB's table holds when this ships.
+	if err := db.Exec(`ALTER TABLE cross_currency_swap_operations DROP COLUMN residue_deferred_since`).Error; err != nil {
+		t.Fatalf("simulate the old schema: %v", err)
+	}
+	nextAt := now.Add(time.Minute)
+	legacy := residueOp("legacy-inflight", domain.ResidueReturnFailed, now.Add(-72*time.Hour), &nextAt)
+	legacy.ResidueAttempts = 2
+	// Omit, because GORM's INSERT lists every column the model declares — including the one just
+	// dropped. The row has to be written as the old binary would have written it.
+	if err := db.Omit("residue_deferred_since").Create(legacy).Error; err != nil {
+		t.Fatalf("seed a pre-migration row: %v", err)
+	}
+
+	if err := db.AutoMigrate(&domain.CrossCurrencySwapOperation{}); err != nil {
+		t.Fatalf("AutoMigrate must add the column without touching existing rows: %v", err)
+	}
+
+	var got domain.CrossCurrencySwapOperation
+	if err := db.Where("swap_id = ?", "legacy-inflight").First(&got).Error; err != nil {
+		t.Fatalf("reload after migration: %v", err)
+	}
+	// NULL, not zero: a zero timestamp would read as a pause that started in year 1 and escalate
+	// every in-flight refund on the first sweep after the deploy.
+	if got.ResidueDeferredSince != nil {
+		t.Fatalf("existing row came back with deferred_since = %v, want NULL", got.ResidueDeferredSince)
+	}
+	if got.ResidueAttempts != 2 {
+		t.Fatalf("migration disturbed residue_attempts: %d, want 2", got.ResidueAttempts)
+	}
+	// And the retry loop must still pick it up afterwards.
+	r := newCrossCurrencySwapRepository(db)
+	op, err := r.ClaimNextRetryableResidue(ctx, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("claim after migration: %v", err)
+	}
+	if op == nil || op.SwapID != "legacy-inflight" {
+		t.Fatalf("a row mid-retry stopped being claimable after the migration: %v", op)
 	}
 }

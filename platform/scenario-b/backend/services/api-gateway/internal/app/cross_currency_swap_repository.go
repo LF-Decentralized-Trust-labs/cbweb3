@@ -231,6 +231,10 @@ func (r *crossCurrencySwapRepository) ClaimNextRetryableResidue(ctx context.Cont
 // RecordResidueAttempt persists the attempt counter and when the next attempt becomes due.
 // A nil nextAttemptAt clears the schedule, which is what a terminal outcome (enqueued or
 // escalated) leaves behind.
+//
+// It also clears residue_deferred_since. Recording an attempt means the row was actually tried,
+// so any deferral window is over; leaving a stale stamp behind would make a pause months later
+// escalate on its very first sweep.
 func (r *crossCurrencySwapRepository) RecordResidueAttempt(ctx context.Context, swapID string, attempts int, nextAttemptAt *time.Time) error {
 	return r.db.WithContext(ctx).
 		Model(&domain.CrossCurrencySwapOperation{}).
@@ -238,6 +242,24 @@ func (r *crossCurrencySwapRepository) RecordResidueAttempt(ctx context.Context, 
 		Updates(map[string]interface{}{
 			"residue_attempts":        attempts,
 			"residue_next_attempt_at": nextAttemptAt,
+			"residue_deferred_since":  nil,
+		}).Error
+}
+
+// DeferResidue reschedules a row whose pair is halted by governance without touching the attempt
+// counter — deferring is not an attempt — and opens a deferral window if none is open.
+//
+// The stamp is written with COALESCE rather than read-then-write: two sweepers can look at the
+// same row across a claim lease boundary, and a read-modify-write would let the later one move the
+// start of the pause forward. Every move forward pushes the bound further away, which is precisely
+// the unbounded wait this column exists to end.
+func (r *crossCurrencySwapRepository) DeferResidue(ctx context.Context, swapID string, nextAttemptAt, deferredSince time.Time) error {
+	return r.db.WithContext(ctx).
+		Model(&domain.CrossCurrencySwapOperation{}).
+		Where("swap_id = ?", swapID).
+		Updates(map[string]interface{}{
+			"residue_next_attempt_at": nextAttemptAt,
+			"residue_deferred_since":  gorm.Expr("COALESCE(residue_deferred_since, ?)", deferredSince),
 		}).Error
 }
 

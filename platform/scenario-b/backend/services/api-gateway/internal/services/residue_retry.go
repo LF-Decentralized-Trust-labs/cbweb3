@@ -44,6 +44,13 @@ const (
 	residueBackoffCapSeconds = 1800
 	// residueBackoffBaseSeconds is the first delay; each attempt doubles it up to the cap.
 	residueBackoffBaseSeconds = 60
+	// residueMaxDeferralSeconds bounds how long a pair halted by governance may hold a refund
+	// before it needs a human. It has to sit WELL above residueBackoffCapSeconds, or a routine
+	// incident-length pause would escalate every pending refund instead of waiting it out — the
+	// same trap the backoff cap comment describes, one level up. A day is chosen because a pause
+	// that outlives a business day has stopped being an incident and become a decision, and a
+	// decision to keep a pair closed is not a decision to keep a payer over-debited.
+	residueMaxDeferralSeconds = 86400
 	// residueClaimLeaseSeconds is how long a claimed row is hidden from other sweepers while
 	// this one works on it. It only matters when a sweep dies mid-row: every normal outcome —
 	// success, failure, or a breaker deferral — writes a real schedule over the lease. So it
@@ -55,6 +62,12 @@ const (
 // ResidueMaxAttempts exposes the attempt ceiling so the persistence layer can enforce it in the
 // query itself, keeping one definition of the bound.
 func ResidueMaxAttempts() int { return residueMaxAttempts }
+
+// residueMaxDeferral is the deferral bound as a duration. Unexported deliberately: unlike the
+// attempt ceiling, this bound is evaluated in Go and never in the claim query. A row that has
+// outlasted it is escalated by status, and if that status write fails the next sweep simply
+// reaches the same conclusion and writes it again — cheap, because escalating dispatches nothing.
+func residueMaxDeferral() time.Duration { return residueMaxDeferralSeconds * time.Second }
 
 // ResidueClaimLease exposes the claim lease for the same reason: the persistence layer writes
 // it, this package owns what it means.
@@ -76,7 +89,15 @@ type ResidueRetryRepository interface {
 	UpdateResidue(ctx context.Context, swapID, amount, positionID string, status domain.ResidueReturnStatus) error
 	// RecordResidueAttempt persists the attempt counter and when the next one becomes due.
 	// A nil nextAttemptAt means no further attempt is scheduled.
+	//
+	// It also CLEARS any deferral window: recording an attempt means the row was actually tried,
+	// so a later pause opens a fresh window instead of inheriting an old one and escalating on
+	// its first sweep.
 	RecordResidueAttempt(ctx context.Context, swapID string, attempts int, nextAttemptAt *time.Time) error
+	// DeferResidue reschedules a row whose pair is halted WITHOUT touching the attempt counter,
+	// and records deferredSince if no deferral window is open yet — the first stamp wins, so the
+	// bound measures the whole pause.
+	DeferResidue(ctx context.Context, swapID string, nextAttemptAt, deferredSince time.Time) error
 }
 
 // RetryFailedResidueReturns re-drives every residue return that failed to enqueue and is due.
@@ -124,8 +145,22 @@ func (o *CrossCurrencySwapOrchestrator) RetryFailedResidueReturns(ctx context.Co
 		// value. Reschedule without consuming an attempt — the residue is not lost by waiting.
 		if o.circuitBreakerCheck != nil {
 			if halted, cerr := o.circuitBreakerCheck.IsHalted(ctx, op.PoolPair); cerr == nil && halted {
+				// Deferring does not consume an attempt, so the attempt ceiling cannot end this
+				// wait: without a bound of its own, a pair left paused defers the refund forever
+				// while the payer stays over-debited. Past the bound the pause has outlived any
+				// incident and the row needs a human — the same conclusion exhaustion reaches, by
+				// a different route.
+				if op.ResidueDeferredSince != nil && now.Sub(*op.ResidueDeferredSince) >= residueMaxDeferral() {
+					log.Printf("[residue-retry] swap %s: pool %s has been halted since %s (over %s) — escalating; %s %s stays on the issuing CB's Hub address and the payer %s remains over-debited until reconciled",
+						op.SwapID, op.PoolPair, op.ResidueDeferredSince.Format(time.RFC3339), residueMaxDeferral(),
+						op.ResidueAmount, sanitizeCurrency(op.SourceCurrency), sanitizeLogValue(op.PayerBankID))
+					// The counter is passed through unchanged: no attempt was ever made against
+					// this row, and claiming one would misreport why it was given up on.
+					o.recordResidueOutcome(ctx, repo, op.SwapID, op.ResidueAmount, "", domain.ResidueReturnEscalated, op.ResidueAttempts, nil)
+					continue
+				}
 				next := now.Add(residueBackoff(op.ResidueAttempts + 1))
-				if rerr := repo.RecordResidueAttempt(ctx, op.SwapID, op.ResidueAttempts, &next); rerr != nil {
+				if rerr := repo.DeferResidue(ctx, op.SwapID, next, now); rerr != nil {
 					log.Printf("[residue-retry] swap %s: could not defer while %s is halted: %v", op.SwapID, op.PoolPair, rerr)
 				}
 				log.Printf("[residue-retry] swap %s deferred — pool %s is halted by governance", op.SwapID, op.PoolPair)
