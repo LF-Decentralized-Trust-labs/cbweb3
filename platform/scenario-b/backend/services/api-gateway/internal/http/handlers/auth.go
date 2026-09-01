@@ -28,9 +28,6 @@ type loginRequest struct {
 	ClientSecret string `json:"clientSecret"`
 }
 
-// NewAuthHandler builds an AuthHandler with its required dependencies.
-// cookieSecure should be true when the gateway is served over HTTPS so that
-// auth cookies are sent with the Secure flag; use false for plain HTTP (local dev).
 // Stable error codes for the auth routes.
 //
 // The five portals used to render axios's own `error.message`, so an operator saw "Request failed
@@ -66,6 +63,9 @@ const (
 	CodeInvalidRefreshToken = "INVALID_REFRESH_TOKEN"
 )
 
+// NewAuthHandler builds an AuthHandler with its required dependencies.
+// cookieSecure should be true when the gateway is served over HTTPS so that
+// auth cookies are sent with the Secure flag; use false for plain HTTP (local dev).
 func NewAuthHandler(
 	authProvider interfaces.IAuthProvider,
 	kycChecker interfaces.KYCChecker,
