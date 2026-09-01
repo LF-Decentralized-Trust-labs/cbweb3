@@ -4,12 +4,14 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -165,4 +167,78 @@ func mustJSON(t *testing.T, v any) []byte {
 		t.Fatalf("marshal: %v", err)
 	}
 	return out
+}
+
+// --- the wire values themselves ---
+//
+// Review of #188: renaming CodeMissingCredentials's VALUE (not its identifier) to
+// "CREDENTIALS_MISSING" left the whole Go suite green, because every test here compares against
+// the constant. The frontend's CODE_TO_MESSAGE hardcodes the literal, so the two lists are
+// independent and nothing checked that they agree — a rename would keep both suites green and
+// silently degrade the 400 case to "Sign-in failed (HTTP 400)" in all five portals, which is the
+// status dump this work exists to remove.
+//
+// Pinning the literals makes a rename a deliberate two-file act. INVALID_CREDENTIALS is the benign
+// one — a 401 still falls through to the right copy — but it is pinned too, so the rule has no
+// exceptions to remember.
+func TestAuthErrorCodes_WireValuesArePinned(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct{ got, want string }{
+		{CodeInvalidRequest, "INVALID_REQUEST"},
+		{CodeMissingCredentials, "MISSING_CREDENTIALS"},
+		{CodeInvalidCredentials, "INVALID_CREDENTIALS"},
+		{CodeAuthServiceUnavailable, "AUTH_SERVICE_UNAVAILABLE"},
+		{CodeMissingRefreshToken, "MISSING_REFRESH_TOKEN"},
+		{CodeInvalidRefreshToken, "INVALID_REFRESH_TOKEN"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("wire value is %q, want %q — the portals' CODE_TO_MESSAGE keys on the literal, so changing it here alone degrades every portal to a bare status", tc.got, tc.want)
+		}
+	}
+}
+
+// --- the 503 branch ---
+//
+// Also from the review: dropping the code from BOTH service-unavailable responses left the suite
+// green. That is the path behind this work's own headline — "503 does not blame the credential" —
+// so it was the one branch the frontend was written against and the backend did not hold itself to.
+//
+// Reaching it needs a PKI provider: Login tries IssueLoginNonce first, and a NON-gRPC error there
+// (a network failure, a timeout, a cancelled context) is what produces the 503.
+
+type pkiProviderStub struct {
+	authProviderStub
+	nonceErr error
+}
+
+func (s pkiProviderStub) IssueLoginNonce(_ context.Context, _, _ string) (string, error) {
+	return "", s.nonceErr
+}
+
+func (s pkiProviderStub) VerifyPKILogin(_ context.Context, _, _, _ string) (domain.AuthToken, error) {
+	return domain.AuthToken{}, s.nonceErr
+}
+
+func TestLogin_ServiceUnavailableCarriesItsOwnCode(t *testing.T) {
+	t.Parallel()
+
+	// A plain error, not a gRPC status: the handler reads that as "the auth service could not be
+	// reached", which must never be reported to an operator as a rejected credential.
+	handler := NewAuthHandler(pkiProviderStub{nonceErr: errors.New("dial tcp: connection refused")}, kycCheckerStub{}, false)
+	resp := postLogin(t, handler, mustJSON(t, map[string]string{"clientId": "bank", "clientSecret": "s"}))
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+	code, message := decodeErrorBody(t, resp)
+	if code != CodeAuthServiceUnavailable {
+		t.Fatalf("code = %q, want %q — without it the portals fall back to a bare status and tell the operator to check credentials that were fine", code, CodeAuthServiceUnavailable)
+	}
+	if code == CodeInvalidCredentials {
+		t.Fatal("a service outage must never be reported as a rejected credential")
+	}
+	if message == "" {
+		t.Fatal("the human-readable message must survive adding a code")
+	}
 }

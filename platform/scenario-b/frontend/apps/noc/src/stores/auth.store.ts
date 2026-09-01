@@ -5,7 +5,7 @@ import { NOC_UNAUTHORIZED_MESSAGE, hasNOCAccess } from "../auth/authorization";
 import { authApi } from "../services/api";
 import { setSessionExpiredHandler } from "../services/api/token";
 import type { AsyncStatus, SysAdminUser } from "../types";
-import { loginErrorMessage } from "@cbweb3/ui";
+import { LOGIN_ERROR_COPY, loginErrorMessage } from "@cbweb3/ui";
 
 type AuthState = {
   user: SysAdminUser | null;
@@ -80,6 +80,9 @@ setSessionExpiredHandler(() => {
     isAuthenticated: false,
     initialized: true,
     status: "idle",
-    error: "Session expired. Sign in again.",
+    // The shared copy, not a second wording of it: this is the one place in Scenario B that
+    // renders session expiry, so an operator who sees it here and the mapping's version elsewhere
+    // would be reading two sentences for one condition.
+    error: LOGIN_ERROR_COPY.sessionExpired,
   });
 });
