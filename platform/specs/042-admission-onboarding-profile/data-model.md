@@ -53,8 +53,10 @@ pending ──approve-kyc (ROLE_ADMISSION, off-chain)──▶ KYC_APPROVED (+ P
 - **Key-operation boundary (governance)**: signing the participant CSR with the central bank's CA key, then
   `RegisterParticipant` (`GOVERNANCE_ROLE`) + `VerifyParticipant` (`VERIFIER_ROLE`) signed with
   `CB_PRIVATE_KEY`. Both legs run in the completion step; neither is Admission-authorized.
-- **FR-017 consequence**: between `KYC_APPROVED` and the completion step the participant is approved
-  off-chain but **not** on-chain `Verified`, so it cannot transact. Only the completion step confers that.
+- ~~**FR-017 consequence**: between `KYC_APPROVED` and the completion step the participant is approved
+  off-chain but **not** on-chain `Verified`, so it cannot transact. Only the completion step confers that.~~
+  **Amendment 1 (2026-09-01): does not apply.** Approval and the on-chain register+verify stay in one
+  action, so `KYC_APPROVED` continues to imply on-chain `Verified`, as it does today.
 - **Scenario A change**: today these two boundaries are collapsed inside `ApproveKYC`
   (`compliance/.../server.go` inline `RegisterParticipant`/`VerifyParticipant`). A2 separates them.
 - **Scenario B**: already separated — `ApproveKYC` (chain-free) then auth-service `CompleteOnboarding`.

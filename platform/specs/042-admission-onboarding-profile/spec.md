@@ -2,7 +2,7 @@
 
 **Feature Branch**: `042-admission-onboarding-profile`
 **Created**: 2026-08-03
-**Status**: Draft
+**Status**: Draft — **amended, see Amendment 1**
 **Input**: User description: "Introduce an Admission profile (ROLE_ADMISSION) that takes over commercial-bank onboarding management from the central-bank governance profile in scenarios A and B, while the central bank retains all on-chain signing authority"
 
 **Source documents**: [`docs/admission-onboarding-profile-change-proposal.md`](../../docs/admission-onboarding-profile-change-proposal.md) · [`docs/rework-governance-inter-spoke-scope-with-external-orchestrators.md`](../../docs/rework-governance-inter-spoke-scope-with-external-orchestrators.md)
@@ -12,6 +12,43 @@
 > the implementation is delivered as **two independent, scenario-isolated PRs** (one per scenario,
 > no shared code). This single specification defines the common behaviour and the per-scenario
 > differences so both deliveries start from one validated design.
+
+---
+
+## Amendment 1 (2026-09-01) — approval keeps the on-chain registration
+
+**Decided by the project lead. Supersedes the Clarifications answer that chose the full split.**
+
+The original proposal offered two shapes for Scenario A and recommended the first; this
+specification overrode that and chose the second. The team has now decided the **first**:
+
+> **The Admission profile approves onboarding AND registers the participant on-chain in the same
+> action.** The signature continues to come from the central bank's service key
+> (`CB_PRIVATE_KEY`) inside compliance's `ApproveKYC` — not from the operator, who holds no key of
+> their own. Authorization moves to Admission; execution is unchanged.
+
+What this changes in this document:
+
+| Requirement | Under Amendment 1 |
+| --- | --- |
+| **FR-015** | **Superseded.** The off-chain approval is NOT separated from the on-chain register+verify. They stay in one action. |
+| **FR-015a** | **Superseded** with FR-015. A route authorized by Admission MAY trigger an on-chain identity registration in the same request, because the signature is the central bank's, not the operator's. |
+| **FR-017** | **Not applicable.** It described a consequence of the separation. Without the separation, `KYC_APPROVED` continues to imply the participant is on-chain `Verified`, exactly as today. No audit of "approval implies transactability" is needed. |
+| FR-014, FR-016, and the rest | Unchanged. |
+
+Why the first shape was preferred: the invariant that matters is that **the operator never holds a
+signing key**, and that holds either way. The separation bought a cleaner story about which service
+signs, at the price of a behavioural change — approval no longer meaning "ready" — whose blast radius
+reaches anything that treats approval as sufficient. The cost was not worth the story.
+
+The separation remains a defensible future direction, and Scenario B already works that way. If it is
+revisited, FR-015/FR-015a/FR-017 are the requirements to reinstate, and this amendment is the record
+of why they were stood down.
+
+**Delivery note.** The cross-scenario note above says the implementation ships as two
+scenario-isolated PRs. It shipped as **one** — [PR #194](https://github.com/LNetNetworks/cbweb3-platform/pull/194) — because `ROLE_ADMISSION` is a single role definition whose two copies must be
+identical, and splitting it would put half a role definition on `develop` at a time. The
+justification is recorded in that PR, as the constitution requires.
 
 ## Clarifications
 
@@ -48,6 +85,8 @@ and file anchors in [research.md](./research.md) R8–R14.
 - Q: Does the Scenario A split change any observable behaviour beyond authorization? → A: **Yes.** Approval
   currently guarantees the participant is registered and verified on-chain before it is marked approved;
   after the split it does not. Captured as FR-017.
+  *(Amendment 1: this is precisely the cost that led the project lead to reject the split. There is no
+  split, so the guarantee stands and FR-017 does not apply.)*
 - Q: Reuse the dormant `ROLE_GOVERNANCE_OFFICER` role instead of adding a new one? → A: **No** — it is
   already published as a participant-assignable role; reusing it would conflate two concepts. Recorded in
   Assumptions, with a separate cleanup ticket for the dormant role.
@@ -261,17 +300,17 @@ run the existing onboarding end-to-end flow and confirm it still completes.
   registry and its roles are untouched.
 - **FR-014**: The observable onboarding behaviour (Admission manages onboarding; central bank signs
   on-chain) MUST be identical across Scenario A and Scenario B, even where the underlying wiring differs.
-- **FR-015**: In Scenario A, the off-chain admission approval MUST be separated from the on-chain
+- **FR-015** *(SUPERSEDED by Amendment 1 — approval keeps the on-chain registration)*: In Scenario A, the off-chain admission approval MUST be separated from the on-chain
   register+verify so that the Admission-authorized approval no longer performs the on-chain call inline;
   the on-chain register+verify MUST execute in a distinct central-bank-signed completion step (converging
   on the same two-step flow Scenario B already uses).
-- **FR-015a**: The separation in FR-015 MUST cover **every** path that performs an inline on-chain
+- **FR-015a** *(SUPERSEDED with FR-015 by Amendment 1)*: The separation in FR-015 MUST cover **every** path that performs an inline on-chain
   register+verify, not only the KYC-approval path. No route authorized by the Admission profile may trigger
   an on-chain identity registration within the same request, in either scenario.
 - **FR-016**: The onboarding surface MUST be reachable by an operator holding **only** the Admission
   profile — including authentication into the governance portal. A profile that authorizes the onboarding
   actions but cannot sign in does not satisfy FR-002.
-- **FR-017**: After the FR-015 separation, the off-chain approved state MUST NOT be interpreted as
+- **FR-017** *(NOT APPLICABLE under Amendment 1 — there is no separation, so approval still confers on-chain verification)*: After the FR-015 separation, the off-chain approved state MUST NOT be interpreted as
   authorisation to transact. Only the central-bank-signed on-chain verification confers that. Any existing
   behaviour, test or operational procedure that treats approval as sufficient MUST be updated accordingly.
 

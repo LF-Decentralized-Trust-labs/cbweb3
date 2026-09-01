@@ -67,9 +67,9 @@ Manual checks (the same five as Scenario B, with the route substitution above) p
 - Invariant test: no `ROLE_ADMISSION`-authorized request produces an `IdentityRegistry` transaction
   signed by anything other than the central-bank key — covering **both** of Scenario A's inline paths
   (compliance `ApproveKYC` and auth `OnboardParticipant`, see contracts/authorization-matrix.md INV-2).
-- **New semantics** (FR-017): a participant at `KYC_APPROVED` is no longer necessarily on-chain
-  `Verified`. Confirm an attempt to transact in that window fails at the contracts' `onlyVerified` check
-  rather than being permitted, and that no tryout script assumes approval alone is sufficient.
+- ~~**New semantics** (FR-017): a participant at `KYC_APPROVED` is no longer necessarily on-chain
+  `Verified`.~~ **Amendment 1 (2026-09-01): no longer applies.** Approval still registers and verifies
+  on-chain in the same action, so there is no window to test and no tryout script to revisit.
 
 ## Cross-cutting checks (both)
 

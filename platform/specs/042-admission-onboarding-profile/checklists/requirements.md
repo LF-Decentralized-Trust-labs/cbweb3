@@ -41,6 +41,10 @@
 Re-checked after the second codebase-verification pass, which added a clarification session and seven
 requirements (FR-002a, FR-003a→b, FR-015a, FR-016, FR-017, SC-002a). All items above still pass.
 
+**Amendment 1 (2026-09-01):** FR-015, FR-015a and FR-017 were stood down when the project lead chose to
+keep the on-chain registration inside the Admission-authorized approval. The checklist items they were
+recorded against are satisfied by the amendment rather than by those requirements.
+
 - **Requirements are testable and unambiguous** — improved: the three previously unclassified routes
   (certificate issuance, registry read, participant provisioning) now have explicit owners, so the
   authorization contract no longer has silent defaults.
