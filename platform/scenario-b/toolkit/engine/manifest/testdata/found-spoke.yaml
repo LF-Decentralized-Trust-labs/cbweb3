@@ -31,3 +31,4 @@ spec:
     - { role: GOVERNANCE, username: cb-a-governance, password: <local-only-bootstrap> }
     - { role: TREASURY,   username: cb-a-treasury,   password: <local-only-bootstrap> }
     - { role: SUPERVISOR, username: cb-a-supervisor, password: <local-only-bootstrap> }
+    - { role: ADMISSION,  username: cb-a-admission,  password: <local-only-bootstrap> }

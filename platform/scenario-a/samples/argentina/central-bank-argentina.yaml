@@ -64,6 +64,9 @@ spec:
     - role: ROLE_SUPERVISOR
       username: admin@argentina.supervisor.gov
       password: argentina-supervisor-local
+    - role: ROLE_ADMISSION
+      username: admin@argentina.admission.gov
+      password: argentina-admission-local
     - role: ROLE_NOC_ADMIN
       username: admin@argentina.noc.gov
       password: argentina-noc-local

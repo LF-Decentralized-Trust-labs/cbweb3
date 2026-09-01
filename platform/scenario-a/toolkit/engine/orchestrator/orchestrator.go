@@ -240,6 +240,12 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			Realms: centralBankRealmPlans(entity, m.Spec.AdminUsers, m.Spec.Environment,
 				splitOrigins(cbCORSOriginsFor(ports, frontendAdvertisedHost(m), proxyEnabled))),
 		}),
+		// Runs after provision-keycloak and converges the declared operators every time: the realm
+		// import above only applies to a realm that does not yet exist, so on an upgraded entity a
+		// newly declared role would otherwise never be created. See keycloak_admin_users_reconcile.go.
+		newReconcileAdminUsersStep(StepReconcileAdminUsers, prefix, mustInfraSecret(dataDir, "KC_ADMIN_PASSWORD"),
+			centralBankRealmPlans(entity, m.Spec.AdminUsers, m.Spec.Environment,
+				splitOrigins(cbCORSOriginsFor(ports, frontendAdvertisedHost(m), proxyEnabled)))),
 		newStartBackendStackStep(StepStartCBBackend, backendStackParams{
 			SpokeID: spokeID, EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
 			// tls/central-bank.{crt,key} (gen-tls) lives in the named volume
