@@ -29,11 +29,6 @@ type loginRequest struct {
 	ClientSecret string `json:"clientSecret"`
 }
 
-// NewAuthHandler builds an AuthHandler with its required dependencies.
-// cookieSecure should be true when the gateway is served over HTTPS so that
-// auth cookies are sent with the Secure flag; use false for plain HTTP (local dev).
-// bankCode is optional: pass the entity's BANK_CODE so it is included in /me
-// responses even when the Keycloak JWT does not carry a bank_id custom claim.
 // Stable error codes for the auth routes.
 //
 // The five portals rendered axios's own `error.message`, so an operator saw "Request failed with
@@ -66,6 +61,11 @@ const (
 	CodeInvalidRefreshToken = "INVALID_REFRESH_TOKEN"
 )
 
+// NewAuthHandler builds an AuthHandler with its required dependencies.
+// cookieSecure should be true when the gateway is served over HTTPS so that
+// auth cookies are sent with the Secure flag; use false for plain HTTP (local dev).
+// bankCode is optional: pass the entity's BANK_CODE so it is included in /me
+// responses even when the Keycloak JWT does not carry a bank_id custom claim.
 func NewAuthHandler(
 	authProvider interfaces.IAuthProvider,
 	kycChecker interfaces.KYCChecker,
@@ -192,11 +192,28 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 			// Non-gRPC error (network, timeout, context cancelled) — reject.
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authentication service unavailable", "code": CodeAuthServiceUnavailable})
 		}
-		msg := st.Message()
-		if msg != "participant not found" && msg != "PKI_NOT_REQUIRED" {
+		// Switch on the CODE, not the message. Matching prose sent every other outcome to 401:
+		// a gRPC Unavailable or Internal from an auth service that is down or erroring answered
+		// "invalid credentials", and with the portals now rendering that as "Incorrect username or
+		// password", an outage would tell an operator to reset a password that was fine — the exact
+		// thing CodeAuthServiceUnavailable exists to prevent. It also made 503 nearly unreachable,
+		// since only a non-gRPC error gets past the check above.
+		//
+		// The auth service returns exactly the two codes below for the fall-through cases
+		// (auth/internal/grpc/server/server.go: NotFound "participant not found",
+		// PermissionDenied "PKI_NOT_REQUIRED"), so this preserves non-PKI login while routing a
+		// service failure where it belongs. Same shape as Scenario B.
+		switch st.Code() {
+		case codes.NotFound, codes.PermissionDenied:
+			// participant not found or PKI not required → fall through to direct login.
+		case codes.Unauthenticated:
+			// PKI first factor failed: a genuinely wrong secret.
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials", "code": CodeInvalidCredentials})
+		default:
+			// Internal, Unavailable, DeadlineExceeded — the service could not answer. Never an
+			// auth failure: reporting one accuses a credential that was never tested.
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authentication service unavailable", "code": CodeAuthServiceUnavailable})
 		}
-		// participant not found or PKI not required → fall through to direct login.
 	}
 
 	// Direct login for non-PKI roles (ROLE_SUPERVISOR, ROLE_NOC, ROLE_GOVERNANCE_OFFICER)

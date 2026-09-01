@@ -4,7 +4,6 @@ package handlers
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,6 +12,8 @@ import (
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/gofiber/fiber/v2"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // --- stable error codes on the auth routes ---
@@ -182,23 +183,10 @@ func TestAuthErrorCodes_WireValuesArePinned(t *testing.T) {
 // Reaching it needs a PKI provider: Login tries IssueLoginNonce first, and a NON-gRPC error there —
 // a network failure, a timeout, a cancelled context — is what produces the 503.
 
-type pkiProviderStub struct {
-	authProviderStub
-	nonceErr error
-}
-
-func (s pkiProviderStub) IssueLoginNonce(_ context.Context, _, _ string) (string, error) {
-	return "", s.nonceErr
-}
-
-func (s pkiProviderStub) VerifyPKILogin(_ context.Context, _, _, _ string) (domain.AuthToken, error) {
-	return domain.AuthToken{}, s.nonceErr
-}
-
 func TestLogin_ServiceUnavailableCarriesItsOwnCode(t *testing.T) {
 	t.Parallel()
 
-	handler := NewAuthHandler(pkiProviderStub{nonceErr: errors.New("dial tcp: connection refused")}, kycCheckerStub{}, false)
+	handler := NewAuthHandler(pkiAuthProviderStub{nonceErr: errors.New("dial tcp: connection refused")}, kycCheckerStub{}, false)
 	resp := postTo(t, "/auth/login", func(app *fiber.App) { app.Post("/auth/login", handler.Login) },
 		jsonBody(t, map[string]string{"clientId": "admin@cb.test", "clientSecret": "s"}))
 
@@ -211,5 +199,93 @@ func TestLogin_ServiceUnavailableCarriesItsOwnCode(t *testing.T) {
 	}
 	if message == "" {
 		t.Fatal("the human-readable message must survive adding a code")
+	}
+}
+
+// --- a service failure is not a credential failure ---
+//
+// Review of #189 probed the PKI branch and found every gRPC error answering 401:
+//
+//	PROBE grpc_Unavailable     -> status=401 code="INVALID_CREDENTIALS"
+//	PROBE grpc_Internal        -> status=401 code="INVALID_CREDENTIALS"
+//	PROBE grpc_Unauthenticated -> status=401 code="INVALID_CREDENTIALS"
+//
+// The branch matched on st.Message() and sent everything that was not "participant not found" or
+// "PKI_NOT_REQUIRED" to 401. Harmless while the portals rendered a status dump; not harmless once
+// they render "Incorrect username or password", because an outage then tells an operator to reset
+// a password that was fine — the exact outcome CodeAuthServiceUnavailable exists to prevent. It
+// also made 503 nearly unreachable, since only a non-gRPC error got past the check above.
+//
+// It now switches on st.Code(), like Scenario B. These pin both halves of that: the two codes that
+// must still fall through to direct login, and the failures that must not read as a refusal.
+func TestLogin_PKIBranchClassifiesByCodeNotMessage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		err      error
+		status   int
+		wantCode string
+		why      string
+	}{
+		{
+			name: "service_unavailable", err: status.Error(codes.Unavailable, "connection refused"),
+			status: http.StatusServiceUnavailable, wantCode: CodeAuthServiceUnavailable,
+			why: "a service that cannot answer never tested the credential",
+		},
+		{
+			name: "service_internal", err: status.Error(codes.Internal, "boom"),
+			status: http.StatusServiceUnavailable, wantCode: CodeAuthServiceUnavailable,
+			why: "an erroring service is an outage, not a refusal",
+		},
+		{
+			name: "deadline_exceeded", err: status.Error(codes.DeadlineExceeded, "timeout"),
+			status: http.StatusServiceUnavailable, wantCode: CodeAuthServiceUnavailable,
+			why: "a timeout says nothing about the credential",
+		},
+		{
+			name: "first_factor_rejected", err: status.Error(codes.Unauthenticated, "invalid credentials"),
+			status: http.StatusUnauthorized, wantCode: CodeInvalidCredentials,
+			why: "this one IS a genuinely wrong secret and must stay a 401",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := NewAuthHandler(pkiAuthProviderStub{nonceErr: tc.err}, kycCheckerStub{}, false)
+			resp := postTo(t, "/auth/login", func(app *fiber.App) { app.Post("/auth/login", handler.Login) },
+				jsonBody(t, map[string]string{"clientId": "admin@cb.test", "clientSecret": "s"}))
+
+			if resp.StatusCode != tc.status {
+				t.Fatalf("status = %d, want %d — %s", resp.StatusCode, tc.status, tc.why)
+			}
+			if code, _ := decodeAuthError(t, resp); code != tc.wantCode {
+				t.Fatalf("code = %q, want %q — %s", code, tc.wantCode, tc.why)
+			}
+		})
+	}
+}
+
+// The other half: the two codes that mean "not a PKI user" must still reach direct login, or
+// switching on the code would lock out every non-PKI operator.
+func TestLogin_NonPKICodesStillFallThroughToDirectLogin(t *testing.T) {
+	t.Parallel()
+
+	for _, err := range []error{
+		status.Error(codes.NotFound, "participant not found"),
+		status.Error(codes.PermissionDenied, "PKI_NOT_REQUIRED"),
+	} {
+		// The embedded authProviderStub answers the direct login with a token, so reaching it is
+		// observable as a 200 rather than as any of the PKI branch's refusals.
+		handler := NewAuthHandler(pkiAuthProviderStub{
+			nonceErr:         err,
+			authProviderStub: authProviderStub{token: domain.AuthToken{AccessToken: "t", ExpiresIn: 60}},
+		}, kycCheckerStub{}, false)
+		resp := postTo(t, "/auth/login", func(app *fiber.App) { app.Post("/auth/login", handler.Login) },
+			jsonBody(t, map[string]string{"clientId": "supervisor@cb.test", "clientSecret": "s"}))
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%v produced status %d, want 200 — a non-PKI operator must still reach direct login", err, resp.StatusCode)
+		}
 	}
 }
