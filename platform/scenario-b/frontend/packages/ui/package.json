@@ -47,7 +47,8 @@
     "vite": "^7.3.1"
   },
   "scripts": {
-    "lint": "echo \"No lint configured for @cbweb3/ui yet\""
+    "lint": "echo \"No lint configured for @cbweb3/ui yet\"",
+    "test": "vitest run"
   },
   "license": "ISC"
 }

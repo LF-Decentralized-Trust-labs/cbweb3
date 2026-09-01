@@ -31,6 +31,41 @@ type loginRequest struct {
 // NewAuthHandler builds an AuthHandler with its required dependencies.
 // cookieSecure should be true when the gateway is served over HTTPS so that
 // auth cookies are sent with the Secure flag; use false for plain HTTP (local dev).
+// Stable error codes for the auth routes.
+//
+// The five portals used to render axios's own `error.message`, so an operator saw "Request failed
+// with status code 400" and could not tell a wrong secret from an empty field from a gateway that
+// was down. Keying the frontend on the prose instead would break the moment a message is reworded,
+// and keying on the status is not enough: 400 covers both a missing field and a malformed body.
+//
+// So the body carries a code as well as the message — the same convention the relay-rejection
+// classifier already relies on. `error` is unchanged: it is what logs and existing clients read.
+//
+// Scoped to the login and refresh routes, the ones the portals key on. The other handlers in this
+// file still answer with `error` alone; extending them is a separate change with its own callers.
+const (
+	// CodeInvalidRequest is a request the gateway could not parse. A client bug, not something the
+	// operator can fix by typing more carefully.
+	CodeInvalidRequest = "INVALID_REQUEST"
+	// CodeMissingCredentials is an absent clientId or clientSecret. One code for either field: the
+	// message may name which, but no caller should have to parse prose to find out.
+	CodeMissingCredentials = "MISSING_CREDENTIALS"
+	// CodeInvalidCredentials is a credential the identity provider refused. One code for both an
+	// unknown client and a wrong secret — distinguishing them is user enumeration.
+	CodeInvalidCredentials = "INVALID_CREDENTIALS"
+	// CodeAuthServiceUnavailable is the auth service being unreachable or not ready. Deliberately
+	// not an auth failure: telling an operator their credentials are wrong when the service is down
+	// sends them to rotate a secret that was fine.
+	CodeAuthServiceUnavailable = "AUTH_SERVICE_UNAVAILABLE"
+	// CodeMissingRefreshToken means no refresh token was presented — usually a session-restore probe
+	// on a page that has no session yet. A caller that recognises this can stay silent instead of
+	// rendering "refreshToken is required" as a login failure, which is what an operator reported
+	// seeing on a login screen.
+	CodeMissingRefreshToken = "MISSING_REFRESH_TOKEN"
+	// CodeInvalidRefreshToken is a refresh token the identity provider rejected: a real expiry.
+	CodeInvalidRefreshToken = "INVALID_REFRESH_TOKEN"
+)
+
 func NewAuthHandler(
 	authProvider interfaces.IAuthProvider,
 	kycChecker interfaces.KYCChecker,
@@ -127,13 +162,13 @@ func clearAuthCookies(c *fiber.Ctx, secure bool) {
 func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	var req loginRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body", "code": CodeInvalidRequest})
 	}
 	if req.ClientID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientId is required"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientId is required", "code": CodeMissingCredentials})
 	}
 	if req.ClientSecret == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientSecret is required"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientSecret is required", "code": CodeMissingCredentials})
 	}
 
 	// Attempt PKI nonce flow first (ROLE_COMMERCIAL_BANK / ROLE_TREASURY).
@@ -149,17 +184,17 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		st, ok := status.FromError(err)
 		if !ok {
 			// Non-gRPC error (network, timeout, context cancelled) — treat as service unavailable.
-			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authentication service unavailable"})
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authentication service unavailable", "code": CodeAuthServiceUnavailable})
 		}
 		switch st.Code() {
 		case codes.NotFound, codes.PermissionDenied:
 			// "participant not found" or "PKI_NOT_REQUIRED" — fall through to direct login.
 		case codes.Unauthenticated:
 			// PKI first factor failed (wrong clientSecret).
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials", "code": CodeInvalidCredentials})
 		default:
 			// Internal error, Unavailable (service not ready), etc. — do not leak as auth failure.
-			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authentication service unavailable"})
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authentication service unavailable", "code": CodeAuthServiceUnavailable})
 		}
 	}
 
@@ -167,7 +202,7 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	// or other non-PKI roles (ROLE_SUPERVISOR, ROLE_NOC, ROLE_GOVERNANCE_OFFICER).
 	token, err := h.authProvider.Authenticate(c.UserContext(), req.ClientID, req.ClientSecret)
 	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials", "code": CodeInvalidCredentials})
 	}
 	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure)
 	resp := fiber.Map{
@@ -195,12 +230,12 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 		rt = c.Cookies("refresh_token")
 	}
 	if rt == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "refreshToken is required"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "refreshToken is required", "code": CodeMissingRefreshToken})
 	}
 
 	token, err := h.authProvider.RefreshToken(c.UserContext(), rt)
 	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid or expired refresh token"})
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid or expired refresh token", "code": CodeInvalidRefreshToken})
 	}
 	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure)
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
