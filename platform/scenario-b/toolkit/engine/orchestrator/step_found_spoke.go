@@ -877,6 +877,22 @@ func (c SpokeConfig) spokeBroadcastPath() string {
 }
 
 // FoundSpokeSteps builds the ordered found-spoke step set.
+// truncateForLog bounds a hub reply quoted into an error. The body is worth quoting — it is how an
+// operator tells a malformed answer from a rejected one — but an unbounded body in an error message
+// reaches logs and terminals, and a hub that answers HTML on a misrouted path would bury the rest of
+// the line. CR/LF go too, so a quoted body cannot forge a log entry.
+func truncateForLog(body []byte) string {
+	const max = 200
+	out := strings.NewReplacer("\r", " ", "\n", " ").Replace(strings.TrimSpace(string(body)))
+	if out == "" {
+		return "(empty body)"
+	}
+	if len(out) > max {
+		return out[:max] + "… (truncated)"
+	}
+	return out
+}
+
 func FoundSpokeSteps(c SpokeConfig) []Step {
 	c.WithDefaults()
 	var capturedEnode string // written by start-besu-spoke, read by emit-spoke-bundle
@@ -968,6 +984,15 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			// NOT created here — a CB opens the corridor later from its portal.
 			Name: "register-currency",
 			Deps: []string{"register-cb"},
+			// Idempotent by reading what the step produces, not by trusting the durable state.
+			// Without a Check the engine skips this step whenever state says done, so a run that
+			// recorded done WITHOUT recording the address could never retry: every later apply
+			// skipped it and failed downstream at the same place, until someone hand-edited
+			// .provisioning-state.yaml. The address being present is the real definition of
+			// "already registered".
+			Check: func(context.Context) (bool, error) {
+				return addrs.ReadAddr(c.SpokeEnvFile, "W_TOKEN_ADDRESS") != "", nil
+			},
 			Run: func(ctx context.Context) error {
 				hub, err := bundle.LoadHub(c.HubBundlePath)
 				if err != nil {
@@ -1005,15 +1030,23 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				}
 				// Capture the sovereign W-token address so the CB gateway can wire
 				// W_TOKEN_ADDRESS (the source→W-token to mint on the hub bridge-in).
+				//
+				// This address IS the step's output: separate-token-admin and the gateway's
+				// bridge-in both need it. A 2xx that does not carry one therefore cannot be
+				// reported as success — doing that used to strand the run one step later behind a
+				// message accusing this step of never having run.
 				var out struct {
 					TokenAddress string `json:"token_address"`
 				}
-				if json.Unmarshal(body, &out) == nil && out.TokenAddress != "" {
-					if err := addrs.AppendAddr(c.SpokeEnvFile, "W_TOKEN_ADDRESS", out.TokenAddress); err != nil {
-						return err
-					}
+				if err := json.Unmarshal(body, &out); err != nil {
+					return fmt.Errorf("register-currency: hub answered %d with a body this step cannot read (%v): %s",
+						resp.StatusCode, err, truncateForLog(body))
 				}
-				return nil
+				if out.TokenAddress == "" {
+					return fmt.Errorf("register-currency: hub answered %d without token_address, which is what this step exists to obtain: %s",
+						resp.StatusCode, truncateForLog(body))
+				}
+				return addrs.AppendAddr(c.SpokeEnvFile, "W_TOKEN_ADDRESS", out.TokenAddress)
 			},
 		},
 		{
@@ -1029,7 +1062,11 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			Run: func(ctx context.Context) error {
 				token := addrs.ReadAddr(c.SpokeEnvFile, "W_TOKEN_ADDRESS")
 				if token == "" {
-					return fmt.Errorf("separate-token-admin: W_TOKEN_ADDRESS not found in %s — register-currency must run first", c.SpokeEnvFile)
+					// Deliberately does not say "register-currency must run first": that step now
+					// fails when it cannot obtain the address, so reaching here means the address
+					// is absent for some other reason — an env file replaced by hand, or a state
+					// file carried over from an older version that recorded done without it.
+					return fmt.Errorf("separate-token-admin: W_TOKEN_ADDRESS is absent from %s, so there is no token to separate; re-run register-currency (it is idempotent) or check whether that file was replaced", c.SpokeEnvFile)
 				}
 				gatewayKey, gatewayAddr := deriveCBHubKey(c.SpokeID)
 				_, relayerAddr := deriveCBRelayerKey(c.SpokeID)
