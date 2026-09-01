@@ -26,6 +26,14 @@ func realmRolesForAdminRole(role string) []string {
 		return []string{"central_bank", "ROLE_TREASURY"}
 	case "SUPERVISOR":
 		return []string{"ROLE_SUPERVISOR"}
+	case "ADMISSION":
+		// Onboarding operator (spec 042). central_bank is attached so the operator can
+		// reach the CB-scoped v2 surfaces the portal shares; ROLE_ADMISSION is the claim
+		// the api-gateway's onboarding guards check. This case is REQUIRED: without it
+		// the default branch below returns the bare "ADMISSION" string, the realm role
+		// and JWT claim land as "ADMISSION", and every RequireRole("ROLE_ADMISSION")
+		// guard fails silently. The profile is password-only — no PKI, no on-chain role.
+		return []string{"central_bank", "ROLE_ADMISSION"}
 	case "NOC", "NOC_ADMIN":
 		return []string{"ROLE_NOC_ADMIN"}
 	case "BANK", "COMMERCIAL_BANK":

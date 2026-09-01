@@ -18,7 +18,8 @@ import {
   toast,
 } from "@cbweb3/ui";
 import { useEffect, useMemo, useState } from "react";
-import { useRegistry } from "../hooks";
+import { useAuth, useRegistry } from "../hooks";
+import { hasAdmissionAccess } from "../auth/authorization";
 
 const statusVariant = {
   ACTIVE: "default",
@@ -33,6 +34,11 @@ const statusVariant = {
 
 export function RegistryPage() {
   const { participants, pendingKyc, fetch, fetchPendingKyc, approveKyc, kycStatus, error } = useRegistry();
+  // Approving KYC is Admission-exclusive (spec 042 FR-002/FR-003). A governance-only
+  // operator keeps the read views but must not be offered the control — the gateway
+  // would 403 it anyway, so showing it would only produce a dead button.
+  const { profile } = useAuth();
+  const canApprove = hasAdmissionAccess(profile);
   const [search, setSearch] = useState("");
   // const [entityName, setEntityName] = useState("");
   // const [legalEntityId, setLegalEntityId] = useState("");
@@ -223,9 +229,13 @@ export function RegistryPage() {
                     />
                   </TableCell>
                   <TableCell>
-                    <Button size="sm" onClick={() => void onApproveKyc(entry.subject)} disabled={kycStatus === "loading"}>
-                      Approve KYC
-                    </Button>
+                    {canApprove ? (
+                      <Button size="sm" onClick={() => void onApproveKyc(entry.subject)} disabled={kycStatus === "loading"}>
+                        Approve KYC
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Requires the Admission profile</span>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

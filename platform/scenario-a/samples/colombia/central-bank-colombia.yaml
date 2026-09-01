@@ -64,6 +64,9 @@ spec:
     - role: ROLE_SUPERVISOR
       username: admin@colombia.supervisor.gov
       password: colombia-supervisor-local
+    - role: ROLE_ADMISSION
+      username: admin@colombia.admission.gov
+      password: colombia-admission-local
     - role: ROLE_NOC_ADMIN
       username: admin@colombia.noc.gov
       password: colombia-noc-local
