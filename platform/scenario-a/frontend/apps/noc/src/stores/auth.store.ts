@@ -5,6 +5,7 @@ import { NOC_UNAUTHORIZED_MESSAGE, hasNOCAccess } from "../auth/authorization";
 import { authApi } from "../services/api";
 import { setSessionExpiredHandler } from "../services/api/token";
 import type { AsyncStatus, SysAdminUser } from "../types";
+import { loginErrorMessage } from "@cbweb3/ui";
 
 type AuthState = {
   user: SysAdminUser | null;
@@ -41,7 +42,9 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch (error) {
       set({
         status: "error",
-        error: error instanceof Error ? error.message : "Unable to login",
+        // The gateway names the cause in the body; axios's own message is only "Request failed
+        // with status code N". Shared so the five portals cannot drift apart on this copy.
+        error: loginErrorMessage(error),
         isAuthenticated: false,
         initialized: true,
       });

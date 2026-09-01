@@ -34,6 +34,38 @@ type loginRequest struct {
 // auth cookies are sent with the Secure flag; use false for plain HTTP (local dev).
 // bankCode is optional: pass the entity's BANK_CODE so it is included in /me
 // responses even when the Keycloak JWT does not carry a bank_id custom claim.
+// Stable error codes for the auth routes.
+//
+// The five portals rendered axios's own `error.message`, so an operator saw "Request failed with
+// status code 400" and could not tell a wrong password from an empty field from a gateway that was
+// down. Keying the frontend on the prose would break on any rewording, and the status is not enough
+// either: 400 covers both a missing field and a malformed body.
+//
+// So the body carries a code as well as the message. `error` is unchanged — it is what logs and
+// existing clients read — and only the login and refresh routes are covered, the ones the portals
+// key on.
+const (
+	// CodeInvalidRequest is a request the gateway could not parse: a client bug, not something the
+	// operator can fix by typing more carefully.
+	CodeInvalidRequest = "INVALID_REQUEST"
+	// CodeMissingCredentials is an absent username or password. One code for either field.
+	CodeMissingCredentials = "MISSING_CREDENTIALS"
+	// CodeInvalidCredentials is a credential the identity provider refused. One code for both an
+	// unknown user and a wrong password — distinguishing them is user enumeration.
+	CodeInvalidCredentials = "INVALID_CREDENTIALS"
+	// CodeAuthServiceUnavailable is the auth service being unreachable or not ready. Deliberately
+	// not an auth failure: telling an operator their password is wrong while the service is down
+	// sends them to reset a password that was fine.
+	CodeAuthServiceUnavailable = "AUTH_SERVICE_UNAVAILABLE"
+	// CodeMissingRefreshToken means no refresh token was presented — usually a session-restore probe
+	// on a page with no session yet. A caller that recognises this can stay silent instead of
+	// rendering "refreshToken is required" as a login failure, which is the string a BCRP tester
+	// reported seeing on a login screen.
+	CodeMissingRefreshToken = "MISSING_REFRESH_TOKEN"
+	// CodeInvalidRefreshToken is a refresh token the identity provider rejected: a real expiry.
+	CodeInvalidRefreshToken = "INVALID_REFRESH_TOKEN"
+)
+
 func NewAuthHandler(
 	authProvider interfaces.IAuthProvider,
 	kycChecker interfaces.KYCChecker,
@@ -136,13 +168,13 @@ func clearAuthCookies(c *fiber.Ctx, secure bool) {
 func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	var req loginRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body", "code": CodeInvalidRequest})
 	}
 	if req.ClientID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientId is required"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientId is required", "code": CodeMissingCredentials})
 	}
 	if req.ClientSecret == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientSecret is required"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientSecret is required", "code": CodeMissingCredentials})
 	}
 
 	// Attempt PKI nonce flow first (ROLE_COMMERCIAL_BANK / ROLE_TREASURY).
@@ -158,11 +190,11 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		st, ok := status.FromError(err)
 		if !ok {
 			// Non-gRPC error (network, timeout, context cancelled) — reject.
-			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authentication service unavailable"})
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authentication service unavailable", "code": CodeAuthServiceUnavailable})
 		}
 		msg := st.Message()
 		if msg != "participant not found" && msg != "PKI_NOT_REQUIRED" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials", "code": CodeInvalidCredentials})
 		}
 		// participant not found or PKI not required → fall through to direct login.
 	}
@@ -182,7 +214,7 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	// credential being refused on purpose.
 	token, err := h.authProvider.Authenticate(c.UserContext(), req.ClientID, req.ClientSecret)
 	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials", "code": CodeInvalidCredentials})
 	}
 	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure)
 	resp := fiber.Map{
@@ -210,12 +242,12 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 		rt = c.Cookies("refresh_token")
 	}
 	if rt == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "refreshToken is required"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "refreshToken is required", "code": CodeMissingRefreshToken})
 	}
 
 	token, err := h.authProvider.RefreshToken(c.UserContext(), rt)
 	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid or expired refresh token"})
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid or expired refresh token", "code": CodeInvalidRefreshToken})
 	}
 	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure)
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
