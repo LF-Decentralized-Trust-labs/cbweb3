@@ -158,3 +158,60 @@ func TestSeparateTokenAdminDoesNotBlameRegisterCurrency(t *testing.T) {
 		t.Fatalf("the message must name what is missing: %v", err)
 	}
 }
+
+// truncateForLog carries two properties the error messages above depend on, and neither is
+// exercised by asserting on those messages: a body short enough to quote whole passes through, so
+// the assertions elsewhere stay meaningful, and the two guards hold on a body that is neither.
+//
+// The CR/LF half is not cosmetic. The quoted body comes from the hub, so a reply carrying newlines
+// would let a misbehaving or hostile one write extra lines into an error an operator reads as a
+// single statement — a forged log entry inside a message this step produces. Stripping them is what
+// prevents that, and nothing else here would notice if it went away.
+func TestTruncateForLog(t *testing.T) {
+	const max = 200
+
+	t.Run("an empty body says so instead of quoting nothing", func(t *testing.T) {
+		for _, in := range []string{"", "   ", "\n\n", " \r\n "} {
+			if got := truncateForLog([]byte(in)); got != "(empty body)" {
+				t.Errorf("truncateForLog(%q) = %q, want %q", in, got, "(empty body)")
+			}
+		}
+	})
+
+	t.Run("a short body is quoted unchanged", func(t *testing.T) {
+		const body = `{"error":"currency already registered"}`
+		if got := truncateForLog([]byte(body)); got != body {
+			t.Errorf("truncateForLog(%q) = %q, want it unchanged", body, got)
+		}
+	})
+
+	t.Run("newlines cannot survive into the error", func(t *testing.T) {
+		// A hub reply shaped to look like two more log lines once quoted.
+		body := "{\"error\":\"nope\"}\r\nINFO  registration succeeded\nINFO  token_address=0xdeadbeef"
+		got := truncateForLog([]byte(body))
+		if strings.ContainsAny(got, "\r\n") {
+			t.Fatalf("the quoted body kept a line break, so it can forge a log entry: %q", got)
+		}
+		// The content is still there — the point is that it cannot break the line, not that it
+		// is hidden.
+		if !strings.Contains(got, "registration succeeded") {
+			t.Errorf("the body was mangled beyond recognition: %q", got)
+		}
+	})
+
+	t.Run("a long body is bounded", func(t *testing.T) {
+		body := strings.Repeat("A", max*3)
+		got := truncateForLog([]byte(body))
+		if !strings.HasPrefix(got, strings.Repeat("A", max)) {
+			t.Errorf("the first %d characters were not kept: %q", max, got)
+		}
+		if !strings.HasSuffix(got, "… (truncated)") {
+			t.Errorf("a truncated body does not say so: %q", got)
+		}
+		// Bounded, not merely marked: an unbounded body reaches logs and terminals whether or
+		// not it carries a suffix.
+		if len(got) > max+len("… (truncated)") {
+			t.Errorf("output is %d bytes, which is not bounded by the %d cap", len(got), max)
+		}
+	})
+}
