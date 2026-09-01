@@ -9,16 +9,23 @@ import {
   CardHeader,
   CardTitle,
   Input,
+  Label,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
+  Textarea,
   toast,
 } from "@cbweb3/ui";
 import { useEffect, useMemo, useState } from "react";
 import { useRegistry } from "../hooks";
+import {
+  approvalReasonIssue,
+  approvalReasonLength,
+  isApprovalReasonAcceptable,
+} from "../features/onboarding/approval-reason";
 
 const statusVariant = {
   ACTIVE: "default",
@@ -81,8 +88,12 @@ export function RegistryPage() {
 
   const onApproveKyc = async (subject: string) => {
     const rowReason = (approvalReasonBySubject[subject] ?? "").trim();
-    if (rowReason.length < 10) {
-      toast.error("Provide an approval reason with at least 10 characters");
+    // The button is disabled while the reason is unacceptable, so this is belt and braces — a
+    // disabled control is a hint, not an enforcement. Both paths read the same rule, so the refusal
+    // and the button can never describe different requirements.
+    const issue = approvalReasonIssue(rowReason);
+    if (issue) {
+      toast.error(issue);
       return;
     }
 
@@ -195,12 +206,11 @@ export function RegistryPage() {
                 <TableHead>Bank Code</TableHead>
                 <TableHead>Institution</TableHead>
                 <TableHead>Wallet</TableHead>
-                <TableHead>Reason</TableHead>
                 <TableHead>Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {pendingKyc.map((entry) => (
+              {pendingKyc.flatMap((entry) => [
                 <TableRow key={entry.subject}>
                   <TableCell className="max-w-56 truncate font-medium" title={entry.subject}>
                     {entry.subject}
@@ -211,27 +221,50 @@ export function RegistryPage() {
                     {entry.wallet_address ?? "—"}
                   </TableCell>
                   <TableCell>
-                    <Input
-                      value={approvalReasonBySubject[entry.subject] ?? ""}
-                      onChange={(event) =>
-                        setApprovalReasonBySubject((current) => ({
-                          ...current,
-                          [entry.subject]: event.target.value,
-                        }))
-                      }
-                      placeholder="Approval reason (min 10 chars)"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Button size="sm" onClick={() => void onApproveKyc(entry.subject)} disabled={kycStatus === "loading"}>
+                    <Button
+                      size="sm"
+                      onClick={() => void onApproveKyc(entry.subject)}
+                      // Disabled until the justification is acceptable, so the requirement is
+                      // visible BEFORE the click. It used to exist only inside the submit handler,
+                      // which meant an operator discovered it by being refused.
+                      disabled={kycStatus === "loading" || !isApprovalReasonAcceptable(approvalReasonBySubject[entry.subject] ?? "")}
+                    >
                       Approve KYC
                     </Button>
                   </TableCell>
-                </TableRow>
-              ))}
+                </TableRow>,
+                // The justification gets a row of its own, full width: it is the part of this
+                // decision a human writes and the audit trail keeps, and it did not fit in a
+                // one-line box inside a table cell.
+                <TableRow key={`${entry.subject}-reason`}>
+                  <TableCell colSpan={5} className="pt-0">
+                    <div className="space-y-1.5 rounded-md border border-border bg-muted/30 p-3">
+                      <Label htmlFor={`approval-reason-${entry.subject}`}>
+                        Approval reason <span className="text-destructive">*</span>
+                      </Label>
+                      <Textarea
+                        id={`approval-reason-${entry.subject}`}
+                        rows={3}
+                        value={approvalReasonBySubject[entry.subject] ?? ""}
+                        onChange={(event) =>
+                          setApprovalReasonBySubject((current) => ({
+                            ...current,
+                            [entry.subject]: event.target.value,
+                          }))
+                        }
+                        placeholder="Why this institution is being approved — what was checked, and against what."
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {approvalReasonIssue(approvalReasonBySubject[entry.subject] ?? "") ??
+                          `${approvalReasonLength(approvalReasonBySubject[entry.subject] ?? "")} characters — recorded in the audit trail.`}
+                      </p>
+                    </div>
+                  </TableCell>
+                </TableRow>,
+              ])}
               {!pendingKyc.length ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
                     No pending KYC requests.
                   </TableCell>
                 </TableRow>
