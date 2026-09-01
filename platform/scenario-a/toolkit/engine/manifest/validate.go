@@ -290,8 +290,12 @@ func validateNOC(m *Manifest) []error {
 // provision an admin user for, keyed on spec.role. It mirrors the realms/clients
 // the engine provisions: a central bank hosts governance + treasury + the shared
 // NOC realm; a commercial bank hosts its bank realm.
+// ROLE_ADMISSION (spec 042) is required for a central bank only: it owns the mutating
+// commercial-bank onboarding actions, and only a central bank onboards commercial banks.
+// A commercial bank is not an onboarding authority, so it stays exempt — requiring it
+// there would break provisioning of those entities.
 var requiredAdminRolesByEntity = map[string][]string{
-	"central-bank":    {"ROLE_GOVERNANCE", "ROLE_TREASURY", "ROLE_SUPERVISOR", "ROLE_NOC_ADMIN"},
+	"central-bank":    {"ROLE_GOVERNANCE", "ROLE_TREASURY", "ROLE_SUPERVISOR", "ROLE_NOC_ADMIN", "ROLE_ADMISSION"},
 	"commercial-bank": {"ROLE_BANK"},
 }
 

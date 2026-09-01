@@ -2,6 +2,7 @@
 
 import type { RouteObject } from "react-router-dom";
 import { Navigate } from "react-router-dom";
+import { GOVERNANCE_ONLY, GOVERNANCE_OR_ADMISSION } from "../auth/authorization";
 import { ProtectedRoute } from "../components/auth/ProtectedRoute";
 import { AppLayout } from "../components/layout/AppLayout";
 import { isScenarioB } from "../config/scenario";
@@ -23,9 +24,15 @@ import {
   TransferLimitsPage,
 } from "../pages";
 
-const scenarioAChildren: RouteObject[] = [
+// Per-route authorization (spec 042 FR-008). The onboarding surface is shared by the
+// governance and Admission profiles; every other page stays governance-only. The
+// governance-only pages sit behind a second, pathless ProtectedRoute so a page added
+// there inherits the stricter requirement by default — the frontend counterpart of the
+// router's "relaxing a group widens everything inside it" hazard.
+const onboardingChildren: RouteObject[] = [{ path: "registry", element: <RegistryPage /> }];
+
+const scenarioAGovernanceOnlyChildren: RouteObject[] = [
   { index: true, element: <DashboardPage /> },
-  { path: "registry", element: <RegistryPage /> },
   { path: "circuit-breaker", element: <CircuitBreakerPage /> },
   { path: "transfer-limits", element: <TransferLimitsPage /> },
   { path: "htlc-monitor", element: <HTLCMonitorPage /> },
@@ -38,9 +45,8 @@ const scenarioAChildren: RouteObject[] = [
   { path: "settings", element: <SettingsPage /> },
 ];
 
-const scenarioBChildren: RouteObject[] = [
+const scenarioBGovernanceOnlyChildren: RouteObject[] = [
   { index: true, element: <DashboardPage /> },
-  { path: "registry", element: <RegistryPage /> },
   { path: "accounts", element: <AccountsPage /> },
   { path: "swap-monitor", element: <SwapMonitorPage /> },
   { path: "circuit-breaker", element: <CircuitBreakerPage /> },
@@ -50,6 +56,10 @@ const scenarioBChildren: RouteObject[] = [
   { path: "settings", element: <SettingsPage /> },
 ];
 
+const governanceOnlyChildren = isScenarioB
+  ? scenarioBGovernanceOnlyChildren
+  : scenarioAGovernanceOnlyChildren;
+
 export const routes: RouteObject[] = [
   {
     path: "/login",
@@ -57,11 +67,21 @@ export const routes: RouteObject[] = [
   },
   {
     path: "/",
-    element: <ProtectedRoute />,
+    // Portal gate: signed in AND holding either profile.
+    element: <ProtectedRoute required={GOVERNANCE_OR_ADMISSION} />,
     children: [
       {
         element: <AppLayout />,
-        children: isScenarioB ? scenarioBChildren : scenarioAChildren,
+        children: [
+          ...onboardingChildren,
+          {
+            // Inner gate: governance-only pages. An Admission-only operator opening one
+            // of these is redirected to the onboarding surface instead of being shown a
+            // page whose every request would 403.
+            element: <ProtectedRoute required={GOVERNANCE_ONLY} />,
+            children: governanceOnlyChildren,
+          },
+        ],
       },
     ],
   },
