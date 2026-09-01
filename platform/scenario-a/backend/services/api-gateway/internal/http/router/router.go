@@ -95,44 +95,73 @@ func Setup(app *fiber.App, deps Dependencies) {
 		oversightGroup.Get("/disclosure-status/:requestID", deps.OversightHandler.GetDisclosureStatus)
 	}
 
-	centralBankRoutes := complianceGroup.Group("", middleware.RequireRole(domain.RoleGovernance))
-	centralBankRoutes.Get("/participants", deps.ComplianceHandler.ListParticipants)
-	centralBankRoutes.Post("/approve-kyc", deps.GovernanceHandler.ApproveKYC)
-	centralBankRoutes.Post("/participants/provision", deps.ComplianceHandler.ProvisionParticipant)
-	centralBankRoutes.Post("/accounts/freeze", deps.ComplianceHandler.FreezeAccount)
-	centralBankRoutes.Post("/accounts/unfreeze", deps.ComplianceHandler.UnfreezeAccount)
-	centralBankRoutes.Post("/register", deps.ComplianceHandler.RegisterParticipant)
+	// The sub-group guard is the UNION of the roles used inside it (spec 042). Fiber
+	// group middleware is PREFIX-scoped, and Group("") mounts at the parent prefix, so
+	// a route-level RequireRole runs *in addition* to this one: a narrower group guard
+	// would 403 an Admission caller before its own route guard ran.
+	//
+	// CONSEQUENCE: this group no longer authorizes anything by itself. EVERY route below
+	// must carry an explicit guard; one added without a guard is reachable by BOTH
+	// profiles (INV-5 in contracts/authorization-matrix.md).
+	centralBankRoutes := complianceGroup.Group("", middleware.RequireRole(domain.RoleGovernance, domain.RoleAdmission))
+	// Shared read view / Admission-exclusive approval.
+	centralBankRoutes.Get("/participants", middleware.RequireRole(domain.RoleGovernance, domain.RoleAdmission), deps.ComplianceHandler.ListParticipants)
+	centralBankRoutes.Post("/approve-kyc", middleware.RequireRole(domain.RoleAdmission), deps.GovernanceHandler.ApproveKYC)
+	// Governance-retained: provision can set FROZEN (a freeze lever, not onboarding);
+	// freeze/unfreeze are value controls; /register provisions CENTRAL-BANK operator
+	// accounts (its IsAdminRole allowlist admits TREASURY/NOC/SUPERVISOR) and performs
+	// an inline CB-signed on-chain register+verify via auth OnboardParticipant, so it
+	// must stay off the Admission surface (FR-003b / FR-015a — decision T029a).
+	centralBankRoutes.Post("/participants/provision", middleware.RequireRole(domain.RoleGovernance), deps.ComplianceHandler.ProvisionParticipant)
+	centralBankRoutes.Post("/accounts/freeze", middleware.RequireRole(domain.RoleGovernance), deps.ComplianceHandler.FreezeAccount)
+	centralBankRoutes.Post("/accounts/unfreeze", middleware.RequireRole(domain.RoleGovernance), deps.ComplianceHandler.UnfreezeAccount)
+	centralBankRoutes.Post("/register", middleware.RequireRole(domain.RoleGovernance), deps.ComplianceHandler.RegisterParticipant)
 
-	// --- Governance Portal (Central Bank only — ROLE_GOVERNANCE) ---
+	// --- Governance Portal (Central Bank only) ---
 	// Only registered when running as a central bank gateway (no proxy handler).
 	// Scope: KYC/onboarding/registry, account control (freeze/unfreeze),
 	// circuit breaker, system parameters, and audit logs. Operational actions
 	// (mint/burn, deposit/escrow/redeem approvals) live under ROLE_TREASURY.
+	//
+	// The group guard is the UNION of the roles used inside (spec 042), for the same
+	// prefix-scoping reason as centralBankRoutes above. In Scenario A this is not
+	// optional: BOTH routes the governance portal uses for onboarding —
+	// GET /registry and POST /approve-kyc — live in here, so without the relaxation the
+	// Admission profile has no working onboarding surface at all.
+	//
+	// CONSEQUENCE: the group authorizes nothing by itself. EVERY route below carries an
+	// explicit guard; one added without a guard is reachable by BOTH profiles (INV-5).
 	if deps.PaymentProxyHandler == nil && deps.GovernanceHandler != nil {
 		govGroup := app.Group("/api/v1/governance",
 			middleware.RequireCookieAuth(deps.AuthProvider),
-			middleware.RequireRole(domain.RoleGovernance),
+			middleware.RequireRole(domain.RoleGovernance, domain.RoleAdmission),
 		)
-		govGroup.Post("/approve-kyc", deps.GovernanceHandler.ApproveKYC)
+		// Onboarding: approval and participant-record registration are Admission-exclusive;
+		// the registry read is shared. These three are why the group guard is a union.
+		govGroup.Post("/approve-kyc", middleware.RequireRole(domain.RoleAdmission), deps.GovernanceHandler.ApproveKYC)
+		govGroup.Get("/registry", middleware.RequireRole(domain.RoleGovernance, domain.RoleAdmission), deps.GovernanceHandler.GetRegistry)
+		govGroup.Post("/participants", middleware.RequireRole(domain.RoleAdmission), deps.GovernanceHandler.RegisterParticipant)
 
-		govGroup.Get("/registry", deps.GovernanceHandler.GetRegistry)
-		govGroup.Post("/registry/csr", deps.GovernanceHandler.SubmitCSR)
-		govGroup.Post("/participants", deps.GovernanceHandler.RegisterParticipant)
+		// Certificate issuance stays with governance: SubmitCSR signs the participant
+		// certificate with the central bank's CA key — the same class of act as an
+		// on-chain signature, so it is never Admission-authorized (FR-002a).
+		govGroup.Post("/registry/csr", middleware.RequireRole(domain.RoleGovernance), deps.GovernanceHandler.SubmitCSR)
 
-		govGroup.Get("/accounts", deps.GovernanceHandler.GetAccounts)
-		govGroup.Post("/accounts/freeze", deps.GovernanceHandler.FreezeAccount)
-		govGroup.Post("/accounts/unfreeze", deps.GovernanceHandler.UnfreezeAccount)
+		// Governance-retained: value/freeze, circuit breaker, parameters, audit, users.
+		govGroup.Get("/accounts", middleware.RequireRole(domain.RoleGovernance), deps.GovernanceHandler.GetAccounts)
+		govGroup.Post("/accounts/freeze", middleware.RequireRole(domain.RoleGovernance), deps.GovernanceHandler.FreezeAccount)
+		govGroup.Post("/accounts/unfreeze", middleware.RequireRole(domain.RoleGovernance), deps.GovernanceHandler.UnfreezeAccount)
 
-		govGroup.Get("/circuit-breaker/status", deps.GovernanceHandler.GetCircuitBreakerStatus)
-		govGroup.Post("/circuit-breaker/toggle", deps.GovernanceHandler.ToggleCircuitBreaker)
+		govGroup.Get("/circuit-breaker/status", middleware.RequireRole(domain.RoleGovernance), deps.GovernanceHandler.GetCircuitBreakerStatus)
+		govGroup.Post("/circuit-breaker/toggle", middleware.RequireRole(domain.RoleGovernance), deps.GovernanceHandler.ToggleCircuitBreaker)
 
-		govGroup.Get("/parameters", deps.GovernanceHandler.GetParameters)
-		govGroup.Put("/parameters", deps.GovernanceHandler.UpdateParameters)
+		govGroup.Get("/parameters", middleware.RequireRole(domain.RoleGovernance), deps.GovernanceHandler.GetParameters)
+		govGroup.Put("/parameters", middleware.RequireRole(domain.RoleGovernance), deps.GovernanceHandler.UpdateParameters)
 
-		govGroup.Get("/audit/logs", deps.GovernanceHandler.GetAuditLogs)
+		govGroup.Get("/audit/logs", middleware.RequireRole(domain.RoleGovernance), deps.GovernanceHandler.GetAuditLogs)
 
-		govGroup.Get("/users", deps.GovernanceHandler.ListUsers)
-		govGroup.Get("/users/:userId", deps.GovernanceHandler.GetUser)
+		govGroup.Get("/users", middleware.RequireRole(domain.RoleGovernance), deps.GovernanceHandler.ListUsers)
+		govGroup.Get("/users/:userId", middleware.RequireRole(domain.RoleGovernance), deps.GovernanceHandler.GetUser)
 	}
 
 	// --- Treasury: Transfer Limits (Central Bank only — ROLE_TREASURY, R1-10.1) ---

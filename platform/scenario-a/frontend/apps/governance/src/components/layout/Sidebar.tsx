@@ -3,11 +3,27 @@
 import { Badge } from "@cbweb3/ui";
 import { ClipboardCheck, LayoutDashboard, ScrollText, Settings, Users } from "lucide-react";
 import { NavLink } from "react-router-dom";
-import { useCircuitBreaker } from "../../hooks";
+import { useAuth, useCircuitBreaker } from "../../hooks";
+import {
+  GOVERNANCE_ONLY,
+  GOVERNANCE_OR_ADMISSION,
+  isAllowedOnRoute,
+  type RouteRequirement,
+} from "../../auth/authorization";
 
-const navItems = [
+// Each item carries the same requirement its route declares in routes/index.tsx, so the
+// nav can never offer a link the router would bounce (spec 042 FR-008). Default is
+// governance-only: an item added without a requirement stays hidden from Admission.
+type NavItem = {
+  to: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  required?: RouteRequirement;
+};
+
+const navItems: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/registry", label: "Registry", icon: ClipboardCheck },
+  { to: "/registry", label: "Registry", icon: ClipboardCheck, required: GOVERNANCE_OR_ADMISSION },
   { to: "/accounts", label: "Accounts", icon: Users },
   { to: "/audit", label: "Audit", icon: ScrollText },
   { to: "/settings", label: "Settings", icon: Settings },
@@ -15,7 +31,12 @@ const navItems = [
 
 export function Sidebar() {
   const { circuitBreaker } = useCircuitBreaker();
+  const { profile } = useAuth();
   const isHalted = circuitBreaker?.state === "HALTED";
+  // Hide links the router would bounce for this profile (spec 042 FR-008).
+  const visibleNavItems = navItems.filter((item) =>
+    isAllowedOnRoute(profile, item.required ?? GOVERNANCE_ONLY),
+  );
 
   return (
     <aside className="w-full border-b border-border bg-card p-3 md:min-h-full md:w-64 md:shrink-0 md:border-b-0 md:border-r">
@@ -26,7 +47,7 @@ export function Sidebar() {
         </div>
       </div>
       <nav className="grid gap-1">
-        {navItems.map((item) => (
+        {visibleNavItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}

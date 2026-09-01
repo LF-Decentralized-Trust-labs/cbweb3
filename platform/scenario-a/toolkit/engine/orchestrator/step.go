@@ -41,8 +41,13 @@ const (
 	StepRenderCBEnv       = "render-cb-env"
 	StepStartCBInfra      = "start-cb-infra"
 	StepProvisionKeycloak = "provision-keycloak"
-	StepStartCBBackend    = "start-cb-backend"
-	StepStartCBFrontend   = "start-cb-frontend"
+	// StepReconcileAdminUsers converges the manifest's operator accounts and their realm roles on
+	// EVERY run. provision-keycloak seeds a realm import, which Keycloak applies only when the realm
+	// does not yet exist, and its Check skips whenever Keycloak is up — so without this a role newly
+	// declared in spec.adminUsers never reaches an entity that is already provisioned.
+	StepReconcileAdminUsers = "reconcile-admin-users"
+	StepStartCBBackend      = "start-cb-backend"
+	StepStartCBFrontend     = "start-cb-frontend"
 	// Per-entity launcher (distributed A/B entry point). Runs in both modes.
 	StepStartLauncher = "start-launcher"
 	// Per-host reverse proxy (Caddy): one :80 entrypoint routing portals + api by path.
@@ -79,6 +84,7 @@ var CanonicalStepOrder = []string{
 	StepRenderCBEnv,
 	StepStartCBInfra,
 	StepProvisionKeycloak,
+	StepReconcileAdminUsers,
 	StepStartCBBackend,
 	StepStartCBFrontend,
 	StepRegisterRelay,
