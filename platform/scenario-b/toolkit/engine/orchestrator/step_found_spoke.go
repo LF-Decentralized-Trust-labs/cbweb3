@@ -463,10 +463,7 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	// Per-role operator accounts from the manifest (spec.adminUsers). Fall back to a
 	// single default CB admin when the manifest declares none. Each user's manifest
 	// role maps to the realm roles the api-gateway checks (realmRolesForAdminRole).
-	users := c.AdminUsers
-	if len(users) == 0 {
-		users = []AdminUser{{Role: "GOVERNANCE", Username: spokeCBUser, Password: spokeCBPass}}
-	}
+	users := c.reconcilableAdminUsers()
 	appendKeycloakUsers(&b, kc, spokeKeycloakRealm, users)
 	appendKeycloakAssertions(&b, kc, spokeKeycloakRealm, spokeKeycloakClient, users)
 	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", b.String())
@@ -544,6 +541,17 @@ func jsonStringArray(values []string) (string, error) {
 		return "", fmt.Errorf("encode origins: %w", err)
 	}
 	return string(encoded), nil
+}
+
+// reconcilableAdminUsers is the operator set provisioning intends to exist: the manifest's
+// spec.adminUsers, or the single default CB admin when the manifest declares none. Shared with
+// provisionKeycloakRealm so the initial creation and the reconciliation cannot disagree about who
+// should exist.
+func (c SpokeConfig) reconcilableAdminUsers() []AdminUser {
+	if len(c.AdminUsers) == 0 {
+		return []AdminUser{{Role: "GOVERNANCE", Username: spokeCBUser, Password: spokeCBPass}}
+	}
+	return c.AdminUsers
 }
 
 // appendKeycloakUsers appends idempotent kcadm commands that create each admin user
@@ -1189,6 +1197,36 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 					}
 				}
 				return nil
+			},
+		},
+		{
+			// Same skip, one object along: an operator role newly declared in spec.adminUsers
+			// never reaches an entity that is already provisioned. Spec 042 makes that concrete
+			// — POST /approve-kyc is re-gated to ROLE_ADMISSION, which is granted only to a user
+			// declared as ADMISSION, so on an upgraded stack the route would close on a role
+			// nobody holds and KYC approval would be unreachable with nothing reporting it.
+			Name: "reconcile-admin-users",
+			Deps: []string{"provision-keycloak-spoke"},
+			Check: func(ctx context.Context) (bool, error) {
+				return adminUsersAlreadyProvisioned(ctx, c.Runner, c.keycloakContainer(),
+					keycloakAdminCLI, spokeKeycloakRealm,
+					mustInfraSecret(secretsDirOf(c.SpokeEnvFile), "KC_ADMIN_PASSWORD"),
+					c.reconcilableAdminUsers())
+			},
+			Run: func(ctx context.Context) error {
+				// Self-sufficient for the same reason reconcile-noc-origins is: the Check reaches
+				// this Run when Keycloak could not be asked at all, which on a provisioned entity
+				// with its containers down is ordinary.
+				if _, err := c.Runner.Run(ctx, "docker", c.composeUpArgs("entity-keycloak")...); err != nil {
+					return err
+				}
+				if err := c.WaitKeycloak(ctx); err != nil {
+					return err
+				}
+				return reconcileAdminUsers(ctx, c.Runner, c.keycloakContainer(),
+					keycloakAdminCLI, spokeKeycloakRealm,
+					mustInfraSecret(secretsDirOf(c.SpokeEnvFile), "KC_ADMIN_PASSWORD"),
+					c.reconcilableAdminUsers())
 			},
 		},
 		{

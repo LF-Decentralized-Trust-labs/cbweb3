@@ -18,7 +18,8 @@ import {
   toast,
 } from "@cbweb3/ui";
 import { useEffect, useState } from "react";
-import { useRegistry } from "../hooks";
+import { useAuth, useRegistry } from "../hooks";
+import { hasAdmissionAccess } from "../auth/authorization";
 import {
   approvalReasonIssue,
   approvalReasonLength,
@@ -36,6 +37,11 @@ import {
 
 export function RegistryPage() {
   const {pendingKyc, fetch, fetchPendingKyc, approveKyc, kycStatus, error } = useRegistry();
+  // Approving KYC is Admission-exclusive (spec 042 FR-002/FR-003). A governance-only
+  // operator keeps the read views but must not be offered the control — the gateway
+  // would 403 it anyway, so showing it would only produce a dead button.
+  const { profile } = useAuth();
+  const canApprove = hasAdmissionAccess(profile);
   // const [search, setSearch] = useState("");
   // const [entityName, setEntityName] = useState("");
   // const [legalEntityId, setLegalEntityId] = useState("");
@@ -217,21 +223,32 @@ export function RegistryPage() {
                     {entry.wallet_address ?? "—"}
                   </TableCell>
                   <TableCell>
-                    <Button
-                      size="sm"
-                      onClick={() => void onApproveKyc(entry.subject)}
-                      // Disabled until the justification is acceptable, so the requirement is
-                      // visible BEFORE the click. It used to exist only inside the submit handler,
-                      // which meant an operator discovered it by being refused.
-                      disabled={kycStatus === "loading" || !isApprovalReasonAcceptable(approvalReasonBySubject[entry.subject] ?? "")}
-                    >
-                      Approve KYC
-                    </Button>
+                    {canApprove ? (
+                      <Button
+                        size="sm"
+                        onClick={() => void onApproveKyc(entry.subject)}
+                        // Two conditions, two different messages. hasAdmissionAccess decides whether
+                        // the control is offered at all (spec 042); the justification rule decides
+                        // whether an offered control is usable yet, so the requirement is visible
+                        // BEFORE the click rather than discovered by being refused.
+                        disabled={kycStatus === "loading" || !isApprovalReasonAcceptable(approvalReasonBySubject[entry.subject] ?? "")}
+                      >
+                        Approve KYC
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Requires the Admission profile</span>
+                    )}
                   </TableCell>
                 </TableRow>,
                 // The justification gets a row of its own, full width: it is the part of this
                 // decision a human writes and the audit trail keeps, and it did not fit in a
                 // one-line box inside a table cell.
+                //
+                // Behind the same gate as the button, for the same reason the button is gated: a
+                // required field offered to an operator who cannot approve is a dead control with
+                // extra steps. A governance-only operator keeps the read view and sees why.
+                ...(canApprove
+                  ? [
                 <TableRow key={`${entry.subject}-reason`}>
                   <TableCell colSpan={5} className="pt-0">
                     <div className="space-y-1.5 rounded-md border border-border bg-muted/30 p-3">
@@ -257,6 +274,8 @@ export function RegistryPage() {
                     </div>
                   </TableCell>
                 </TableRow>,
+                    ]
+                  : []),
               ])}
               {!pendingKyc.length ? (
                 <TableRow>
