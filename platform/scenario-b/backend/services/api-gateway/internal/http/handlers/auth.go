@@ -49,7 +49,7 @@ const (
 	CodeMissingCredentials = "MISSING_CREDENTIALS"
 	// CodeInvalidCredentials is a credential the identity provider refused. One code for both an
 	// unknown client and a wrong secret — distinguishing them is user enumeration.
-	CodeInvalidCredentials = "INVALID_CREDENTIALS"
+	CodeInvalidCredentials = "INVALID_CREDENTIALS" //#nosec G101 -- not a secret; a wire error code, no credential material
 	// CodeAuthServiceUnavailable is the auth service being unreachable or not ready. Deliberately
 	// not an auth failure: telling an operator their credentials are wrong when the service is down
 	// sends them to rotate a secret that was fine.
