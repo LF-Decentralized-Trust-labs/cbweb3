@@ -176,6 +176,16 @@ func (c JoinConfig) provisionKeycloakRealm(ctx context.Context) error {
 	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password %[2]s && ",
 		kc, mustInfraSecret(c.DataDir, "KC_ADMIN_PASSWORD"))
 	fmt.Fprintf(&b, "(%[1]s create realms -s realm=%[2]s -s enabled=true || kcw 'create realm') && ", kc, bankKeycloakRealm)
+	// Local lab uses plain HTTP and the portal does a browser-direct password grant, which
+	// Keycloak's default sslRequired=external rejects with "HTTPS required". Relax it for
+	// local (never in production), and cap the token lifespan the same way the other modes do.
+	//
+	// This is also a precondition of this script's own assertions: appendKeycloakAssertions
+	// checks the realm holds sslRequired=none, so omitting the update made the gate
+	// unsatisfiable and took every bank join down with
+	// "realm cbweb3 did not accept sslRequired=NONE".
+	fmt.Fprintf(&b, "(%[1]s update realms/%[2]s -s sslRequired=NONE -s accessTokenLifespan=%[3]d || kcw 'update realm settings') && ",
+		kc, bankKeycloakRealm, accessTokenLifespanSeconds)
 	fmt.Fprintf(&b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s secret=%[4]s -s enabled=true "+
 		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[5]s || kcw 'create backend client') && ",
 		kc, bankKeycloakRealm, bankKeycloakClient, bankKeycloakSecret, audienceMapperArg(keycloakBackendAudience))
