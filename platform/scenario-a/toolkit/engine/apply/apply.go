@@ -82,12 +82,16 @@ func runFoundMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyRes
 		return result, err
 	}
 
+	// Snapshot what was already finished BEFORE the engine runs. Without it the
+	// report cannot tell work this run did from work it found already done.
+	doneBefore := completedSteps(m.Spec.Node.DataDir)
+
 	// Run the 10-step idempotent provisioning engine.
 	runErr := fns.runFound(ctx, m, deps)
 
 	// Read final state to build the step report regardless of error.
 	state, _ := orchestrator.LoadState(m.Spec.Node.DataDir)
-	result.Steps = buildStepResults(plannedStepOrder(m), state)
+	result.Steps = buildStepResults(plannedStepOrder(m), state, doneBefore)
 
 	if ctx.Err() != nil {
 		// Mark the last step that was running when context was cancelled (recorded
@@ -210,10 +214,12 @@ func runJoinMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyResu
 		return result, err
 	}
 
+	doneBefore := completedSteps(m.Spec.Node.DataDir)
+
 	runErr := fns.runJoin(ctx, m, b, deps)
 
 	state, _ := orchestrator.LoadState(m.Spec.Node.DataDir)
-	result.Steps = buildStepResults(plannedStepOrder(m), state)
+	result.Steps = buildStepResults(plannedStepOrder(m), state, doneBefore)
 
 	if ctx.Err() != nil {
 		for i := len(result.Steps) - 1; i >= 0; i-- {
@@ -257,7 +263,13 @@ func plannedStepOrder(m *manifest.Manifest) []string {
 }
 
 // buildStepResults constructs the step report from orchestrator state.
-func buildStepResults(stepOrder []string, state orchestrator.ProvisioningState) []StepResult {
+//
+// doneBefore names the steps that were already complete when this run started. A
+// finished step is reported as "executed" when this run did the work and "skipped"
+// only when it genuinely had nothing to do — the report used to say "skipped" for
+// both, so a first apply described ten freshly executed steps as skipped while
+// stamping each with a new completedAt.
+func buildStepResults(stepOrder []string, state orchestrator.ProvisioningState, doneBefore map[string]bool) []StepResult {
 	results := make([]StepResult, len(stepOrder))
 	for i, name := range stepOrder {
 		sr := StepResult{Name: name}
@@ -267,7 +279,11 @@ func buildStepResults(stepOrder []string, state orchestrator.ProvisioningState) 
 				found = true
 				switch s.Status {
 				case "done":
-					sr.Status = "skipped"
+					if doneBefore[name] {
+						sr.Status = "skipped"
+					} else {
+						sr.Status = "executed"
+					}
 					sr.CompletedAt = s.CompletedAt
 				case "failed":
 					sr.Status = "failed"
@@ -326,4 +342,21 @@ func resolveLocalProfileFromInput(in ApplyInput) LocalProfile {
 		p.OutputDir = filepath.Dir(in.Manifest.Spec.Node.DataDir)
 	}
 	return p
+}
+
+// completedSteps reads the steps already marked done in the state file, before a run
+// starts. A missing or unreadable state file means a first run: nothing was done
+// before, so nothing can be reported as skipped.
+func completedSteps(dataDir string) map[string]bool {
+	state, err := orchestrator.LoadState(dataDir)
+	if err != nil {
+		return nil
+	}
+	done := make(map[string]bool, len(state.Steps))
+	for _, s := range state.Steps {
+		if s.Status == "done" {
+			done[s.Step] = true
+		}
+	}
+	return done
 }

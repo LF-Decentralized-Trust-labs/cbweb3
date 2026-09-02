@@ -86,8 +86,11 @@ func TestRun_ProxyEnabled_ReportListsEveryExecutedStep(t *testing.T) {
 	if proxy == nil {
 		t.Fatalf("%q executed but is absent from the report: %v", orchestrator.StepStartProxy, reported)
 	}
-	if proxy.Status != "skipped" {
-		t.Errorf("%q recorded done in state; report Status = %q, want skipped", orchestrator.StepStartProxy, proxy.Status)
+	// "executed", not "skipped": this run started with no prior state and did the
+	// work. The report used to say skipped for both cases, which is what this
+	// assertion was pinning before the distinction existed.
+	if proxy.Status != "executed" {
+		t.Errorf("%q was run by this apply; report Status = %q, want executed", orchestrator.StepStartProxy, proxy.Status)
 	}
 }
 

@@ -250,11 +250,14 @@ func TestRun_InterruptedStepStatus(t *testing.T) {
 	if result.Status != "interrupted" {
 		t.Errorf("result.Status = %q; want interrupted", result.Status)
 	}
-	if result.Steps[0].Status != "skipped" {
-		t.Errorf("step[0] %s: Status = %q; want skipped", result.Steps[0].Name, result.Steps[0].Status)
+	// The two steps that finished before the interrupt are reported as executed:
+	// this run did them. They read "skipped" until the report learned to tell work
+	// it performed from work it found already done.
+	if result.Steps[0].Status != "executed" {
+		t.Errorf("step[0] %s: Status = %q; want executed", result.Steps[0].Name, result.Steps[0].Status)
 	}
-	if result.Steps[1].Status != "skipped" {
-		t.Errorf("step[1] %s: Status = %q; want skipped", result.Steps[1].Name, result.Steps[1].Status)
+	if result.Steps[1].Status != "executed" {
+		t.Errorf("step[1] %s: Status = %q; want executed", result.Steps[1].Name, result.Steps[1].Status)
 	}
 	if result.Steps[2].Status != "interrupted" {
 		t.Errorf("step[2] %s: Status = %q; want interrupted", result.Steps[2].Name, result.Steps[2].Status)

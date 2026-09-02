@@ -274,7 +274,9 @@ curl -s http://localhost:4000/api/v1/spokes | jq
 ```
 
 The structured report printed by each `apply` (`-o yaml` or `-o json`) also shows
-the per-step status: `success`, `skipped`, `failed`, or `pending`.
+the per-step status: `executed` (this run did the work), `skipped` (already done
+before this run), `failed`, `interrupted`, or `pending`. `success` appears on the
+run as a whole, never on a step — the previous wording listed it here by mistake.
 
 ---
 
