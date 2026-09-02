@@ -16,7 +16,7 @@
    - [Dashboard](#51-dashboard)
    - [Registry](#52-registry)
    - [Accounts](#53-accounts)
-   - [Swap Monitor](#54-swap-monitor)
+   - [Approvals Overview](#54-approvals-overview)
    - [Circuit Breaker](#55-circuit-breaker)
    - [Transfer Limits](#56-transfer-limits)
    - [Oversight](#57-oversight)
@@ -84,7 +84,7 @@ In Scenario B, the sidebar contains exactly the following items in order:
 | Dashboard | `/` | Network health summary and alert cards |
 | Registry | `/registry` | Participant compliance registry and KYC approvals |
 | Accounts | `/accounts` | Account freeze for emergency intervention |
-| Swap Monitor | `/swap-monitor` | Read-only visibility into AMM swap operations |
+| Approvals Overview | `/approvals-overview` | Read-only counts of the pending approval queues, with a link into each |
 | Circuit Breaker | `/circuit-breaker` | Pause / resume AMM swaps per pair (multi-sig) |
 | Transfer Limits | `/transfer-limits` | Daily transfer limits per participant |
 | Oversight | `/oversight` | AML/CFT disclosure requests |
@@ -200,17 +200,19 @@ A searchable, paginated table of all participant accounts. The search field filt
 
 ---
 
-### 5.4 Swap Monitor
+### 5.4 Approvals Overview
 
-**Route:** `/swap-monitor`
+**Route:** `/approvals-overview`
 
-The Swap Monitor provides read-only operational visibility into the Scenario B payment pipeline. It shows live counts of pending approval queues and allows governance operators to track individual swaps by swap ID during a session.
+A roll-up of the approval queues a governance operator has to work through. Counts only.
 
-![Swap Monitor](../img/scenario-b/governance/05-swap-monitor.png)
+> **Screenshot pending.** The image previously shown here was captured while this screen still
+> carried a Swap History panel, so it no longer matches the page. It was removed rather than left
+> in place showing a feature that is gone; a recapture is outstanding.
 
 #### Pending approval summary
 
-Three summary cards at the top of the screen:
+Three summary cards:
 
 | Card | What it counts |
 |---|---|
@@ -218,24 +220,22 @@ Three summary cards at the top of the screen:
 | **Pending Escrows** | Tokenisation requests awaiting approval. |
 | **Pending Redeems** | Redemption requests awaiting approval. |
 
-> These counts are informational only. Each card carries a link (Open issuance approvals / Open tokenisation approvals / Open redeem approvals), but the approval screens for deposits, escrows, and redeems are part of other portals in the Scenario B architecture and are not present in the Governance Portal navigation. The cards show the queue depth so governance operators can monitor pipeline health.
+These counts are informational only. In Scenario B the deposit, escrow and redeem approval
+screens are **not** part of this portal — the components exist in the codebase but only the
+Scenario A route set registers them — so there is nothing to open from here and nothing to act on.
+The cards used to carry links to those routes; in Scenario B every one of them fell through to the
+dashboard, so they were removed. Verified on a live stack.
 
-#### Swap History
+#### Swap tracking was removed
 
-Governance operators can track individual swap operations by ID. Enter a swap ID in the **Swap ID** field and click **Track Swap**. The swap record is fetched and displayed as a card with the following fields:
+This screen used to let an operator enter a swap ID and read that swap's record. It never worked
+from here: a swap read is answered only to the bank that owns the swap, so a governance session was
+refused on every lookup and the screen reported the refusal as "Could not load this swap record."
 
-| Field | Description |
-|---|---|
-| **Status** | Current swap status (see swap status table in [Status reference](#7-status-reference)). |
-| **Payer Bank** | Bank ID of the institution initiating the payment. |
-| **Beneficiary Bank** | Bank ID of the receiving institution. |
-| **Bridge In Position** | Position ID for the incoming bridge leg, or "—". |
-| **Swap Tx Ref** | On-chain transaction reference for the AMM swap, or "—". |
-| **Bridge Out Position** | Position ID for the outgoing bridge leg, or "—". |
-| **Created At** | Timestamp when the swap was initiated. |
-| **Updated At** | Timestamp of the most recent status change. |
-
-Multiple swaps can be tracked in a single session; each appears as a separate card. Tracked swap IDs are retained for the duration of the browser session only.
+It was removed rather than given a working read path, because whether a central bank should see
+commercial banks' swaps was **decided in the negative**. There is deliberately no swap read for
+`central_bank`, `ROLE_GOVERNANCE` or `ROLE_SUPERVISOR`. For swap-level investigation, go to the
+payment team or the NOC.
 
 ---
 
@@ -485,13 +485,12 @@ Click **Save Settings** to confirm. These preferences are display-only client-si
 6. The second operator navigates to **Oversight**, enters the request ID and their signer ID in the **Sign Disclosure** panel, and clicks **Submit Signature**.
 7. Monitor quorum progress in the **Disclosure Status** panel by entering the request ID and clicking **Fetch Status**.
 
-### Monitoring swap pipeline health
+### Monitoring approval queue depth
 
-1. Navigate to **Swap Monitor** (`/swap-monitor`).
+1. Navigate to **Approvals Overview** (`/approvals-overview`).
 2. Review the three pending count cards (Deposits, Escrows, Redeems). Elevated counts indicate a processing backlog in the payment pipeline.
-3. To investigate a specific swap, obtain the swap ID from the payment team or NOC, enter it in the **Swap ID** field, and click **Track Swap**.
-4. Review the swap record card for status, parties, and transaction references.
-5. If the swap shows a failure status (e.g. `BRIDGE_OUT_FAILED`), escalate to the NOC team — do not attempt to intervene from this portal.
+3. An elevated count is a signal to chase, not something to action here: these approval screens are not part of this portal in Scenario B.
+4. Individual swaps cannot be inspected from this portal — that read is answered only to the bank that owns the swap. For a specific swap, escalate to the payment team or the NOC with the swap ID.
 
 ### Setting a daily transfer limit
 
@@ -564,7 +563,7 @@ The portal could not reach the backend API on the most recent 15-second poll. Th
 ### Banks report that cross-border transfers are failing
 
 1. Navigate to **Circuit Breaker** (`/circuit-breaker`). If the state is `HALTED`, swaps are intentionally blocked. Initiate the resume process if the halt is no longer required (see [Resuming AMM swaps](#resuming-amm-swaps-two-signature-process)).
-2. If the state is `LIVE`, navigate to **Swap Monitor** (`/swap-monitor`) and check whether pending queue counts are elevated or individual swaps show `BRIDGE_OUT_FAILED`. Escalate to the NOC team for infrastructure investigation.
+2. If the state is `LIVE`, navigate to **Approvals Overview** (`/approvals-overview`) and check whether pending queue counts are elevated. Escalate to the NOC team for infrastructure investigation, including any swap-level check — swaps cannot be read from this portal.
 
 ### A pending KYC entry does not appear in the Registry
 
