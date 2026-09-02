@@ -242,6 +242,24 @@ export function formatTokenAmount(rawAmount: string, decimals: number): string {
   }
 }
 
+// formatFiatDisplayUnits and formatCeBMDisplay render an amount the OPERATOR TYPED.
+//
+// The distinction is load-bearing and was got wrong. formatFiatUnits and formatCeBM take a
+// raw base-unit amount — what balances and stored records carry — and divide by
+// 10^decimals. Handing them the display string held in a form's state divides it a second
+// time, so at 18 decimals a typed 1500 rendered as "0". The three confirmation panels did
+// exactly that, announcing an amount that was never the one submitted.
+//
+// These convert first, with the same displayToBase the submit path uses, so the
+// confirmation and the request cannot disagree by construction.
+export function formatFiatDisplayUnits(displayAmount: string, decimals: number, tokenSymbol?: string | null): string {
+  return formatFiatUnits(displayToBase(displayAmount, decimals), decimals, tokenSymbol);
+}
+
+export function formatCeBMDisplay(displayAmount: string, decimals: number, tokenSymbol?: string | null): string {
+  return formatCeBM(displayToBase(displayAmount, decimals), decimals, tokenSymbol);
+}
+
 // displayToBase converts a human-readable decimal string entered by the user into
 // the raw base-unit integer string expected by the API (multiplies by 10^decimals).
 // Accepts comma-formatted input (e.g. "1,000.5") as well as plain "1000.5".

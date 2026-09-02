@@ -28,6 +28,7 @@ import {
   displayToBase,
   fiatCurrencyLabel,
   formatCeBM,
+  formatCeBMDisplay,
   getPaymentStatusLabel,
   getPaymentStatusVariant,
   normalizePaymentStatus,
@@ -166,7 +167,7 @@ export function RedeemsPage() {
           <CardHeader>
             <CardTitle>Confirm Redeem Request</CardTitle>
             <CardDescription>
-              {formatCeBM(amount, decimals, tCeBMSymbol)} will be submitted for central bank fiat
+              {formatCeBMDisplay(amount, decimals, tCeBMSymbol)} will be submitted for central bank fiat
               reserve release approval.
             </CardDescription>
           </CardHeader>

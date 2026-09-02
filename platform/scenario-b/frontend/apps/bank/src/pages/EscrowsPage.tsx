@@ -26,7 +26,8 @@ import {
   EscrowStatus,
   displayToBase,
   fiatCurrencyLabel,
-  formatCeBM,
+  formatCeBMDisplay,
+  formatFiatDisplayUnits,
   formatFiatUnits,
   tokenUnitPrefix,
 } from "../types";
@@ -210,8 +211,8 @@ export function EscrowsPage() {
           <CardHeader>
             <CardTitle>Confirm Tokenisation Request</CardTitle>
             <CardDescription>
-              {formatFiatUnits(amount, fDecimals, fCeBMSymbol)} held as {fCeBMName} will be submitted to the central bank for conversion to{" "}
-              {formatCeBM(amount, tDecimals, tCeBMSymbol)}.
+              {formatFiatDisplayUnits(amount, fDecimals, fCeBMSymbol)} held as {fCeBMName} will be submitted to the central bank for conversion to{" "}
+              {formatCeBMDisplay(amount, tDecimals, tCeBMSymbol)}.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
