@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Toolkit CI
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ["scenario-a/toolkit/**", "scenario-b/toolkit/**", ".github/workflows/toolkit.yml"]
+  pull_request:
+    branches: [main, develop]
+    paths: ["scenario-a/toolkit/**", "scenario-b/toolkit/**", ".github/workflows/toolkit.yml"]
+  workflow_dispatch:
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  # Until this job existed, NO workflow ran the toolkit tests — the word "toolkit"
+  # appeared nowhere under .github/workflows. Roughly 490 tests in Scenario A and 428
+  # in Scenario B only ever ran on a developer's machine, on the one tool that stands
+  # up every environment since deploy/local was removed.
+  #
+  # Several guards live exactly there and were protecting nothing in CI: the one
+  # keeping the Keycloak admin secret out of argv (#203), the log-rotation and
+  # hardcoded-debug guards (#204), the guard forbidding a duplicated image literal
+  # (#202) — which exists because the Besu pin once missed a whole tree silently —
+  # and the Keycloak prerequisite test (#197).
+  #
+  # This is the same shape as the regression that reached develop for want of a gate:
+  # a missing vitest devDependency broke the bank portal image and blocked a bank join.
+  test:
+    name: ${{ matrix.scenario }} — vet, build and test
+    runs-on: ubuntu-latest
+    strategy:
+      # Both scenarios always report. With fail-fast, one scenario's failure cancels
+      # the other and hides whether it was also broken — which matters most on the
+      # changes that touch both trees.
+      fail-fast: false
+      matrix:
+        scenario: [scenario-a, scenario-b]
+    defaults:
+      run:
+        working-directory: ${{ matrix.scenario }}/toolkit
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.scenario }}/toolkit/go.mod
+          cache-dependency-path: ${{ matrix.scenario }}/toolkit/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      # Formatting is a gate rather than advice because the drift is silent: the two
+      # files this repo carried unformatted were found by hand, not by any check.
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would change these files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      # The integration and E2E tests in these packages skip with a warning when
+      # Docker, Foundry or Besu are absent, so this runs the hermetic suite. Wiring
+      # the heavyweight ones into CI is a separate decision, not a silent omission.
+      - name: Test
+        run: go test -count=1 ./...
