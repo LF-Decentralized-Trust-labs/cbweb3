@@ -19,7 +19,7 @@ const defaultBesuImage = "hyperledger/besu:25.8.0"
 
 // defaultPaladinImage is the pinned Paladin image used for the spoke's Paladin
 // nodes when the deps do not override it. Matches the reference network.
-const defaultPaladinImage = "docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1"
+const defaultPaladinImage = "docker.io/lfdecentralizedtrust/paladin:v1.0.0"
 
 // startBesuFoundStep brings up the central-bank Besu node (the spoke bootnode)
 // for mode:found using the TK-4 central-bank compose template. It is the first

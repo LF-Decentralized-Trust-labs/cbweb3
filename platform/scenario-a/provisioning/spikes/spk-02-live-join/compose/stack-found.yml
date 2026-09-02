@@ -78,7 +78,7 @@ services:
     restart: "no"
 
   paladin-cb:
-    image: docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1
+    image: docker.io/lfdecentralizedtrust/paladin:v1.0.0
     container_name: spk02-paladin-cb
     networks:
       - spk02_found_net
@@ -105,7 +105,7 @@ services:
         condition: service_started
 
   paladin-bank-a:
-    image: docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1
+    image: docker.io/lfdecentralizedtrust/paladin:v1.0.0
     container_name: spk02-paladin-bank-a
     networks:
       - spk02_found_net

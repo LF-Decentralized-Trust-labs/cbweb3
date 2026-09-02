@@ -37,7 +37,7 @@ services:
     restart: always
 
   paladin:
-    image: "${PALADIN_IMAGE:-lfdt-labs/paladin:latest}"
+    image: "${PALADIN_IMAGE:-docker.io/lfdecentralizedtrust/paladin:v1.0.0}"
     container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-paladin"
     depends_on:
       - besu
