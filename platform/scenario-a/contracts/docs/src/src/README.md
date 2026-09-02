@@ -3,7 +3,6 @@
 # Contents
 - [interfaces](/src/interfaces)
 - [libraries](/src/libraries)
-- [AutomatedMarketMaker](AutomatedMarketMaker.sol/contract.AutomatedMarketMaker.md)
 - [FXAgreement](FXAgreement.sol/contract.FXAgreement.md)
 - [FiatCentralBankMoney](FiatCentralBankMoney.sol/contract.FiatCentralBankMoney.md)
 - [HashTimeLockedContract](HashTimeLockedContract.sol/contract.HashTimeLockedContract.md)

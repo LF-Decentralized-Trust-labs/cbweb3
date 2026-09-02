@@ -246,7 +246,6 @@ Contracts deployed per spoke:
 | `HashTimeLockedContract` | Atomic cross-spoke escrow |
 | `IdentityRegistry` | On-chain participant registry |
 | `SpokeBridge` | Cross-spoke bridge |
-| `AutomatedMarketMaker` | AMM pool (used in Scenario B) |
 | `FXAgreement` | FX agreement lifecycle |
 
 #### Phase 5 — Paladin (privacy layer)
@@ -536,17 +535,16 @@ cat contracts/.env
 
 Make sure `DEPLOYER_PRIVATE_KEY`, `ADMIN_ADDRESS`, and `CENTRAL_BANK_ADDRESS` are set in `contracts/.env`.
 
-### Resume is refused, or a participant cannot be registered (institutionId)
+### A participant cannot be registered, or resolves to the wrong institution (institutionId)
 
-The IdentityRegistry carries an `institutionId` per participant, and the AMM resume quorum
-counts **distinct institutions** rather than distinct addresses. Two consequences show up at
-deploy time.
+The IdentityRegistry carries an `institutionId` per participant, and institution attribution
+is read back through `getInstitutionId` by the auth and compliance services. Two consequences
+show up at deploy time.
 
 **The registry ABI changed.** `registerParticipant` takes a fifth argument (`bytes32
 institutionId`) and `getInstitutionId(address)` is new. A registry deployed before this
-change does not answer `getInstitutionId`, and an AMM pointed at it refuses every resume
-signature with `AMM__InvalidInstitutionId`. There is no migration path on a deployed
-instance — the registry holds no such field. It has to be redeployed, and the toolkit is the
+change does not answer `getInstitutionId` at all, so every caller that reads institution
+attribution gets nothing back. There is no migration path on a deployed instance — the registry holds no such field. It has to be redeployed, and the toolkit is the
 only path that does so (see the note at the top of this runbook: the legacy `deploy/local`
 targets were retired on 2026-08-21).
 
@@ -570,17 +568,14 @@ exists. It belongs to the retired six-entity local topology: its sync step write
 `backend/config/.env.infra.*`, files nothing provisions any more, and after the legacy
 removal moved the script its own `ROOT_DIR` resolves above the repository root.
 
-The AMM and the registry must move together. A stack with a new AMM and an old registry, or
-the reverse, fails at the first resume rather than at deploy.
-
 **One institution must resolve to one id.** The id is `keccak256(bankCode)`, computed
 identically in three places — the Go services
 (`backend/shared/blockchain/registry.InstitutionIDForParticipant`), the seed script
 (`contracts/script/RegisterParticipants.s.sol`, env `CENTRAL_BANK_CODE`) and the
 provisioning toolkit (which renders `GOVERNANCE_BANK_CODE` into the CB's env and hashes the
 same value). If a central bank registers a second governance wallet under a different code,
-the contract sees two institutions and that bank can resume on its own — the failure this
-control exists to prevent, and it fails silently. Check the codes agree:
+the registry records two institutions for one bank and every consumer of that attribution
+reads them as unrelated — and it fails silently. Check the codes agree:
 
 ```bash
 # The toolkit renders the CB's env into the data dir, not into backend/config.

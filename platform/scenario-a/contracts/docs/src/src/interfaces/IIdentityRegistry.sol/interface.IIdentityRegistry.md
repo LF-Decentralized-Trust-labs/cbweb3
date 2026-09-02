@@ -6,7 +6,7 @@ IIdentityRegistry
 
 Interface for the central Identity and Compliance Registry.
 
-Standardizes how external modules (AMM, HTLC) interact with identity data.
+Standardizes how external modules (HTLC) interact with identity data.
 
 
 ## Functions

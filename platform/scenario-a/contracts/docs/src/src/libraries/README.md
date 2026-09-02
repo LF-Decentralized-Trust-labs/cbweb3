@@ -1,7 +1,6 @@
 
 
 # Contents
-- [AutomatedMarketMakerLibrary](AutomatedMarketMakerLibrary.sol/library.AutomatedMarketMakerLibrary.md)
 - [FXAgreementLibrary](FXAgreementLibrary.sol/library.FXAgreementLibrary.md)
 - [FiatCentralBankMoneyLibrary](FiatCentralBankMoneyLibrary.sol/library.FiatCentralBankMoneyLibrary.md)
 - [HashTimeLockedContractLibrary](HashTimeLockedContractLibrary.sol/library.HashTimeLockedContractLibrary.md)

@@ -117,7 +117,7 @@ Two deployment scripts are provided — one for the hub (full platform) and one 
 # Load environment variables
 source .env
 
-# Deploy hub contracts (IdentityRegistry + tCeBM_BRL + tCeBM_EUR + HTLC + AMM)
+# Deploy hub contracts (IdentityRegistry + tCeBM_BRL + tCeBM_EUR + HTLC)
 make contracts.deploy-hub
 
 # Deploy spoke-a contracts (IdentityRegistry + tCeBM_BRL)

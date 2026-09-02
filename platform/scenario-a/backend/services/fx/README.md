@@ -26,4 +26,3 @@ The FX pricing logic for Scenario A is currently handled inline by the [payment-
 
 - [payment-orchestrator](../payment-orchestrator/README.md) — currently owns FX logic
 - [contracts › ManualOracle](../../../contracts/README.md) — on-chain price oracle
-- [contracts › AutomatedMarketMaker](../../../contracts/README.md) — AMM pool for Scenario B
