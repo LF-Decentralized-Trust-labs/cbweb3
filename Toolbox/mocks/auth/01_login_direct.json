@@ -1,0 +1,31 @@
+{
+  "id": "mock-auth-hp-01",
+  "title": "Direct login — a Central Bank operator obtains a session cookie",
+  "description": "POST /api/v1/auth/login for a role that logs in directly (ROLE_GOVERNANCE, ROLE_SUPERVISOR, ROLE_NOC, ROLE_GOVERNANCE_OFFICER). The body carries the tokens and Set-Cookie installs the HttpOnly access_token and refresh_token cookies. The session is ready to use.",
+  "notes": "Gateway: BCCR (Banco Central de Costa Rica) Central Bank gateway, spoke-crc. The server chooses the flow from the participant record — a client cannot select it; a commercial bank sending this same request gets the nonce body of mock-auth-hp-02 instead. Both tokens here are literal placeholders, not JWTs; no credential in this kit is real.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/auth/login",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "clientId": "bccr-governance",
+      "clientSecret": "SYNTHETIC-CLIENT-SECRET-DO-NOT-USE"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "23bc9d547248f303c94aae5934b1c6ad",
+      "Set-Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture; Path=/; HttpOnly; SameSite=Strict; Max-Age=300"
+    },
+    "body": {
+      "accessToken": "SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture",
+      "refreshToken": "SYNTHETIC.NOT-A-REAL-REFRESH-TOKEN.cbweb3-toolbox-fixture",
+      "expiresIn": 3600,
+      "tokenType": "Bearer"
+    }
+  }
+}

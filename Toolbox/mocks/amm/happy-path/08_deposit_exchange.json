@@ -1,0 +1,27 @@
+{
+  "id": "mock-amm-hp-08",
+  "title": "Reserve step 3 — BCCR mints fCeBM against the deposit",
+  "description": "The fiat exchange mints fCeBM, the ERC-20 fiat token on Besu, to the payer bank's address.",
+  "notes": "Gateway: BCCR Central Bank gateway, spoke-crc — the approve/reject/exchange half of the reserve lifecycle is registered only on a Central Bank gateway; a commercial-bank gateway answers 404. Note the path: Scenario B serves this at deposits/exchange while Scenario A serves the equivalent at deposits/fiat-exchange. No gateway serves both, which is why the Toolbox publishes the reserve lifecycle once per scenario instead of sharing it. The platform's own summary for this operation says 'mint tCeBM', which is wrong: tCeBM is minted later, by approveEscrow.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/payments/deposits/exchange",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "deposit_id": "b7a87cc9-4c09-4eb5-9263-f1a1448c1ee2"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "875a0e01b0278cafd0da47a5ab973d25"
+    },
+    "body": {
+      "mint_tx_hash": "0x100622f2d388de140946ec546481fdc6f7714f94c5d2286414d6ef38c79b8f40"
+    }
+  }
+}

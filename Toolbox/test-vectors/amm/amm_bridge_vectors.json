@@ -1,0 +1,425 @@
+{
+  "contract": "CBWeb3 Scenario B — Hub-and-spoke settlement (bridge, liquidity and reconciliation)",
+  "contractVersion": "2.3.0",
+  "generatedAt": "2026-08-20",
+  "vectors": [
+    {
+      "id": "bridge-hp-01",
+      "title": "Lock spoke tCeBM and mint the Hub W-token",
+      "description": "Moves value from a spoke to the Hub. Used directly by Central Banks to seed liquidity, and indirectly by the relay as step 1 of every cross-currency swap — a client never calls it as part of a payment.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "cookie OR bearer, carrying commercial_bank or central_bank",
+        "reservePrelude": "completed; the caller holds at least amount of spoke tCeBM"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/bridge/lock-mint",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "amount": "1000000000000000000000"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "position_id": "{{NON_EMPTY_STRING}}",
+          "owner_bank_id": "{{NON_EMPTY_STRING}}",
+          "mirrored_amount": "1000000000000000000000",
+          "bridge_state": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "The request needs ONLY amount. owner_bank_id comes from the session bankId claim and spoke_network, native_asset and mirrored_asset all come from gateway configuration — all four body fields are deprecated and sending them changes nothing. The lock and mint are ENQUEUED, not completed: poll bridge-hp-02 until bridge_state reads ACTIVE."
+    },
+    {
+      "id": "bridge-hp-02",
+      "title": "Positions come back wrapped, and carry a state vocabulary the OpenAPI omits",
+      "description": "Poll after lock-mint until the position is ACTIVE, and after a cross-currency swap to confirm the bridge-out position reached BURNED or RELEASED.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "cookie or bearer",
+        "atLeastOnePosition": true
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/bridge/positions",
+        "headers": {
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "positions": "{{ARRAY}}"
+        }
+      },
+      "notes": "TWO divergences on one operation. (1) The platform document declares the 200 body as a bare JSON array; the delivered handler returns {\"positions\": [...]}. (2) The document's state example suggests PENDING, ACTIVE, CLOSED — PENDING and CLOSED DO NOT EXIST. The real vocabulary is LOCKING, ACTIVE, BURNING, BURNED, RELEASED, RECONCILIATION_REQUIRED, and it lives only in internal/domain, so the contract publishes it in prose rather than as an enum the platform has not committed to. Never write a client state machine against the document's example."
+    },
+    {
+      "id": "bridge-hp-03",
+      "title": "Filter positions by bridge state",
+      "description": "The state query parameter takes the real vocabulary from bridge-hp-02, not the document's example values.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "cookie or bearer",
+        "atLeastOneActivePosition": true
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/bridge/positions",
+        "query": {
+          "state": "ACTIVE"
+        },
+        "headers": {
+          "Authorization": "Bearer {{VALID_JWT}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "positions": "{{ARRAY}}"
+        }
+      },
+      "notes": "This vector deliberately authenticates with a BEARER token rather than a cookie, to exercise the RequireAnyAuth half of the surface. Filtering by PENDING or CLOSED returns an empty list rather than an error, which is exactly how a client following the document's example silently sees nothing."
+    },
+    {
+      "id": "bridge-hp-04",
+      "title": "Burn the Hub token and unlock the spoke tCeBM",
+      "description": "The inverse of lock-mint for an existing position. Also enqueued rather than immediate.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "cookie or bearer, commercial_bank or central_bank",
+        "positionState": "ACTIVE",
+        "positionOwnedByCaller": true
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/bridge/burn-unlock",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "position_id": "{{POSITION_ID}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "position_id": "{{POSITION_ID}}",
+          "bridge_state": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Note the status asymmetry: lock-mint returns 201 and burn-unlock returns 200. Poll bridge-hp-02 until the state reaches BURNED or RELEASED before concluding the unwind finished."
+    },
+    {
+      "id": "bridge-hp-05",
+      "title": "Reconciliation — unexplained must be zero at rest",
+      "description": "Treasury-facing. Reports the Central Bank's omnibus Hub balance, what in-flight payments legitimately still hold, and the part it cannot attribute.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "cookie or bearer for a Central Bank",
+        "gateway": "configured with HUB_BESU_RPC_URL, W_TOKEN_ADDRESS and this Central Bank's hub address",
+        "noInFlightSwaps": true
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/amm/hub-reconciliation",
+        "headers": {
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "on_chain_balance": "{{BIGINT_STRING}}",
+          "expected_in_flight": "{{BIGINT_STRING}}",
+          "unexplained": "0",
+          "balanced": true
+        }
+      },
+      "notes": "unexplained is the number that matters and balanced is true exactly when it is zero. stranded_total is CONTEXT, not a deduction — it is already-flagged value and may be counted in unexplained too, so subtracting it double-counts. unattributed covers settled positions whose trade cost was never recorded and is deliberately excluded from expected_in_flight. This is assertion (5) of swap-hp-04."
+    },
+    {
+      "id": "bridge-hp-06",
+      "title": "Mint and approve this Central Bank's W-token for the pool",
+      "description": "Corridor provisioning. Mints the caller Central Bank's own Hub W-token and approves the pool's AMM to spend it.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "cookie or bearer for a Central Bank",
+        "pairActive": true
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/amm/token/mint-and-approve",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "amount": "1000000000000000000000",
+          "pool_pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "side": "A"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "status": "ok",
+          "amount": "1000000000000000000000"
+        }
+      },
+      "notes": "200, not 201. Supplying an optional recipient changes the semantics entirely: the tokens are minted TO that address instead of being minted and approved for the pool, and recipient is then echoed in the response. A Central Bank attempting to mint another Central Bank's token is refused 403 with CROSS_CB_MINT_PROHIBITED."
+    },
+    {
+      "id": "bridge-hp-07",
+      "title": "Commit liquidity — only pool_pair and amount are required",
+      "description": "The cooperative commit-reveal path the platform's own end-to-end test uses to make a pool ACTIVE. Each Central Bank commits its own side; a Cacti watcher observes CommitMatched and the relay executes both together.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "cookie or bearer carrying central_bank or mlp",
+        "pairActive": true,
+        "tokensMintedAndApproved": "bridge-hp-06 completed"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/amm/liquidity/commit",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "pool_pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "amount": "1000000000000000000000"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "commit_id": "{{NON_EMPTY_STRING}}",
+          "status": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "The contract corrects an upstream over-specification here: provider_id, side and w_token_address are declared but DEPRECATED and must not be sent — the provider comes from the session, the side is an on-chain property of (pair, Central Bank) and the token address comes from gateway configuration. Only pool_pair and amount are genuinely required."
+    },
+    {
+      "id": "bridge-hp-08",
+      "title": "Poll the commit until EXECUTED",
+      "description": "EXECUTED means the Cacti watcher matched both Central Banks' commits and the relay funded the pool. Only then does the pool become ACTIVE.",
+      "category": "happy-path",
+      "preconditions": {
+        "commitRegistered": "bridge-hp-07",
+        "counterpartCommitAlsoRegistered": true
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/amm/liquidity/commits/{commit_id}",
+        "pathParams": {
+          "commit_id": "{{COMMIT_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "commit_id": "{{COMMIT_ID}}",
+          "pool_pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "status": "EXECUTED"
+        }
+      },
+      "notes": "A commit that stays PENDING means the counterpart Central Bank has not committed — check GET /api/v2/amm/pool/{pair}/status for PENDING_COUNTERPART. The list form of this endpoint (GET /api/v2/amm/liquidity/commits) returns a BARE array, unlike currencies, pairs and bridge positions, which are all wrapped. There is no consistency to rely on; check per endpoint."
+    },
+    {
+      "id": "bridge-err-01",
+      "title": "Lock-mint without amount is 400",
+      "description": "amount is the single required field and is validated at the gateway.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid cookie or bearer"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/bridge/lock-mint",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {}
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "The 400 on this route carries the bare {error} shape, not the richer {error, error_code} the swap family uses. Two error models coexist on the same /api/v2 prefix."
+    },
+    {
+      "id": "bridge-err-02",
+      "title": "Lock-mint beyond the daily transfer limit is 422",
+      "description": "The transfer limit applies to the bridge as well as to swaps.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid cookie or bearer",
+        "transferLimit": "exists for this participant and is already exhausted"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/bridge/lock-mint",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "amount": "999999000000000000000000000"
+        }
+      },
+      "expectedOutput": {
+        "status": 422,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "error_code": "TRANSFER_LIMIT_EXCEEDED"
+        }
+      },
+      "notes": "The same 422 also covers a failure of the lock-and-enqueue step itself, so a 422 here does not uniquely identify a limit breach. Undeclared upstream; observed in the delivered handler."
+    },
+    {
+      "id": "bridge-err-03",
+      "title": "Burn-unlock on an unknown position is 422, because there is no 404",
+      "description": "The bridge family declares no 404 anywhere. An identifier that does not resolve fails the burn-and-enqueue step and surfaces as an unprocessable entity.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid cookie or bearer",
+        "positionExists": false
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/bridge/burn-unlock",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "position_id": "00000000-0000-0000-0000-000000000000"
+        }
+      },
+      "expectedOutput": {
+        "status": 422,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Note this 422 returns the BARE {error} body, while the 422 on lock-mint returns {error, error_code}. Two sibling operations, two error shapes. Assert the status code."
+    },
+    {
+      "id": "bridge-err-04",
+      "title": "Positions with no credential at all is 401",
+      "description": "This route accepts cookie OR bearer, but it does require one of them.",
+      "category": "error",
+      "preconditions": {
+        "session": "no cookie and no Authorization header"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/bridge/positions",
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 401,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Contrast the discovery family in amm_registry_vectors.json, where hub-config, currencies, pairs, pool status and circuit-breaker status all answer 200 with no credential at all."
+    },
+    {
+      "id": "bridge-err-05",
+      "title": "Committing liquidity without amount is 400",
+      "description": "pool_pair and amount are both required despite the contract listing three further deprecated fields.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid liquidity-provider session"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/amm/liquidity/commit",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "pool_pair": "{{PAIR_ID_FROM_LISTPAIRS}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "This operation declares only 200, 400, 401 and 403 — no 404 and no 422. An unknown pool_pair therefore does not have a distinct documented status; that gap is recorded in the file README."
+    },
+    {
+      "id": "bridge-err-06",
+      "title": "Reconciliation on an unconfigured gateway is 503",
+      "description": "Deployment-shape signal, not a fault. The endpoint needs HUB_BESU_RPC_URL, W_TOKEN_ADDRESS and this Central Bank's hub address.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid Central Bank session",
+        "gateway": "hub RPC or W-token address unset"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/amm/hub-reconciliation",
+        "headers": {
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 503,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "A conformance runner should SKIP on 503 here rather than fail. Distinguish it from the 500 on the same route, which means the reconciliation itself failed — and whose cause is logged, not returned."
+    },
+    {
+      "id": "bridge-edge-01",
+      "title": "Deprecated identity fields in the body are accepted and ignored",
+      "description": "Sending owner_bank_id, spoke_network, native_asset and mirrored_asset still succeeds, but none of the values is honoured. Caller identity is never taken from a request body anywhere on this platform.",
+      "category": "edge-case",
+      "preconditions": {
+        "session": "valid cookie for central_bank_a",
+        "reservePrelude": "completed"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/bridge/lock-mint",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "amount": "1000000000000000000000",
+          "owner_bank_id": "central_bank_z",
+          "spoke_network": "spoke-zzz",
+          "native_asset": "tCeBM_ZZZ",
+          "mirrored_asset": "W-tCeBM_ZZZ"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "position_id": "{{NON_EMPTY_STRING}}",
+          "owner_bank_id": "central_bank_a"
+        }
+      },
+      "notes": "Assert the outcome, not the status: owner_bank_id in the RESPONSE must be the caller's own bank, never central_bank_z. spoke_network is the one field with a conditional path — gateway configuration wins, and the body value is consulted only when that configuration is unset, which is a deployment a client cannot detect."
+    }
+  ]
+}

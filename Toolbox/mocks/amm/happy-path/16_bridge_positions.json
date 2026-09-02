@@ -1,0 +1,44 @@
+{
+  "id": "mock-amm-hp-16",
+  "title": "Payment step 5 — the on-chain evidence: two bridge positions on the payer's side",
+  "description": "The bridge-in position that carried the full max_amount_in to the Hub, and the separate RESIDUE position that carried the unspent 5.43 CRC back and reached RELEASED.",
+  "notes": "Gateway: BCCR Central Bank gateway, spoke-crc. Accepts a bearer token as well as the cookie. owner_bank_id is the PAYER commercial bank, not the Central Bank that executed the leg — verified in the delivered relay handler, which passes the payer's bank id through as the position owner. Two things this fixture deliberately does NOT claim. First, the bridge-OUT position is created by the BENEFICIARY's Central Bank on spoke-clp and is not visible from here; asserting on it requires the Chilean gateway. Second, ACTIVE is the last state the delivered code is documented to drive the settlement bridge-in position to (the bridge-in handler blocks until ACTIVE); nothing in the published surface says what it becomes after the Hub token is traded away, so a client must not assert a terminal state on it. Divergences: the platform document declares a bare array where the gateway returns {\"positions\": [...]}, and its state query-parameter example names PENDING and CLOSED, neither of which exists. mirrored_asset is an address while native_asset is a symbol.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v2/bridge/positions",
+    "headers": {
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "b39b602fd9e109441f7ba16f840da834"
+    },
+    "body": {
+      "positions": [
+        {
+          "position_id": "e2b86dab-27ed-4d68-80b5-8fec5eab6b8e",
+          "owner_bank_id": "bank-sanjose",
+          "spoke_network": "spoke-crc",
+          "native_asset": "tCeBM_CRC",
+          "mirrored_asset": "0x1a3e796c050839af5f0af526c1a562889e603d38",
+          "mirrored_amount": "548181340558471952655",
+          "bridge_state": "ACTIVE",
+          "relayer_retries": 0
+        },
+        {
+          "position_id": "0f459259-947f-4351-bf08-a5dd23bc7705",
+          "owner_bank_id": "bank-sanjose",
+          "spoke_network": "spoke-crc",
+          "native_asset": "tCeBM_CRC",
+          "mirrored_asset": "0x1a3e796c050839af5f0af526c1a562889e603d38",
+          "mirrored_amount": "5427538025331405472",
+          "bridge_state": "RELEASED",
+          "relayer_retries": 0
+        }
+      ]
+    }
+  }
+}

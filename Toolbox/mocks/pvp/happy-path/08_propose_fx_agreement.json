@@ -1,0 +1,41 @@
+{
+  "id": "mock-pvp-hp-08",
+  "title": "Step 8 — propose the FX agreement: 5,000,000 CRC for 37,000 PEN at 0.0074",
+  "description": "Banco de San Jose proposes the terms of the swap to Banco de Lima. The agreement is created PROPOSED. No value moves; this only fixes the terms both HTLC legs must match.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway. The server validates that |counter_amount/origin_amount - rate| <= FX_RATE_TOLERANCE_PCT (default 0.1%): 37000/5000000 = 0.0074 exactly. It also requires the two currencies to differ and expiry_date to be in the future. trade_id is deliberately omitted so the server generates one — a UUID, despite the trade-a1b2c3d4 form used in the platform's examples. on_behalf is also omitted: the handler hard-codes it to false and ignores any value sent, and originator is rebound to the authenticated caller. Every party identity is checked against the Paladin roster first; an unknown one yields 400 with an invalid_identities array.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/payments/fx/agreements",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "counterparty_b": "funded_operator@spoke-pen-bank-lima",
+      "settlement_agent": "funded_operator@spoke-crc-bank-heredia",
+      "custodian": "funded_operator@spoke-pen-bank-lima",
+      "beneficiary": "funded_operator@spoke-pen-bank-callao",
+      "origin_amount": "5000000",
+      "counter_amount": "37000",
+      "origin_currency": "CRC",
+      "counter_currency": "PEN",
+      "rate": "0.0074",
+      "expiry_date": 1781820000,
+      "source_spoke_id": "spoke-crc",
+      "dest_spoke_id": "spoke-pen",
+      "source_receiver": "funded_operator@spoke-crc-bank-heredia",
+      "dest_receiver": "funded_operator@spoke-pen-bank-callao"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "078de4c1a8cf0e1ab3a7d7492f510af8"
+    },
+    "body": {
+      "trade_id": "aaeca49d-89f2-4bf1-9410-0779f50b9754",
+      "tx_hash": "0x5d45f3b3fa34d7d2e091e8105ee94bc0ed70b283e8fc57170d73a4c526615488"
+    }
+  }
+}

@@ -2,7 +2,10 @@
 
 A simplified view of the CBWeb3 system architecture and how the Toolbox artifacts map to each component.
 
-> This overview is based on Deliverable 4 (Architecture) and Deliverable 7v2 (Design Document). It focuses on the concepts relevant to Toolbox users and contributors.
+> This overview describes the system as **delivered**: CBWeb3 API Gateway **v2.3.0**, in the
+> two scenarios the platform actually runs. It focuses on the concepts a Toolbox user or
+> contributor needs; the normative detail lives in the three interface contracts under
+> `Toolbox/contracts/`.
 
 ---
 
@@ -15,8 +18,9 @@ CBWeb3 uses a **dual-layer architecture**:
 │                    TRANSNATIONAL HUB                            │
 │                                                                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────┐  │
-│  │  CCIP / Cacti │  │  Governance  │  │ Relayer Registry      │  │
-│  │  (bridging)   │  │  Contracts   │  │ (cross-chain proofs)  │  │
+│  │ Hub AMM +    │  │  Governance  │  │ Bridge (lock-mint /   │  │
+│  │ pair &       │  │  Contracts   │  │ burn-unlock) + relay  │  │
+│  │ currency reg.│  │ (breaker)    │  │ (cross-chain proofs)  │  │
 │  └──────────────┘  └──────────────┘  └───────────────────────┘  │
 │                                                                 │
 │         Hyperledger Besu (QBFT consensus, gasless)              │
@@ -32,7 +36,7 @@ CBWeb3 uses a **dual-layer architecture**:
 │                    │           │                        │
 │ ┌────────────────┐ │           │ ┌────────────────────┐ │
 │ │ Central Bank A │ │           │ │ Central Bank B     │ │
-│ │ issues tCeBM-A │ │           │ │ issues tCeBM-B     │ │
+│ │ issues tCeBM   │ │           │ │ issues tCeBM       │ │
 │ └────────────────┘ │           │ └────────────────────┘ │
 │                    │           │                        │
 │ ┌────────────────┐ │           │ ┌────────────────────┐ │
@@ -40,8 +44,9 @@ CBWeb3 uses a **dual-layer architecture**:
 │ │ Banks          │ │           │ │ Banks              │ │
 │ └────────────────┘ │           │ └────────────────────┘ │
 │                    │           │                        │
-│ HTLC + Zeto/       │           │ HTLC + Zeto/           │
-│ Paladin (privacy)  │           │ Paladin (privacy)      │
+│ Zeto / Paladin     │           │ Zeto / Paladin         │
+│ (privacy)          │           │ (privacy)              │
+│ HTLC — scenario A  │           │ HTLC — scenario A      │
 │                    │           │                        │
 │ Hyperledger Besu   │           │ Hyperledger Besu       │
 └────────────────────┘           └────────────────────────┘
@@ -58,8 +63,9 @@ Each participating country operates its own **private Hyperledger Besu** network
 ### Transnational network (Hub)
 
 A shared settlement layer for cross-border operations:
-- Hosts **cross-chain bridging** contracts (CCIP adapters, Cacti relay plugins)
-- Hosts **governance contracts** (circuit breaker, participant registry)
+- Hosts the **Hub AMM**, the pair registry and the currency registry (Scenario B)
+- Hosts the **bridge** that mints and burns Hub W-tokens against locked spoke reserves
+- Hosts **governance contracts** (circuit breaker, transfer limits, participant registry)
 - Operated by a neutral multilateral entity
 - All central banks participate on equal footing
 
@@ -74,26 +80,43 @@ A shared settlement layer for cross-border operations:
 
 ## Two settlement scenarios
 
-### Scenario A: Enhanced Correspondent Banking (HTLC)
+The platform ships **two complete stacks**. They are not variants of one API — they share the
+identity, token and reserve surfaces and diverge completely at the settlement layer.
 
-Bilateral PvP settlement using **Hash Time-Lock Contracts**. This is the scenario fully covered by the Toolbox today.
+### Scenario A: single-ledger, spoke-to-spoke (FX agreement + HTLC)
 
-**4-corner model:**
-- CommA (originator) locks tCeBM-A on Spoke A
-- Bank C (correspondent in Country B) locks tCeBM-B on Spoke B
-- Secret revelation triggers atomic settlement on both sides
-- If timeout expires, funds are automatically refunded
+Bilateral PvP settlement using a **bilateral FX agreement** plus a pair of dual-layer **Hash
+Time-Locked Contracts**.
 
-> The Toolbox simplifies this to a 2-party model (Central Bank A <-> Central Bank B) for clarity.
+- The originating bank proposes an FX agreement; the counterparty accepts it
+- The initiator locks tCeBM — **the gateway generates the secret internally** and returns the
+  derived `hash_lock`
+- The hash lock crosses to the other spoke **out of band; there is no API endpoint for it**
+- The responder locks with that hash, on a **shorter** timelock
+- The initiator settles, revealing the secret; the Cacti relay broadcasts it to the other
+  spoke, which settles the mirror leg with no call from anyone
+- If the secret is never revealed, each side refunds its own leg after its own timelock
 
-### Scenario B: Cross-Chain Interoperability (CCIP / Fabric-X)
+Covered by [`contracts/pvp/`](../../contracts/pvp/README.md) — 28 paths / 32 operations.
 
-Hub-mediated bridging for multi-network settlement:
-- CCIP adapters relay messages and token transfers between Spokes and the Hub
-- Fabric-X corridor kit enables settlement across heterogeneous DLTs (Besu ↔ Fabric)
-- Cryptographic proofs verify cross-chain events before releasing funds
+### Scenario B: hub-and-spoke, "International Hub" (bridge + AMM)
 
-> Not yet covered in Toolbox artifacts. See backlog issues #28 (CCIP Adapter) and #29 (Fabric-X Corridor Kit).
+Hub-mediated settlement through a shared automated market maker. **Scenario B has no HTLC
+endpoints and no FX agreement surface whatsoever.**
+
+- Both Central Banks provision the corridor: register currencies, propose and confirm the
+  pair, bridge reserves in, and commit liquidity to each side of the pool
+- A commercial bank quotes (15-second TTL) and issues **one** swap call
+- That call fans out into bridge-in (payer's CB) → Hub AMM swap (same CB) → bridge-out
+  (**beneficiary's** CB, because one CB burning another's tokens would breach sovereignty) →
+  residue return
+- The unspent slippage buffer comes back to the payer as a separate `RESIDUE` bridge position
+
+Covered by [`contracts/amm/`](../../contracts/amm/README.md) — 52 paths / 59 operations.
+
+Both scenarios bootstrap their session through the same authentication surface,
+[`contracts/auth/`](../../contracts/auth/README.md) — 8 paths / 8 operations, verified
+byte-identical between the two delivered gateway specifications.
 
 ---
 
@@ -102,54 +125,77 @@ Hub-mediated bridging for multi-network settlement:
 | Layer | Technology | Language |
 |-------|-----------|----------|
 | **Backend** | Go microservices (Auth Service, Payment Orchestrator, Compliance Orchestrator, Liquidity Monitor) | Go 1.25+ |
-| **Smart contracts** | HTLC.sol, Bridge.sol | Solidity |
+| **Smart contracts** | HTLC + FX coordination (Scenario A); Hub AMM, pair/currency registries, bridge, circuit breaker (Scenario B) | Solidity |
 | **Blockchain** | Hyperledger Besu | EVM-compatible |
 | **Consensus** | QBFT (Byzantine Fault Tolerant) | — |
 | **Privacy** | Hyperledger Paladin + Zeto tokens (ZK-SNARKs) | — |
 | **Interoperability** | Hyperledger Cacti + Business Logic Plugins | TypeScript |
 | **Frontend** | Bank Portal, Treasury Portal, Supervisor Portal, NOC Portal, Governance Portal | React 18+ / TypeScript |
-| **Auth** | OAuth 2.0 / JWT (RSA256) | — |
-| **API** | REST / OpenAPI 3.0.3 / JSON | — |
+| **Auth** | Keycloak-issued JWT delivered as an `access_token` **HttpOnly cookie**; commercial banks bind a session with an X.509 + P-256 nonce signature | — |
+| **API** | REST / OpenAPI 3.0.3 / JSON — `/api/v1` (core) and `/api/v2` (Hub AMM) served side by side; `/api/v2` is a subsystem prefix, **not** a newer generation | — |
 
 ---
 
 ## How the Toolbox maps to this architecture
 
-The Toolbox does NOT contain the implementation. It provides **integration artifacts** that describe the interfaces between components:
+The Toolbox does **not** contain the implementation. It provides **integration artifacts**
+that describe the delivered interfaces, so a third party can build against them.
 
 ```
-┌────────────────────────────┐     ┌──────────────────────────┐
-│ REAL SYSTEM                │     │ TOOLBOX                  │
-│                            │     │                          │
-│ Payment Orchestrator (Go)  │ ──> │ contracts/pvp/           │
-│   exposes REST API         │     │   openapi_pvp_v0.1.0.yaml│
-│                            │     │                          │
-│ API responses              │ ──> │ mocks/pvp/               │
-│   (what you get back)      │     │   happy-path/*.json      │
-│                            │     │                          │
-│ Business rules             │ ──> │ test-vectors/pvp/        │
-│   (what MUST happen)       │     │   pvp_htlc_vectors.json  │
-│                            │     │                          │
-│ Quality gates              │ ──> │ conformance/             │
-│   (does it work?)          │     │   tests/pvp/test_*.py    │
-│                            │     │                          │
-│ Getting started            │ ──> │ sandbox/                 │
-│   (how do I begin?)        │     │   tutorials/, devnet-guide│
-└────────────────────────────┘     └──────────────────────────┘
+┌─────────────────────────────┐     ┌───────────────────────────────┐
+│ DELIVERED PLATFORM          │     │ TOOLBOX                       │
+│                             │     │                               │
+│ API Gateway v2.3.0 (Go)     │ ──> │ contracts/auth/               │
+│   scenario-a + scenario-b   │     │   openapi_auth_v2.3.0.yaml    │
+│   REST surface              │     │ contracts/pvp/                │
+│                             │     │   openapi_pvp_v2.3.0.yaml     │
+│                             │     │ contracts/amm/                │
+│                             │     │   openapi_amm_v2.3.0.yaml     │
+│                             │     │                               │
+│ API responses               │ ──> │ mocks/{auth,pvp,amm}/         │
+│   (what you get back)       │     │   *.json                      │
+│                             │     │                               │
+│ Business rules              │ ──> │ test-vectors/{auth,pvp,amm}/  │
+│   (what MUST happen)        │     │   *_vectors.json              │
+│                             │     │                               │
+│ Quality gates               │ ──> │ conformance/                  │
+│   (does it work?)           │     │   tests/{auth,pvp,amm}/       │
+│                             │     │                               │
+│ Getting started             │ ──> │ sandbox/                      │
+│   (how do I begin?)         │     │   tutorials/, devnet-guide/   │
+└─────────────────────────────┘     └───────────────────────────────┘
 ```
 
-| Toolbox artifact | Maps to | Real-world component |
+| Toolbox artifact | Maps to | Delivered component |
 |-----------------|---------|---------------------|
-| OpenAPI contract (`contracts/pvp/`) | REST API spec | Payment Orchestrator endpoints (`/fx/*`, `/htlc/*`) |
-| Reference mocks (`mocks/pvp/`) | Simulated responses | What the backend returns for each operation |
-| Test vectors (`test-vectors/pvp/`) | Business rules | HTLC state machine, FX agreement lifecycle |
-| Conformance tests (`conformance/`) | Validation suite | Executable checks against any implementation |
-| Sandbox (`sandbox/`) | Developer onboarding | How to start without real infrastructure |
+| `contracts/auth/` | REST API spec | Gateway authentication surface — `/healthz`, `/api/v1/auth/*` (shared by both scenarios) |
+| `contracts/pvp/` | REST API spec | Scenario A gateway — `/api/v1/token/*`, `/api/v1/payments/*`, `/api/v1/htlc/*` |
+| `contracts/amm/` | REST API spec | Scenario B gateway — `/api/v1/token/*`, `/api/v1/payments/*`, `/api/v2/{amm,bridge,hub,governance,oversight}/*` |
+| `mocks/` | Simulated responses | What each gateway returns for a given call |
+| `test-vectors/` | Business rules | HTLC and FX agreement lifecycles; reserve tokenisation; swap and residue reconciliation |
+| `conformance/` | Validation suite | Executable checks against any implementation, per gateway profile |
+| `sandbox/` | Developer onboarding | How to start without real infrastructure |
+
+### What the Toolbox deliberately does not describe
+
+- **`/internal/*` on either scenario.** Those routes are authenticated by a relay credential,
+  are only ever called by the Cacti relay between Central Bank gateways, and are never
+  client-callable. Publishing them with a placeholder credential in a public kit would invite
+  misuse.
+- **The cross-spoke choreography itself.** Moving a hash lock from initiator to responder, and
+  broadcasting a revealed secret between spokes, both happen out of band. Neither has an HTTP
+  endpoint in the delivered gateway, and the Toolbox does not invent one.
+- **The compliance, governance, supervisor, onboarding and PKI-administration surface of
+  Scenario A** — roughly 42 of that gateway's 69 `/api/v1` paths. Deferred, not forgotten:
+  they serve supervisors and regulators rather than the settlement integrator this kit
+  targets.
 
 ---
 
 ## Further reading
 
-- [PvP Settlement Flow Walkthrough](flow-walkthrough.md) — Step-by-step explanation of the HTLC settlement
-- [PvP Interface Contract](../../contracts/pvp/README.md) — Full endpoint documentation
-- [Conformance Requirements](../../conformance/spec/conformance_requirements.md) — What "pass" means
+- [Settlement Flow Walkthrough](flow-walkthrough.md) — both scenarios, call by call
+- [PvP Interface Contract (Scenario A)](../../contracts/pvp/README.md)
+- [Hub-and-Spoke Interface Contract (Scenario B)](../../contracts/amm/README.md)
+- [Authentication Contract (shared)](../../contracts/auth/README.md)
+- [Conformance Requirements](../../conformance/spec/conformance_requirements.md) — what "pass" means

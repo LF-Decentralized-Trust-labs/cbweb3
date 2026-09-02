@@ -1,0 +1,23 @@
+{
+  "id": "mock-amm-hp-11",
+  "title": "Reserve step 6 — the settlement precondition: 600,000 CRC of tCeBM held",
+  "description": "The payer bank's tCeBM balance is non-zero and covers the max_amount_in it is about to commit. This is the pre-condition half of the settlement assertion.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway, spoke-crc. No identity parameter is accepted — a bank can only read its own balance. The post-condition is in mocks/amm/residue, where the payer's net debit is shown to be amount_in rather than max_amount_in.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/token/balance",
+    "headers": {
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "a2c05a2e004f96d0bcf34c3aba0764e8"
+    },
+    "body": {
+      "balance": "600000000000000000000000"
+    }
+  }
+}

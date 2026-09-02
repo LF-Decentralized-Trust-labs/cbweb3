@@ -1,0 +1,20 @@
+{
+  "id": "mock-amm-err-03",
+  "title": "401 — no access_token cookie on a protected balance read",
+  "description": "The discovery endpoints of mock-amm-hp-01 to -05 need no credentials; everything that touches a bank's own position does. The cookie-auth middleware rejects this before the handler runs.",
+  "notes": "Verified in the delivered Scenario B gateway middleware (internal/http/middleware/auth.go), byte-identical to Scenario A's. Bearer auth is accepted on twelve /api/v2 routes but NOT here and NOT on the swap endpoints. No CSRF header exists anywhere on the platform; SameSite=Strict is the only cross-site mitigation, and that absence is recorded as a finding rather than papered over.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/token/balance"
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "344d968b7898f7cc8198c087f3438c52"
+    },
+    "body": {
+      "error": "missing access_token cookie"
+    }
+  }
+}

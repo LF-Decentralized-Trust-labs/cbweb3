@@ -1,0 +1,27 @@
+{
+  "id": "mock-pvp-hp-01",
+  "title": "Step 1 — the payer bank registers a 10,000,000 CRC fiat deposit",
+  "description": "Banco de San Jose tells BCCR it is depositing 10,000,000 CRC of fiat funds. BCCR creates a PENDING deposit record and returns deposit_id. Nothing has moved on any chain yet.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway (spoke-crc), which proxies to BCCR. The create half of the reserve lifecycle is registered only on a commercial-bank gateway; a Central Bank gateway answers 404 on this path. Send only amount: the proxy overwrites requester_besu_address and requester_paladin_identity from the verified caller. Divergence from the contract, verified in the delivered gateway (internal/adapters/payment/payment_grpc.go RegisterDepositResult): the 201 body is {deposit_id} alone — there is no status field, although both the platform OpenAPI document and contracts/pvp declare one.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/payments/deposits",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "amount": "10000000"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "96936f8272bea59fe561f734deff8417"
+    },
+    "body": {
+      "deposit_id": "436ae9b6-2e15-49a0-9e83-272e0a2accbf"
+    }
+  }
+}

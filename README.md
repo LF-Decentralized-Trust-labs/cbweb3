@@ -69,8 +69,13 @@ This repository is the **coordination hub** for the CBWeb3 DPG Working Group. It
 cbweb3/
 ├── Toolbox/              Integration kit: contracts, mocks, test vectors,
 │                         conformance tests, sandbox tutorials
-├── docs/                 DPG assessment, research papers, public documentation
+├── docs/                 DPG assessment, research papers, technical blueprint,
+│                         published documentation site
 ├── CONTRIBUTING.md       Governance model, roles, decision-making process
+├── MAINTAINERS.md        Who maintains what
+├── SECURITY.md           How to report a vulnerability
+├── AGENTS.md             Conventions for AI coding tools
+├── CHANGELOG.md          Notable changes
 └── README.md             This file
 ```
 
@@ -82,11 +87,11 @@ The [**Toolbox**](Toolbox/README.md) is a curated set of integration-ready artif
 
 | Artifact | What it provides | Status |
 |----------|-----------------|--------|
-| [Interface contracts](Toolbox/contracts/pvp/) | OpenAPI 3.0.3 specs for PvP settlement (7 endpoints) | Available |
-| [Reference mocks](Toolbox/mocks/pvp/) | Canonical API responses for the full PvP flow (8 fixtures) | Available |
-| [Test vectors](Toolbox/test-vectors/pvp/) | Deterministic input/output fixtures (13 vectors) | Available |
-| [Conformance tests](Toolbox/conformance/) | Executable compliance checks (16 test methods) | Available |
-| [Sandbox & tutorials](Toolbox/sandbox/) | Quick-start guides, mock server setup, step-by-step tutorials | Available |
+| [Interface contracts](Toolbox/contracts/) | OpenAPI 3.0.3 specs mirroring API Gateway v2.3.0: `auth/` shared (8 paths), `pvp/` Scenario A (28 paths), `amm/` Scenario B (52 paths) — 88 paths / 99 operations | Available |
+| [Reference mocks](Toolbox/mocks/) | Canonical request/response fixtures for both settlement flows (59 fixtures across `auth/`, `pvp/`, `amm/`) | Available |
+| [Test vectors](Toolbox/test-vectors/) | Deterministic input/output fixtures (140 vectors in 9 files) | Available |
+| [Conformance tests](Toolbox/conformance/) | Executable compliance checks against a mock or a live gateway (91 test methods) | Available |
+| [Sandbox & tutorials](Toolbox/sandbox/) | Quick-start guides, mock server setup, and three step-by-step tutorials (Scenario A, conformance, Scenario B) | Available |
 
 ### Community Backlog
 
@@ -156,7 +161,7 @@ CBWeb3 is governed by a **DPG Working Group (DPG WG)** with open participation:
 
 **Decisions** follow a consensus-first model with a GitVote fallback (50%+1 quorum, simple majority).
 
-See the full [participation guidelines](CONTRIBUTING.md) for details on roles, voting, and the decision-making process.
+See the full [participation guidelines](CONTRIBUTING.md) for details on roles, voting, and the decision-making process, and [MAINTAINERS.md](MAINTAINERS.md) for who currently holds each role.
 
 ### Join us
 
@@ -180,9 +185,20 @@ See the full [participation guidelines](CONTRIBUTING.md) for details on roles, v
 
 ---
 
+## Security
+
+Found a vulnerability? **Do not open a public issue.** Report it through
+[GitHub private vulnerability reporting](https://github.com/LF-Decentralized-Trust-labs/cbweb3/security/advisories/new).
+See [SECURITY.md](SECURITY.md) for scope, response targets, and the coordinated disclosure policy.
+
+---
+
 ## License
 
-[Apache-2.0](LICENSE)
+[Apache-2.0](LICENSE) — see [NOTICE](NOTICE) for attribution.
+
+Contributions require a [DCO](https://developercertificate.org/) sign-off (`git commit -s`).
+If you used AI assistance, disclose it with an `Assisted-by:` trailer — see [AGENTS.md](AGENTS.md).
 
 ---
 

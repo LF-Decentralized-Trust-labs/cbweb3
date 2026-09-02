@@ -1,0 +1,27 @@
+{
+  "id": "mock-pvp-hp-03",
+  "title": "Step 3 — BCCR mints 10,000,000 fCeBM against the deposit",
+  "description": "The fiat exchange mints fCeBM — the ERC-20 fiat token on Besu — to the payer bank's Besu operator address. This is the first on-chain movement of the flow.",
+  "notes": "Gateway: BCCR Central Bank gateway (spoke-crc). The approve/reject/exchange half of the reserve lifecycle is registered only on a Central Bank gateway and is gated to ROLE_TREASURY; a commercial-bank gateway answers 404 on this path. Path divergence between scenarios: Scenario A serves this at deposits/fiat-exchange, Scenario B at deposits/exchange; no gateway serves both. Field divergence, verified in the delivered gateway (FiatExchangeResult): the 201 body is {mint_tx_hash}, not the {tx_hash} that the Scenario A OpenAPI document and contracts/pvp declare.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/payments/deposits/fiat-exchange",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "deposit_id": "436ae9b6-2e15-49a0-9e83-272e0a2accbf"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "77ef33f00f5b72bc21dc675784633f07"
+    },
+    "body": {
+      "mint_tx_hash": "0x82c5d20fcea881dff9376adcc01cb55b7e6de6258de06caeb87a30c539aa5130"
+    }
+  }
+}

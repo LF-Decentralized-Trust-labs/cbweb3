@@ -4,7 +4,13 @@
   "title": "CBWeb3 Toolbox Mock File",
   "description": "Schema for reference mock JSON files (canonical API request/response pairs)",
   "type": "object",
-  "required": ["id", "title", "description", "request", "response"],
+  "required": [
+    "id",
+    "title",
+    "description",
+    "request",
+    "response"
+  ],
   "additionalProperties": false,
   "properties": {
     "notes": {
@@ -28,11 +34,20 @@
     },
     "request": {
       "type": "object",
-      "required": ["method", "path"],
+      "required": [
+        "method",
+        "path"
+      ],
       "properties": {
         "method": {
           "type": "string",
-          "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ]
         },
         "path": {
           "type": "string",
@@ -40,7 +55,9 @@
         },
         "headers": {
           "type": "object",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "body": {
           "type": "object"
@@ -50,7 +67,10 @@
     },
     "response": {
       "type": "object",
-      "required": ["status", "body"],
+      "required": [
+        "status",
+        "body"
+      ],
       "properties": {
         "status": {
           "type": "integer",
@@ -59,13 +79,19 @@
         },
         "headers": {
           "type": "object",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "body": {
           "type": "object"
         }
       },
       "additionalProperties": false
+    },
+    "secretWithheld": {
+      "type": "string",
+      "description": "Set on a fixture that publishes a hash_lock for which no secret is documented anywhere, stating WHY. Required by verify_hashlocks.py: an undeclared orphan digest is a failure, because it is indistinguishable from an unrecomputable published value."
     }
   }
 }

@@ -1,0 +1,27 @@
+{
+  "id": "mock-pvp-hp-02",
+  "title": "Step 2 — BCCR confirms the fiat funds arrived",
+  "description": "The Central Bank moves the deposit record to APPROVED. This records the approval only; no token is minted until step 3.",
+  "notes": "Gateway: BCCR Central Bank gateway (spoke-crc). The approve/reject/exchange half of the reserve lifecycle is registered only on a Central Bank gateway and is gated to ROLE_TREASURY; a commercial-bank gateway answers 404 on this path. The platform answers 201 here even though nothing is created. Body verified in the delivered handler: a literal {\"status\": \"approved\"}.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/payments/deposits/approve",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "deposit_id": "436ae9b6-2e15-49a0-9e83-272e0a2accbf"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "b4d52e006207c750753bd642ad2d74aa"
+    },
+    "body": {
+      "status": "approved"
+    }
+  }
+}

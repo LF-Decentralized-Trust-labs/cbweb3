@@ -1,10 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
 name: Toolbox CI
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'Toolbox/**'
+      - '.github/workflows/toolbox-ci.yml'
   pull_request:
     paths:
       - 'Toolbox/**'
       - '.github/workflows/toolbox-ci.yml'
+  workflow_dispatch:
+    inputs:
+      gateway_url:
+        description: >-
+          Optional base origin of a live CBWeb3 API Gateway (e.g. https://gw.example.org).
+          When set, the drift-check job fetches the gateway's self-served
+          GET /openapi.yaml and compares its path set against our contracts.
+        required: false
+        default: ''
+
+permissions:
+  contents: read
 
 jobs:
   lint-openapi:
@@ -19,7 +37,15 @@ jobs:
         run: npm install -g @stoplight/spectral-cli
       - name: Lint all OpenAPI specs
         run: |
-          for spec in Toolbox/contracts/*/openapi_*.yaml; do
+          set -euo pipefail
+          shopt -s nullglob
+          specs=(Toolbox/contracts/*/openapi_*.yaml)
+          if [ ${#specs[@]} -eq 0 ]; then
+            echo "No OpenAPI contracts found under Toolbox/contracts/*/ — the glob is stale."
+            exit 1
+          fi
+          echo "Linting ${#specs[@]} contract(s): ${specs[*]}"
+          for spec in "${specs[@]}"; do
             echo "--- Linting $spec ---"
             spectral lint "$spec" --fail-severity=error
           done
@@ -36,16 +62,102 @@ jobs:
         run: npm install -g ajv-cli ajv-formats
       - name: Validate mock files
         run: |
-          for mock in $(find Toolbox/mocks -name '*.json' -not -name 'README*'); do
+          set -euo pipefail
+          mapfile -t mocks < <(find Toolbox/mocks -name '*.json' -not -name 'README*' | sort)
+          if [ ${#mocks[@]} -eq 0 ]; then
+            echo "No mock fixtures found under Toolbox/mocks/ — expected at least one."
+            exit 1
+          fi
+          echo "Validating ${#mocks[@]} mock fixture(s)"
+          for mock in "${mocks[@]}"; do
             echo "--- Validating $mock ---"
             ajv validate -s Toolbox/schemas/mock.schema.json -d "$mock" --spec=draft2020
           done
       - name: Validate test vector files
         run: |
-          for vector in $(find Toolbox/test-vectors -name '*.json' -not -name 'README*'); do
+          set -euo pipefail
+          mapfile -t vectors < <(find Toolbox/test-vectors -name '*.json' -not -name 'README*' | sort)
+          if [ ${#vectors[@]} -eq 0 ]; then
+            echo "No test vector files found under Toolbox/test-vectors/ — expected at least one."
+            exit 1
+          fi
+          echo "Validating ${#vectors[@]} vector file(s)"
+          for vector in "${vectors[@]}"; do
             echo "--- Validating $vector ---"
             ajv validate -s Toolbox/schemas/vector.schema.json -d "$vector" --spec=draft2020
           done
+
+  validate-artifact-paths:
+    name: Artifact paths resolve against the contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install pyyaml
+      # Nothing in CI used to cross-check a mock or vector path against the OpenAPI
+      # documents. That is exactly why seven fictional endpoints shipped green for four
+      # sessions. This gate makes that failure mode unrepeatable.
+      - name: Every mock and vector path must exist in a contract
+        run: |
+          set -euo pipefail
+          if [ ! -f Toolbox/tools/validate_artifact_paths.py ]; then
+            echo "Toolbox/tools/validate_artifact_paths.py is missing."
+            echo "It is a required CI gate (realignment plan section 5.7)."
+            exit 1
+          fi
+          python Toolbox/tools/validate_artifact_paths.py
+
+  verify-hashlocks:
+    name: Documented SHA-256 hash locks recompute correctly
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      # Every pre-realignment artifact claimed a SHA-256 digest that was simply wrong,
+      # and told implementers to verify it. This gate recomputes every documented pair.
+      - name: Recompute every documented secret/hash-lock pair
+        run: |
+          set -euo pipefail
+          if [ ! -f Toolbox/tools/verify_hashlocks.py ]; then
+            echo "Toolbox/tools/verify_hashlocks.py is missing."
+            echo "It is a required CI gate (realignment plan section 5.7)."
+            exit 1
+          fi
+          python Toolbox/tools/verify_hashlocks.py
+      # The discredited digest must never reappear as a USABLE value. Two precise rules,
+      # rather than a keyword filter that would rot:
+      #   1. The complete 64-character digest must not appear anywhere. Every legitimate
+      #      retraction in this repository writes it elided ("7f83b165…9069"), so the full
+      #      string can only mean someone pasted it back in as a real value.
+      #   2. The prefix must not appear as a hash-bearing VALUE in a fixture or contract.
+      #      That one is enforced by verify_hashlocks.py, which parses the artifacts and can
+      #      therefore distinguish a field value from a retraction note that names the value
+      #      it is retracting — a grep cannot.
+      # The literal is not written contiguously below, because this job greps the working
+      # tree including this file: a literal here would make the gate fail on its own text.
+      - name: The false hash lock must never reappear
+        run: |
+          set -euo pipefail
+          FULL="7f83b1657ff1fc53b92dc18148a1d65dfc""2d4b1fa3d677284addd200126d9069"
+
+          echo "--- rule 1: the complete discredited digest, anywhere ---"
+          if grep -rIn --exclude-dir=.git --exclude-dir=node_modules "$FULL" . ; then
+            echo
+            echo "The complete discredited hash lock is present."
+            echo "It is not the SHA-256 of anything the Toolbox publishes, and it is not"
+            echo "even valid hex. Retractions must write it elided, never in full."
+            exit 1
+          fi
+
+          echo "OK — the discredited hash lock survives only as elided prose."
+          echo "(Rule 2 — the prefix must not appear as a hash-bearing VALUE in any"
+          echo " fixture or contract — is enforced inside verify_hashlocks.py above,"
+          echo " which can tell a field value from a sentence about its own history.)"
 
   conformance-smoke:
     name: Conformance smoke tests (Prism)
@@ -62,14 +174,166 @@ jobs:
         run: |
           npm install -g @stoplight/prism-cli
           pip install pytest requests
-      - name: Start Prism mock server
+      # One Prism instance per contract: 4010 pvp, 4011 amm, 4012 auth.
+      # Contract paths carry their own /api/v1 or /api/v2 prefix and the servers: entries
+      # are bare origins, so Prism serves exactly the paths a real gateway serves.
+      # CBWEB3_BASE_URL must therefore NOT carry a path prefix.
+      - name: Start Prism mock servers
         run: |
-          prism mock Toolbox/contracts/pvp/openapi_pvp_v0.1.0.yaml --port 4010 --host 0.0.0.0 &
-          sleep 3
-          curl -sf http://localhost:4010/fx/agreement -X POST -H "Content-Type: application/json" -H "Authorization: Bearer SYNTHETIC_TOKEN_CI" -d '{"sourceCurrency":"tCeBM-A","targetCurrency":"tCeBM-B","sourceAmount":"1000000","exchangeRate":"0.058","counterpartyAddress":"0xCB002_CountryB"}' > /dev/null
-      - name: Run conformance tests (happy-path only against mock)
+          set -euo pipefail
+          # Resolve each contract by glob so a version bump does not silently break this
+          # job while every other job keeps globbing correctly.
+          for domain in pvp amm auth; do
+            match=$(ls Toolbox/contracts/"$domain"/openapi_*.yaml 2>/dev/null | head -1)
+            if [ -z "$match" ]; then
+              echo "::error::no contract found at Toolbox/contracts/$domain/openapi_*.yaml"
+              exit 1
+            fi
+            echo "$domain -> $match"
+            eval "spec_$domain=\$match"
+          done
+          prism mock "$spec_pvp"  --port 4010 --host 0.0.0.0 > /tmp/prism-pvp.log  2>&1 &
+          prism mock "$spec_amm"  --port 4011 --host 0.0.0.0 > /tmp/prism-amm.log  2>&1 &
+          prism mock "$spec_auth" --port 4012 --host 0.0.0.0 > /tmp/prism-auth.log 2>&1 &
+          # Wait for Prism specifically. A bare 200 from "/" proves only that something is
+          # listening; Prism answers /healthz-style unknown paths with a JSON error body
+          # carrying its own type URI, so match on that instead.
+          for port in 4010 4011 4012; do
+            case "$port" in
+              4010) log=/tmp/prism-pvp.log;;
+              4011) log=/tmp/prism-amm.log;;
+              *)    log=/tmp/prism-auth.log;;
+            esac
+            ready=""
+            for attempt in $(seq 1 30); do
+              if curl -s "http://localhost:${port}/__prism_readiness__" \
+                   | grep -qi 'prism\|NOT_FOUND\|No route matched'; then
+                ready=yes; break
+              fi
+              sleep 2
+            done
+            if [ -z "$ready" ]; then
+              echo "::error::Prism on port ${port} never became ready — last 40 log lines:"
+              tail -40 "$log" || true
+              exit 1
+            fi
+            echo "prism ready on ${port}"
+          done
+      # Readiness probes hit a real path on each contract with the credential that
+      # contract actually declares. Prism validates the PRESENCE of the access_token
+      # cookie, never its value, so a synthetic cookie is sufficient — and a request
+      # without one correctly yields 401.
+      - name: Probe each mock server
+        run: |
+          set -euo pipefail
+
+          echo "--- auth (4012): public health probe ---"
+          curl -sf http://localhost:4012/healthz > /dev/null
+
+          echo "--- auth (4012): direct login is public and returns a token body ---"
+          curl -sf http://localhost:4012/api/v1/auth/login \
+            -X POST -H "Content-Type: application/json" \
+            -d '{"clientId":"bank-a","clientSecret":"secret-a"}' > /dev/null
+
+          echo "--- pvp (4010): cookie-authenticated escrow request ---"
+          curl -sf http://localhost:4010/api/v1/payments/escrows \
+            -X POST -H "Content-Type: application/json" \
+            -H "Cookie: access_token=SYNTHETIC_COOKIE_CI" \
+            -d '{"amount":"5000000"}' > /dev/null
+
+          echo "--- pvp (4010): the same call without a cookie must be rejected ---"
+          status=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:4010/api/v1/payments/escrows \
+            -X POST -H "Content-Type: application/json" -d '{"amount":"5000000"}')
+          if [ "$status" != "401" ]; then
+            echo "Expected 401 without the access_token cookie, got $status"
+            exit 1
+          fi
+
+          echo "--- amm (4011): unauthenticated discovery surface ---"
+          curl -sf http://localhost:4011/api/v2/amm/hub-config > /dev/null
+          curl -sf http://localhost:4011/api/v2/amm/pairs > /dev/null
+      # mock_safe covers single-request shape/status assertions, which are the only
+      # meaningful assertions against a stateless mock. live_only tests (state
+      # transitions, balance deltas, residue reconciliation) are skipped here.
+      - name: Run conformance tests (mock-safe happy path)
         run: |
           cd Toolbox/conformance
-          pytest tests/ -m happy_path -v --base-url=http://localhost:4010
+          pytest tests/ -m "mock_safe and happy_path" -v --base-url=http://localhost:4010
         env:
           CBWEB3_BASE_URL: http://localhost:4010
+          CBWEB3_AMM_BASE_URL: http://localhost:4011
+          CBWEB3_AUTH_BASE_URL: http://localhost:4012
+          CBWEB3_AUTH_MODE: mock
+          CBWEB3_PROFILE: mock
+      - name: Dump Prism logs on failure
+        if: failure()
+        run: |
+          for f in /tmp/prism-pvp.log /tmp/prism-amm.log /tmp/prism-auth.log; do
+            echo "===== $f ====="
+            tail -50 "$f" || true
+          done
+
+  drift-check:
+    name: Drift check against a live gateway (manual)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.gateway_url != ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install pyyaml
+      # Both gateway routers self-serve their own specification at an unauthenticated
+      # GET /openapi.yaml (scenario-a router.go:38, scenario-b router.go:42). Comparing
+      # that path set against our contracts is the cheapest possible drift gate.
+      - name: Compare the gateway's self-served spec with our contracts
+        env:
+          GATEWAY_URL: ${{ github.event.inputs.gateway_url }}
+        run: |
+          set -euo pipefail
+          curl -sf "${GATEWAY_URL%/}/openapi.yaml" -o /tmp/gateway-openapi.yaml
+          python - <<'PY'
+          import glob, os, sys, yaml
+
+          with open("/tmp/gateway-openapi.yaml") as fh:
+              live = yaml.safe_load(fh)
+          live_paths = set(live.get("paths") or {})
+          print(f"Live gateway serves {len(live_paths)} paths.\n")
+
+          # The three contracts describe two different gateways plus a shared auth
+          # surface. A gateway that serves none of a contract's paths is simply not that
+          # contract's scenario, so it is reported and skipped rather than failed.
+          failed = False
+          for path in sorted(glob.glob("Toolbox/contracts/*/openapi_*.yaml")):
+              with open(path) as fh:
+                  doc = yaml.safe_load(fh)
+              ours = set(doc.get("paths") or {})
+              overlap = ours & live_paths
+              name = os.path.basename(path)
+              ratio = len(overlap) / len(ours) if ours else 0.0
+              # The reserve lifecycle is duplicated across the two scenario contracts, so
+              # a partial overlap is expected on the contract belonging to the OTHER
+              # scenario. Only a contract matching most of the gateway is held to a full
+              # containment check; the rest are reported and skipped.
+              if ratio < 0.5:
+                  print(f"{name}: {len(overlap)} of {len(ours)} paths present "
+                        f"({ratio:.0%}) — not this gateway's scenario, skipped.")
+                  continue
+              missing = sorted(ours - live_paths)
+              print(f"{name}: {len(overlap)} of {len(ours)} paths present on the gateway.")
+              for p in missing:
+                  print(f"    DRIFT — published but absent upstream: {p}")
+                  failed = True
+
+          published = set()
+          for path in glob.glob("Toolbox/contracts/*/openapi_*.yaml"):
+              with open(path) as fh:
+                  published |= set(yaml.safe_load(fh).get("paths") or {})
+          extra = sorted(live_paths - published)
+          print(f"\nServed by the gateway and deliberately not published: {len(extra)}")
+          for p in extra:
+              print(f"    {p}")
+
+          sys.exit(1 if failed else 0)
+          PY

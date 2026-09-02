@@ -1,0 +1,40 @@
+{
+  "id": "mock-amm-hp-13",
+  "title": "Payment step 2 — the one call that moves value across the border",
+  "description": "max_amount_in is set 1% above the quoted amount_in as a slippage ceiling. The response is an acknowledgement, not a settlement: status is BRIDGE_IN_PROGRESS and a swap_id comes back to poll.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway, spoke-crc. COOKIE ONLY — this endpoint is RequireCookieAuth, not RequireAnyAuth; a bearer token will not work here even though it does on the bridge and liquidity routes. Requires the commercial_bank realm role; the platform's shared 403 text claiming 'requires CENTRAL_BANK role' is wrong for this operation. payer_bank_id is deprecated and ignored — identity comes from the session. THE WHOLE max_amount_in IS BRIDGED IN before the AMM executes, because the realised input is unknown until execution; the unspent remainder comes back as a separate RESIDUE bridge position. Behind this single POST, four relay-only steps run on two Central Bank gateways: bridge-in and the Hub swap signed by the payer's issuing CB, bridge-out by the BENEFICIARY's CB (CB-A burning CB-B's tokens would be a sovereignty breach), then residue return. That is why one POST produces asynchronous multi-Central-Bank state, and why BRIDGE_OUT_FAILED is expressible: the swap succeeded and delivery did not. Undocumented upstream: 422 with error_code in TRANSFER_LIMIT_EXCEEDED, POOL_NOT_ACTIVE, CIRCUIT_BREAKER_HALTED, BRIDGE_IN_FAILED, SWAP_FAILED.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v2/amm/swap/cross-currency",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "source_currency": "CRC",
+      "target_currency": "CLP",
+      "pool_pair": "W-CRC-CLP",
+      "amount_out": "1000000000000000000000",
+      "max_amount_in": "548181340558471952655",
+      "beneficiary_bank_id": "bank-valparaiso",
+      "quote_id": "q-45513218"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "64956986befaf79376fbfd7f77312c63"
+    },
+    "body": {
+      "swap_id": "swp-794fff1b",
+      "correlation_id": "914512b0-8413-45e6-a46e-e9d1de6a8e25",
+      "status": "BRIDGE_IN_PROGRESS",
+      "amount_in": "542753802533140547183",
+      "amount_out": "1000000000000000000000",
+      "effective_rate": 1.842456,
+      "bridge_in_position_id": "e2b86dab-27ed-4d68-80b5-8fec5eab6b8e",
+      "created_at": "2026-06-18T10:00:00Z"
+    }
+  }
+}

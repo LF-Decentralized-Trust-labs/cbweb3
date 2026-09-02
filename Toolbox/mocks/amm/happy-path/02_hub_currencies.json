@@ -1,0 +1,33 @@
+{
+  "id": "mock-amm-hp-02",
+  "title": "Discovery 2 — which currencies exist on the Hub (no credentials)",
+  "description": "Each fiat symbol mapped to its Hub W-token address and the Central Bank that registered it. Costa Rica and Chile are both present, so the corridor can exist.",
+  "notes": "Gateway: any. Divergence, documented in contracts/amm and verified in the delivered handler: the platform document declares a bare JSON array; the gateway returns a wrapped {\"currencies\": [...]} object. A client deserialising into an array per the document fails. The same wrapping divergence applies to /api/v2/amm/pairs and /api/v2/bridge/positions.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v2/hub/currencies"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "3db99e0a8ddec3d98055d6d40aa37151"
+    },
+    "body": {
+      "currencies": [
+        {
+          "symbol": "W-tCeBM_CRC",
+          "country_name": "Costa Rica",
+          "token_address": "0x1a3e796c050839af5f0af526c1a562889e603d38",
+          "proposer_cb": "central_bank_crc"
+        },
+        {
+          "symbol": "W-tCeBM_CLP",
+          "country_name": "Chile",
+          "token_address": "0xf5049d776fa8137e2e1b948671c734ea7627c4fd",
+          "proposer_cb": "central_bank_clp"
+        }
+      ]
+    }
+  }
+}

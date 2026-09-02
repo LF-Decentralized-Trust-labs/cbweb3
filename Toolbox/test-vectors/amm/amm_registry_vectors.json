@@ -1,0 +1,448 @@
+{
+  "contract": "CBWeb3 Scenario B — Hub-and-spoke settlement (discovery and corridor registry)",
+  "contractVersion": "2.3.0",
+  "generatedAt": "2026-08-20",
+  "vectors": [
+    {
+      "id": "registry-hp-01",
+      "title": "Hub contract discovery with no credentials",
+      "description": "The credential-free entry point. This route is registered on EVERY Scenario B gateway regardless of which AMM services are wired, so it is the cheapest probe of whether a host speaks Scenario B at all.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "none — no cookie, no bearer token"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/amm/hub-config",
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "amm_address": "{{NON_EMPTY_STRING}}",
+          "pair_registry": "{{NON_EMPTY_STRING}}",
+          "currency_registry": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "The addresses are public on-chain data, which is why the endpoint needs no credential. This operation declares a 200 and nothing else — not even a 500."
+    },
+    {
+      "id": "registry-hp-02",
+      "title": "Hub currencies come back WRAPPED, not as a bare array",
+      "description": "Registered fiat symbols mapped to their Hub W-token address and the Central Bank that proposed them.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "none",
+        "atLeastOneCurrencyRegistered": true
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/hub/currencies",
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "currencies": "{{ARRAY}}"
+        }
+      },
+      "notes": "Spec divergence, mirrored to the implementation. The platform document declares the 200 body as a bare JSON array; the delivered handler returns {\"currencies\": [...]}. A client that iterates the response directly gets nothing. The same divergence applies to /api/v2/amm/pairs and /api/v2/bridge/positions."
+    },
+    {
+      "id": "registry-hp-03",
+      "title": "Pairs listing is the ONLY supported source of a pool_pair value",
+      "description": "Five incompatible pair-naming conventions appear across the delivered artefacts and none is documented as canonical (catalogued in Toolbox/DIVERGENCES.md). Treat pair_id as an opaque string and never construct one.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "none",
+        "atLeastOnePairProposed": true
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/amm/pairs",
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "pairs": "{{ARRAY}}"
+        }
+      },
+      "notes": "The conventions seen in the platform's own artefacts are tCeBM_BRL-tCeBM_ARS, W-tCeBM_BRL/W-tCeBM_ARS and W-BRL-ARS. A client that builds one of these itself will match nothing. Served from the gateway's pair_proposals table with no on-chain RPC, and wrapped in a pairs key contrary to the platform document."
+    },
+    {
+      "id": "registry-hp-04",
+      "title": "Pool status must read ACTIVE before any swap",
+      "description": "The liveness gate. EMPTY means no side has been seeded; PENDING_COUNTERPART means one Central Bank has committed and the other has not.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "none",
+        "pairSeededByBothCentralBanks": true
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/amm/pool/{pair}/status",
+        "pathParams": {
+          "pair": "{{PAIR_ID_FROM_LISTPAIRS}}"
+        },
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "pool_pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "pool_status": "ACTIVE",
+          "reserve_a": "{{BIGINT_STRING}}",
+          "reserve_b": "{{BIGINT_STRING}}"
+        }
+      },
+      "notes": "pool_status is the one recovered vocabulary the contract publishes as a real enum (EMPTY | PENDING_COUNTERPART | ACTIVE), because the gateway derives it exhaustively from the two reserves and gates swaps on it. Bridge state and swap status remain free strings by contrast — the platform commits to no vocabulary for those."
+    },
+    {
+      "id": "registry-hp-05",
+      "title": "Circuit breaker must not be halted before a swap",
+      "description": "Public. A halted breaker makes a cross-currency swap fail with 422 CIRCUIT_BREAKER_HALTED, so a client checks this first.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "none"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/governance/circuit-breaker/status",
+        "query": {
+          "pair": "{{PAIR_ID_FROM_LISTPAIRS}}"
+        },
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "state": "LIVE"
+        }
+      },
+      "notes": "ALWAYS send pair explicitly — see registry-edge-01. The states the delivered gateway emits are LIVE, HALTED and RESUME_PENDING; the contract leaves the field a free string because the platform declares no enum. Note the gateway reports a read failure as 500 rather than fabricating a benign LIVE."
+    },
+    {
+      "id": "registry-hp-06",
+      "title": "Register a hub currency — 201, not the documented 200",
+      "description": "Step 0 of opening a corridor. A Central Bank registers its own currency on the hub, which records the corresponding W-token.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "central_bank cookie for the currency's own issuing Central Bank",
+        "symbolNotYetRegistered": true
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/hub/currencies",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "symbol": "W-tCeBM_BRL",
+          "country_name": "Brazil",
+          "token_address": "0x1234abcd00000000000000000000000000000000",
+          "proposer_cb": "central_bank_a"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "symbol": "W-tCeBM_BRL",
+          "country_name": "Brazil",
+          "token_address": "0x1234abcd00000000000000000000000000000000",
+          "proposer_cb": "central_bank_a"
+        }
+      },
+      "notes": "Spec divergence: the platform document declares 200 with no schema; the delivered handler returns 201 with the service result. proposer_cb must be the caller — the field is validated, not merely echoed."
+    },
+    {
+      "id": "registry-hp-07",
+      "title": "Propose a pair — the Central Bank of token A only",
+      "description": "Step 1 of the two-Central-Bank corridor opening.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "central_bank cookie for the Central Bank that ISSUES token A",
+        "bothCurrenciesRegistered": true
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/amm/pairs/propose",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "pair_id": "W-tCeBM_BRL/W-tCeBM_ARS",
+          "token_a_address": "0x1234abcd00000000000000000000000000000000",
+          "token_b_address": "0x5678ef0100000000000000000000000000000000",
+          "proposer_cb": "central_bank_a"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "pair_id": "W-tCeBM_BRL/W-tCeBM_ARS",
+          "status": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "OMIT amm_address unless you know exactly why you are setting it. When omitted the service deploys a dedicated per-pair AMM bound to (token_a, token_b). Supplying a shared or bootstrap AMM address mis-binds the pool and makes every subsequent swap on it wrong in a way that does not surface as an error here."
+    },
+    {
+      "id": "registry-hp-08",
+      "title": "Confirm the pair — the Central Bank of token B activates the corridor",
+      "description": "Step 2. On success the pair becomes ACTIVE and liquidity can be seeded.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "central_bank cookie for the Central Bank that ISSUES token B",
+        "pairState": "proposed, not yet active"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/amm/pairs/confirm",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_B_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "pair_id": "W-tCeBM_BRL/W-tCeBM_ARS",
+          "confirmer_cb": "central_bank_b"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "pair_id": "W-tCeBM_BRL/W-tCeBM_ARS",
+          "status": "ACTIVE"
+        }
+      },
+      "notes": "Note the asymmetry: propose returns 201 and confirm returns 200. An ACTIVE pair is not yet a tradeable pool — GET /api/v2/amm/pool/{pair}/status will still read EMPTY until both Central Banks have committed liquidity."
+    },
+    {
+      "id": "registry-err-01",
+      "title": "Re-registering an existing currency symbol is 409",
+      "description": "The registry rejects a duplicate symbol or a token address that is already registered.",
+      "category": "error",
+      "preconditions": {
+        "session": "central_bank cookie",
+        "symbolAlreadyRegistered": "W-tCeBM_BRL"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/hub/currencies",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "symbol": "W-tCeBM_BRL",
+          "country_name": "Brazil",
+          "token_address": "0x1234abcd00000000000000000000000000000000",
+          "proposer_cb": "central_bank_a"
+        }
+      },
+      "expectedOutput": {
+        "status": 409,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "code": "CURRENCY_ALREADY_EXISTS"
+        }
+      },
+      "notes": "Undeclared upstream; observed in the delivered handler and published in the contract. Mind the key name: the registry family returns its machine-readable code under code, the AMM and swap family returns it under error_code, and the /api/v1 surface has no code at all. Three spellings on one platform. A duplicate token_address under a different symbol yields TOKEN_ALREADY_REGISTERED instead."
+    },
+    {
+      "id": "registry-err-02",
+      "title": "Removing an unknown currency is 404 CURRENCY_NOT_FOUND",
+      "description": "The cleanest unknown-currency assertion on the whole Scenario B surface, because it is the one place the platform commits to a distinct not-found code.",
+      "category": "error",
+      "preconditions": {
+        "session": "central_bank cookie",
+        "symbolNotRegistered": "W-tCeBM_XYZ"
+      },
+      "input": {
+        "method": "DELETE",
+        "path": "/api/v2/hub/currencies/{symbol}",
+        "pathParams": {
+          "symbol": "W-tCeBM_XYZ"
+        },
+        "headers": {
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 404,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "code": "CURRENCY_NOT_FOUND"
+        }
+      },
+      "notes": "Only the Central Bank that registered a currency may remove it. A successful removal returns 200 with NO response body declared."
+    },
+    {
+      "id": "registry-err-03",
+      "title": "Proposing a pair you do not issue token A for is 403",
+      "description": "Sovereignty check. A Central Bank cannot open a corridor on another Central Bank's token.",
+      "category": "error",
+      "preconditions": {
+        "session": "central_bank cookie for a Central Bank that does NOT issue token A"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/amm/pairs/propose",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_B_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "pair_id": "W-tCeBM_BRL/W-tCeBM_ARS",
+          "token_a_address": "0x1234abcd00000000000000000000000000000000",
+          "token_b_address": "0x5678ef0100000000000000000000000000000000",
+          "proposer_cb": "central_bank_b"
+        }
+      },
+      "expectedOutput": {
+        "status": 403,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "code": "NOT_CENTRAL_BANK_OF_TOKEN_A"
+        }
+      },
+      "notes": "The mirror check on confirm carries code NOT_CENTRAL_BANK_OF_TOKEN_B. Note that the platform's shared 403 response is described as 'requires CENTRAL_BANK role', which is inaccurate for the routes the router actually gates on commercial_bank — the description is shared, the behaviour is not."
+    },
+    {
+      "id": "registry-err-04",
+      "title": "Confirming an already-active pair is 409",
+      "description": "Corridor activation is a one-way transition.",
+      "category": "error",
+      "preconditions": {
+        "session": "central_bank cookie for the Central Bank of token B",
+        "pairState": "ACTIVE"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/amm/pairs/confirm",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_B_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "pair_id": "W-tCeBM_BRL/W-tCeBM_ARS",
+          "confirmer_cb": "central_bank_b"
+        }
+      },
+      "expectedOutput": {
+        "status": 409,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "code": "PAIR_ALREADY_ACTIVE"
+        }
+      },
+      "notes": "Re-proposing an existing pair yields 409 PAIR_ALREADY_EXISTS on the propose route. Both codes are undeclared upstream and recovered from the delivered handler."
+    },
+    {
+      "id": "registry-err-05",
+      "title": "Confirming a pair that was never proposed is 404",
+      "description": "Confirm operates on an existing proposal; there is no create-on-confirm path.",
+      "category": "error",
+      "preconditions": {
+        "session": "central_bank cookie",
+        "pairProposed": false
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/amm/pairs/confirm",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_B_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "pair_id": "W-tCeBM_XYZ/W-tCeBM_ABC",
+          "confirmer_cb": "central_bank_b"
+        }
+      },
+      "expectedOutput": {
+        "status": 404,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "code": "PAIR_NOT_FOUND"
+        }
+      },
+      "notes": null
+    },
+    {
+      "id": "registry-err-06",
+      "title": "Pool status for an unavailable pool is 422, not the documented 404",
+      "description": "Divergence between the platform document and the delivered handler, mirrored to the implementation because the platform surface wins.",
+      "category": "error",
+      "preconditions": {
+        "session": "none",
+        "poolUnavailable": true
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/amm/pool/{pair}/status",
+        "pathParams": {
+          "pair": "W-tCeBM_XYZ/W-tCeBM_ABC"
+        },
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 422,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "error_code": "POOL_STATUS_UNAVAILABLE"
+        }
+      },
+      "notes": "The contract declares BOTH 404 (because the platform document does) and 422 (because the handler emits it). A client must tolerate either; a conformance runner should assert 422 against a live gateway and accept 404 only from a mock served straight off the upstream document."
+    },
+    {
+      "id": "registry-edge-01",
+      "title": "Circuit breaker status with no pair reports a pair nobody trades",
+      "description": "A trap with real settlement consequences. The pair query parameter is undeclared upstream and, when omitted, the delivered service falls back to the literal string BRL-USD — which is not a pair identifier any corridor in this network uses.",
+      "category": "edge-case",
+      "preconditions": {
+        "session": "none",
+        "tradedPair": "W-tCeBM_BRL/W-tCeBM_ARS, currently HALTED"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/governance/circuit-breaker/status",
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "pair": "BRL-USD",
+          "state": "LIVE"
+        }
+      },
+      "notes": "A client that omits pair can receive a healthy LIVE for a pair it is not trading while the pair it IS trading is halted, and will then be surprised by a 422 CIRCUIT_BREAKER_HALTED on the swap. Assert the returned pair equals the pair you asked about, and treat a mismatch as a failed pre-flight check. Note BRL-USD is a fourth pair-name spelling, distinct from all three in registry-hp-03."
+    },
+    {
+      "id": "registry-edge-02",
+      "title": "Sovereign wrapped-token supply is the only place decimals are stated",
+      "description": "How much of one Central Bank's domestic reserves are currently bridged to the hub. Deliberately scoped to a single currency — a network-wide total would mix currencies and double-count the same backing.",
+      "category": "edge-case",
+      "preconditions": {
+        "session": "none",
+        "gateway": "a Central Bank gateway with a hub RPC configured"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/hub/token/supply",
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "symbol": "{{NON_EMPTY_STRING}}",
+          "token_address": "{{NON_EMPTY_STRING}}",
+          "total_supply": "{{BIGINT_STRING}}",
+          "decimals": 18
+        }
+      },
+      "notes": "This decimals field is the ONLY decimals count stated anywhere in the entire CBWeb3 surface, and it describes a Hub W-token — not tCeBM and not fCeBM on a spoke. Do not generalise it into a scale factor for /api/v1 amounts. A hub RPC failure here is a 502, never a fabricated zero."
+    }
+  ]
+}

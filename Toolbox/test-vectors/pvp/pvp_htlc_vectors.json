@@ -1,220 +1,687 @@
 {
-  "contract": "PvP Settlement — HTLC",
-  "contractVersion": "0.1.0",
-  "generatedAt": "2026-02-19",
+  "contract": "CBWeb3 Scenario A — PvP Settlement (dual-layer HTLC)",
+  "contractVersion": "2.3.0",
+  "generatedAt": "2026-08-20",
   "hashFunction": "SHA-256",
   "syntheticSecrets": {
-    "validSecret": "cbweb3-test-secret-2026",
-    "validHashLock": "0x7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
-    "invalidSecret": "wrong-secret",
-    "note": "SHA-256('cbweb3-test-secret-2026') = 7f83b165... — implementations can verify this."
+    "secretHex": "6362776562332d746f6f6c626f782d68746c632d766563746f722d30312d6f6b",
+    "hashLock": "cd0a60b0332435927cb5648fe6d22a7be02f3d2cfacb1d4a0e8cce0b7a8d7338",
+    "wrongSecretHex": "6362776562332d746f6f6c626f782d68746c632d766563746f722d30312d6e6f",
+    "wrongSecretHash": "1fad4032e3b64ef8f84c730d80547f46c3939dcf92d04489976a0c92b44aad2d",
+    "derivation": "The secret is a 32-byte value supplied as 64 lowercase hex characters. The gateway hex-decodes it and hashes the DECODED BYTES: hashLock = SHA-256(hex_decode(secretHex)). It does NOT hash the ASCII of the string you send.",
+    "verify": "python3 -c \"import hashlib;print(hashlib.sha256(bytes.fromhex('6362776562332d746f6f6c626f782d68746c632d766563746f722d30312d6f6b')).hexdigest())\"  ->  cd0a60b0332435927cb5648fe6d22a7be02f3d2cfacb1d4a0e8cce0b7a8d7338",
+    "crossCheck": "These 32 bytes are the ASCII of 'cbweb3-toolbox-htlc-vector-01-ok', so sha256 of that literal string gives the same digest. The wrong secret is the ASCII of 'cbweb3-toolbox-htlc-vector-01-no' and hashes to a different value, which is what makes htlc-err-01 a genuine mismatch.",
+    "provenance": "Toolbox-chosen and independently verifiable. It is NOT taken from the platform repository; a grep for either digest across the delivered source returns nothing. Both digests are recomputed by tools/verify_hashlocks.py in CI.",
+    "retracted": "Earlier Toolbox artefacts claimed SHA-256('cbweb3-test-secret-2026') = 0x7f83b165...9069 and instructed implementers to verify it. That claim was false in two independent ways: the digest of that ASCII string is actually 000cd63c150bad10438f05ca3d5875c25a738017b0b70fc1a539f7f15754fdcf, and the string is not valid hex so the gateway would have rejected it outright. Purged."
   },
   "vectors": [
     {
       "id": "htlc-hp-01",
-      "title": "Lock funds — happy path",
-      "description": "Lock tCeBM linked to an accepted FX agreement. Returns 201 with status LOCKED.",
+      "title": "Initiator locks — the gateway generates the secret",
+      "description": "The initiating bank locks tCeBM. The secret is generated INSIDE the gateway; the client neither supplies nor learns it here. A hash lock derived from it is returned and must be conveyed to the responding bank out of band.",
       "category": "happy-path",
       "preconditions": {
-        "authenticatedAs": "CB-CountryA (0xCB001_CountryA)",
-        "agreementExists": true,
-        "agreementStatus": "READY_FOR_SETTLEMENT",
-        "sufficientBalance": true
+        "reservePrelude": "completed — the locking bank's tCeBM balance is at least amount (see pvp_reserves_vectors.json)",
+        "agreementState": "ACCEPTED",
+        "session": "cookie carrying one of ROLE_BANK, ROLE_COMMERCIAL_BANK, ROLE_TREASURY, ROLE_GOVERNANCE",
+        "receiverIsLocal": "receiver must belong to the calling gateway's own spoke"
       },
       "input": {
         "method": "POST",
         "path": "/api/v1/htlc/lock",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
         "body": {
-          "agreementId": "{{VALID_AGREEMENT_ID}}",
-          "hashLock": "0x7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
-          "timeLock": 1740000000
+          "agreement_id": "{{TRADE_ID}}",
+          "receiver": "funded_operator@spoke-a-bank-c",
+          "amount": "1000000",
+          "time_lock": 1798765200
         }
       },
       "expectedOutput": {
         "status": 201,
         "body": {
-          "contractId": "{{NON_EMPTY_STRING}}",
-          "transactionHash": "{{NON_EMPTY_STRING}}",
-          "status": "LOCKED",
-          "blockNumber": "{{POSITIVE_INTEGER}}"
+          "contract_id": "{{NON_EMPTY_STRING}}",
+          "hash_lock": "{{HEX64}}",
+          "htlc_tx_hash": "{{STRING}}",
+          "zeto_tx_hash": "{{STRING}}"
         }
       },
-      "notes": "timeLock should be sufficiently in the future to allow counterparty to also lock and then settle."
+      "notes": "SAFETY-CRITICAL ORDERING. 1798765200 is 2027-01-01T00:00:00Z + 3600s. At run time substitute now+3600. The invariant a runner must preserve is that the INITIATOR's timelock is LONGER than the responder's, so the responder can always refund first if settlement stalls. Nothing in the schema enforces it; any fixture that inverts it models an unsafe swap and must be rejected in review. contract_id is returned as a 64-character hex string (SHA-256 of agreement id plus nanosecond timestamp), not the htlc-a1b2c3d4 shape the contract examples show. hash_lock is returned as 64 hex characters with NO 0x prefix — see htlc-edge-03."
     },
     {
       "id": "htlc-hp-02",
-      "title": "Settle HTLC — valid secret",
-      "description": "Reveal the correct pre-image to claim locked funds. Status transitions from LOCKED to SETTLED.",
+      "title": "Responder locks with the hash received out of band",
+      "description": "The responding bank on the other spoke locks its own leg using the initiator's hash_lock. No secret is generated or stored locally: the secret stays known only to the initiator until it settles.",
       "category": "happy-path",
       "preconditions": {
-        "htlcExists": true,
-        "htlcStatus": "LOCKED",
-        "timeLockNotExpired": true,
-        "authenticatedAs": "Recipient of the locked funds"
+        "hashLockConveyed": "out of band — there is NO API endpoint that transfers the hash lock between spokes",
+        "agreementState": "ACCEPTED",
+        "reservePrelude": "completed on the responder's spoke",
+        "receiverIsLocal": "receiver must belong to the RESPONDER's spoke"
       },
       "input": {
         "method": "POST",
-        "path": "/api/v1/htlc/settle",
+        "path": "/api/v1/htlc/lock-with-hash",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{RESPONDER_ACCESS_TOKEN}}"
+        },
         "body": {
-          "contractId": "{{VALID_CONTRACT_ID}}",
-          "secret": "cbweb3-test-secret-2026"
+          "agreement_id": "{{TRADE_ID}}",
+          "receiver": "funded_operator@spoke-b-bank-d",
+          "amount": "850000",
+          "time_lock": 1798763400,
+          "hash_lock": "cd0a60b0332435927cb5648fe6d22a7be02f3d2cfacb1d4a0e8cce0b7a8d7338"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "contract_id": "{{NON_EMPTY_STRING}}",
+          "hash_lock": "cd0a60b0332435927cb5648fe6d22a7be02f3d2cfacb1d4a0e8cce0b7a8d7338",
+          "htlc_tx_hash": "{{STRING}}",
+          "zeto_tx_hash": "{{STRING}}"
+        }
+      },
+      "notes": "1798763400 is 2027-01-01T00:00:00Z + 1800s — deliberately 1800 seconds SHORTER than htlc-hp-01's timelock. The hash_lock is echoed verbatim. The contract's own example for this field is 66 hex characters against its own 64-character description; do not copy it. When agreement_id is supplied the server also checks that receiver and amount match the agreed terms for this spoke leg, so the amount here is the agreement's counter_amount, not its origin_amount."
+    },
+    {
+      "id": "htlc-hp-03",
+      "title": "Status shows the prefixed state vocabulary — as a bare record",
+      "description": "The lock record is returned at the TOP LEVEL, not wrapped. Note the identifier naming: the path placeholder is camelCase contractId while the JSON field is snake_case contract_id.",
+      "category": "happy-path",
+      "preconditions": {
+        "htlcExists": true,
+        "session": "a counterparty of the HTLC (sender or receiver)"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v1/htlc/status/{contractId}",
+        "pathParams": {
+          "contractId": "{{CONTRACT_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
         }
       },
       "expectedOutput": {
         "status": 200,
         "body": {
-          "contractId": "{{SAME_AS_INPUT}}",
-          "status": "SETTLED"
+          "contract_id": "{{CONTRACT_ID}}",
+          "hash_lock": "cd0a60b0332435927cb5648fe6d22a7be02f3d2cfacb1d4a0e8cce0b7a8d7338",
+          "time_lock": 1798765200,
+          "state": "HTLC_STATE_LOCKED",
+          "counterparty_locked": "{{BOOLEAN}}",
+          "amount": "{{NON_EMPTY_STRING}}",
+          "created_at": "{{RFC3339}}"
         }
       },
-      "notes": "After settlement, the secret is visible on-chain. The counterparty can read it and settle the mirror HTLC."
+      "notes": "secret is empty for everyone except the lock creator until the HTLC settles. The state field uses the PREFIXED vocabulary HTLC_STATE_INVALID | HTLC_STATE_PENDING | HTLC_STATE_LOCKED | HTLC_STATE_SETTLED | HTLC_STATE_REFUNDED, which does not match the unprefixed vocabulary the search endpoint's state query parameter declares — see htlc-hp-06. Divergence: the platform OpenAPI document wraps this record as {\"lock\": {...}} and declares a secret field on it. The delivered gateway returns the record BARE (c.JSON(result) over *HTLCStatus) and its struct has no secret field at all — it carries counterparty_locked, amount and created_at instead. searchHTLC does wrap, as {\"locks\": [...], \"total\": n}; getHTLCStatus does not."
     },
     {
-      "id": "htlc-err-01",
-      "title": "Settle HTLC — invalid secret (hash mismatch)",
-      "description": "Providing a secret that does not hash to the hashLock returns 400.",
-      "category": "error",
+      "id": "htlc-hp-04",
+      "title": "Settle by revealing the pre-image",
+      "description": "The call that makes the swap atomic. The contract checks SHA-256(hex_decode(secret)) == hash_lock, then releases the privately locked tokens via Zeto transferLocked().",
+      "category": "happy-path",
       "preconditions": {
-        "htlcExists": true,
-        "htlcStatus": "LOCKED",
-        "timeLockNotExpired": true
+        "htlcState": "HTLC_STATE_LOCKED",
+        "timeLockNotExpired": true,
+        "session": "a counterparty of this HTLC, holding one of the four mutating roles",
+        "counterpartyLegLocked": "in cross-spoke mode the initiator may not settle until the relay has observed the responder's lock"
       },
       "input": {
         "method": "POST",
         "path": "/api/v1/htlc/settle",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
         "body": {
-          "contractId": "{{VALID_CONTRACT_ID}}",
-          "secret": "wrong-secret"
+          "contract_id": "{{CONTRACT_ID}}",
+          "secret": "6362776562332d746f6f6c626f782d68746c632d766563746f722d30312d6f6b"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "htlc_tx_hash": "{{STRING}}",
+          "zeto_tx_hash": "{{STRING}}"
+        }
+      },
+      "notes": "A successful call here produces state changes on a gateway you never contacted: revealing the secret on Spoke-A publishes it, the Cacti relay picks it up and settles the mirror leg on Spoke-B. There is NO HTTP endpoint for that propagation and no relay endpoint of any kind in the HTLC family. Settling before the counterparty has locked is refused — see htlc-err-04."
+    },
+    {
+      "id": "htlc-hp-05",
+      "title": "After settlement the secret is readable on the record",
+      "description": "Post-condition of htlc-hp-04. The state advances to HTLC_STATE_SETTLED and the previously empty secret field now carries the revealed pre-image, which is how the counterparty spoke learns it.",
+      "category": "happy-path",
+      "preconditions": {
+        "htlcState": "HTLC_STATE_SETTLED"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v1/htlc/status/{contractId}",
+        "pathParams": {
+          "contractId": "{{CONTRACT_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "state": "HTLC_STATE_SETTLED"
+        }
+      },
+      "notes": "Also assert the settlement itself, not only the status word: the receiver's GET /api/v1/token/balance must have risen by the locked amount. A settlement test that checks state alone is an API test, not a settlement test. Divergence: the platform OpenAPI document wraps this record as {\"lock\": {...}} and declares a secret field on it. The delivered gateway returns the record BARE (c.JSON(result) over *HTLCStatus) and its struct has no secret field at all — it carries counterparty_locked, amount and created_at instead. searchHTLC does wrap, as {\"locks\": [...], \"total\": n}; getHTLCStatus does not. The revealed pre-image is NOT readable here: settleHTLC returns the transaction hashes and the secret is never echoed by the status route."
+    },
+    {
+      "id": "htlc-hp-06",
+      "title": "Search accepts the UNPREFIXED state vocabulary",
+      "description": "Filters locks visible to the caller. A ROLE_SUPERVISOR session gets a network-wide read via the on-chain HTLC scanner; everyone else sees only locks they are a counterparty to.",
+      "category": "happy-path",
+      "preconditions": {
+        "atLeastOneLockedHTLC": true
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v1/htlc/search",
+        "query": {
+          "state": "LOCKED",
+          "agreement_id": "{{TRADE_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "locks": "{{ARRAY}}",
+          "total": "{{NON_NEGATIVE_INTEGER}}"
+        }
+      },
+      "notes": "OPEN QUESTION, reproduced not normalised. The state QUERY PARAMETER takes LOCKED | SETTLED | REFUNDED while the state FIELD of each returned lock reads HTLC_STATE_LOCKED and friends. The platform reconciles the two nowhere, so send the bare form and read the prefixed form. Also note agreement_id filters on an FX trade_id despite its name. A supervisor whose on-chain scan fails receives 502, which the platform document does not declare."
+    },
+    {
+      "id": "htlc-hp-07",
+      "title": "Refund after the timelock has expired",
+      "description": "Timeout path. The secret was never revealed, the timelock has passed, and the sender reclaims its tokens via Zeto unlock(). Each side refunds its own leg independently.",
+      "category": "happy-path",
+      "preconditions": {
+        "htlcState": "HTLC_STATE_LOCKED",
+        "timeLockExpired": "current time is past the lock's time_lock",
+        "secretNeverRevealed": true,
+        "session": "a counterparty of this HTLC, holding one of the four mutating roles"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/refund",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "contract_id": "{{EXPIRED_CONTRACT_ID}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "htlc_tx_hash": "{{STRING}}",
+          "zeto_tx_hash": "{{STRING}}"
+        }
+      },
+      "notes": "To reach this state deterministically, lock with a time_lock already in the past (for example 1767229200, which is 2026-01-01T00:00:00Z + 3600s) rather than sleeping. Because the responder's timelock is always the shorter one, the responder regains its tokens strictly before the initiator can — that ordering IS the safety property of the scheme."
+    },
+    {
+      "id": "htlc-err-01",
+      "title": "A secret that does not hash to the hash lock is 500",
+      "description": "The core cryptographic negative. wrongSecretHex is valid hex of the right length but hashes to a different digest, so the pre-image check fails.",
+      "category": "error",
+      "preconditions": {
+        "htlcState": "HTLC_STATE_LOCKED",
+        "session": "a counterparty of this HTLC"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/settle",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "contract_id": "{{CONTRACT_ID}}",
+          "secret": "6362776562332d746f6f6c626f782d68746c632d766563746f722d30312d6e6f"
+        }
+      },
+      "expectedOutput": {
+        "status": 500,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "500 is verified, not assumed. The orchestrator returns codes.InvalidArgument ('secret does not match hashLock', server.go:549-552) but the gateway's SettleHTLC handler maps EVERY downstream error to fiber.StatusInternalServerError (payment.go:303-306) instead of using its own grpcErrorToHTTP mapper. 500 is declared on this operation, so the assertion stays inside the contract; the contract's 400 is reachable only for an unparseable body. Do NOT assert on any error string, and do not resurrect the invented codes HTLC_HASH_MISMATCH or HTLC_EXPIRED — the /api/v1 error model has no machine-readable code at all. The HTLC record stays LOCKED and remains settleable with the correct secret."
+    },
+    {
+      "id": "htlc-err-02",
+      "title": "A non-hex secret is rejected before any hashing",
+      "description": "The secret must be a hex string. The gateway hex-decodes it before computing SHA-256, so a plaintext passphrase fails at decode time.",
+      "category": "error",
+      "preconditions": {
+        "htlcState": "HTLC_STATE_LOCKED",
+        "session": "a counterparty of this HTLC"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/settle",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "contract_id": "{{CONTRACT_ID}}",
+          "secret": "cbweb3-toolbox-htlc-vector-01-ok"
+        }
+      },
+      "expectedOutput": {
+        "status": 500,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "This is the failure mode every earlier Toolbox artefact would have produced: they instructed implementers to send a plaintext passphrase as the secret. hex.DecodeString rejects it (server.go:491-493, codes.InvalidArgument) and the gateway reports 500. The ASCII string used here is the SAME value as the valid secret in htlc-hp-04 — the only difference is that htlc-hp-04 sends it hex-encoded."
+    },
+    {
+      "id": "htlc-err-03",
+      "title": "Refunding before the timelock expires is 500",
+      "description": "The timeout path is unavailable until the timelock has actually passed. This is the guard that stops a sender reclaiming tokens the receiver can still legitimately claim.",
+      "category": "error",
+      "preconditions": {
+        "htlcState": "HTLC_STATE_LOCKED",
+        "timeLockExpired": false,
+        "session": "a counterparty of this HTLC"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/refund",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "contract_id": "{{CONTRACT_ID}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 500,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Verified: orchestrator raises codes.FailedPrecondition ('time lock has not expired yet', server.go:712-716) and the gateway's RefundHTLC handler collapses it to 500 (payment.go:323-326). Note the asymmetry with the FX family, where the same gRPC code becomes 409 because those handlers do use grpcErrorToHTTP. The record stays LOCKED and remains refundable once the timelock passes."
+    },
+    {
+      "id": "htlc-err-04",
+      "title": "Settling before the counterparty has locked is 500",
+      "description": "The atomicity guard. In cross-spoke mode the initiator must not reveal the secret until the relay has observed the responder's matching lock — otherwise it could unlock its own tokens while the mirror lock does not yet exist.",
+      "category": "error",
+      "preconditions": {
+        "htlcState": "HTLC_STATE_LOCKED",
+        "crossSpokeMode": true,
+        "agreementLinked": "the lock carries an agreement_id",
+        "counterpartyLegLocked": false,
+        "session": "the initiator, which holds the secret"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/settle",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "contract_id": "{{CONTRACT_ID}}",
+          "secret": "6362776562332d746f6f6c626f782d68746c632d766563746f722d30312d6f6b"
+        }
+      },
+      "expectedOutput": {
+        "status": 500,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Verified at orchestrator server.go:580-584. The guard applies only when all four conditions hold: the lock has an agreement_id, the gateway is in cross-spoke mode, the caller's record holds the secret (i.e. it is the initiator leg), and the relay has not yet set counterparty_locked. The responder leg, created by lock-with-hash, has no secret and is not gated. Nothing in the API exposes counterparty_locked, so a client cannot pre-check this condition — it can only retry."
+    },
+    {
+      "id": "htlc-err-05",
+      "title": "Lock without amount is 400",
+      "description": "receiver and amount are validated by the gateway itself before anything downstream is called, so this is a genuine 400 rather than a collapsed 500.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid session with a mutating HTLC role"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/lock",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "agreement_id": "{{TRADE_ID}}",
+          "receiver": "funded_operator@spoke-a-bank-c"
         }
       },
       "expectedOutput": {
         "status": 400,
         "body": {
-          "code": "HTLC_HASH_MISMATCH",
-          "message": "{{NON_EMPTY_STRING}}"
+          "error": "{{NON_EMPTY_STRING}}"
         }
       },
-      "notes": "SHA-256('wrong-secret') != hashLock. Contract MUST reject."
+      "notes": "agreement_id and time_lock are the only genuinely optional fields on this request: an absent agreement_id is replaced by a fresh UUID and an absent time_lock defaults to now+3600."
     },
     {
-      "id": "htlc-err-02",
-      "title": "Settle HTLC — expired timeLock (410)",
-      "description": "Attempting to settle after timeLock has passed returns 410.",
+      "id": "htlc-err-06",
+      "title": "Lock-with-hash without hash_lock is 400",
+      "description": "hash_lock, receiver and amount are all checked at the gateway. Omitting the hash lock is the one way a responder leg can fail fast.",
       "category": "error",
       "preconditions": {
-        "htlcExists": true,
-        "htlcStatus": "LOCKED",
-        "timeLockNotExpired": false,
-        "currentTime": "after timeLock"
+        "session": "valid session with a mutating HTLC role"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/lock-with-hash",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "agreement_id": "{{TRADE_ID}}",
+          "receiver": "funded_operator@spoke-b-bank-d",
+          "amount": "850000"
+        }
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Contrast htlc-edge-03: a hash_lock that is PRESENT but malformed gets past this check and fails downstream as a 500."
+    },
+    {
+      "id": "htlc-err-07",
+      "title": "An unknown contract id is 500, not 404",
+      "description": "The HTLC family has no 404 anywhere. Settling or refunding an identifier that does not exist surfaces as a 500, because the gateway's counterparty pre-check only special-cases a permission denial and reports everything else as an internal error.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid session with a mutating HTLC role"
       },
       "input": {
         "method": "POST",
         "path": "/api/v1/htlc/settle",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
         "body": {
-          "contractId": "{{VALID_CONTRACT_ID}}",
-          "secret": "cbweb3-test-secret-2026"
+          "contract_id": "0000000000000000000000000000000000000000000000000000000000000000",
+          "secret": "6362776562332d746f6f6c626f782d68746c632d766563746f722d30312d6f6b"
         }
       },
       "expectedOutput": {
-        "status": 410,
+        "status": 500,
         "body": {
-          "code": "HTLC_EXPIRED"
+          "error": "{{NON_EMPTY_STRING}}"
         }
       },
-      "notes": "Even with the correct secret, settlement is blocked after expiry to protect the refund path."
+      "notes": "Verified: authorizeHTLCCounterparty fetches the lock first, maps only codes.PermissionDenied to 403 and everything else — including codes.NotFound — to 500 (payment.go:349-356). No HTLC operation declares 404 in the contract, which is consistent with the delivered behaviour but leaves a client unable to distinguish 'no such HTLC' from a real server fault."
     },
     {
-      "id": "htlc-hp-03",
-      "title": "Refund HTLC — after timeLock expiry",
-      "description": "After timeLock expires and no settlement occurred, the original sender can reclaim funds.",
-      "category": "happy-path",
+      "id": "htlc-err-08",
+      "title": "Locking against an agreement that is not ACCEPTED is 500",
+      "description": "When agreement_id references a known FX agreement the server gates the lock on that agreement being ACCEPTED and unexpired, and on the receiver and amount matching the agreed terms for this spoke leg.",
+      "category": "error",
       "preconditions": {
-        "htlcExists": true,
-        "htlcStatus": "LOCKED",
-        "timeLockNotExpired": false,
-        "authenticatedAs": "Original sender of locked funds"
+        "agreementState": "PROPOSED",
+        "session": "valid session with a mutating HTLC role",
+        "reservePrelude": "completed"
       },
       "input": {
         "method": "POST",
-        "path": "/api/v1/htlc/refund",
+        "path": "/api/v1/htlc/lock",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
         "body": {
-          "contractId": "{{VALID_CONTRACT_ID}}"
+          "agreement_id": "{{PROPOSED_TRADE_ID}}",
+          "receiver": "funded_operator@spoke-a-bank-c",
+          "amount": "1000000",
+          "time_lock": 1798765200
+        }
+      },
+      "expectedOutput": {
+        "status": 500,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Orchestrator raises FailedPrecondition ('FX agreement must be accepted before locking HTLC', server.go:245) and the gateway's LockHTLC handler collapses it to 500 (payment.go:250-253). The same 500 covers an expired agreement and a receiver/amount that does not match the agreed leg. FX_AGREEMENT_HTLC_STRICT changes whether an UNKNOWN agreement_id is also refused, and is exposed by no endpoint — a client cannot discover which mode a gateway is in."
+    },
+    {
+      "id": "htlc-err-09",
+      "title": "A non-counterparty cannot settle someone else's HTLC — 403",
+      "description": "Authorisation, not authentication. A perfectly valid session belonging to a bank that is neither sender nor receiver of the HTLC is refused.",
+      "category": "error",
+      "preconditions": {
+        "htlcState": "HTLC_STATE_LOCKED",
+        "session": "valid cookie for a third bank that is not a counterparty of this HTLC"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/settle",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{THIRD_PARTY_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "contract_id": "{{CONTRACT_ID}}",
+          "secret": "6362776562332d746f6f6c626f782d68746c632d766563746f722d30312d6f6b"
+        }
+      },
+      "expectedOutput": {
+        "status": 403,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "There are TWO independent sources of 403 on the mutating HTLC routes and the contract describes only one of them. The documented source is the router's role gate. This vector exercises the second: a per-record counterparty check in the handler, re-checked server-side by the orchestrator from the forwarded x-caller-identity (payment.go:358-365). The same check is applied to GET /api/v1/htlc/status, where the contract declares no 403 at all — that gap is recorded in the file README."
+    },
+    {
+      "id": "htlc-err-10",
+      "title": "An oversight-only session cannot lock — 403",
+      "description": "The four mutating HTLC routes are gated to ROLE_BANK, ROLE_COMMERCIAL_BANK, ROLE_TREASURY and ROLE_GOVERNANCE, so a supervisor or NOC session that can read the whole network still cannot drive a settlement.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid cookie carrying ROLE_SUPERVISOR or ROLE_NOC and none of the four mutating roles"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/lock",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{SUPERVISOR_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "agreement_id": "{{TRADE_ID}}",
+          "receiver": "funded_operator@spoke-a-bank-c",
+          "amount": "1000000",
+          "time_lock": 1798765200
+        }
+      },
+      "expectedOutput": {
+        "status": 403,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "The 403 body carries an undocumented required_role array listing the four accepted roles. The platform document declares no 403 on any HTLC operation; the Toolbox contract adds it under x-cbweb3-source: implementation-observed. The same supervisor session CAN call GET /api/v1/htlc/search and gets a network-wide read — read routes carry no role gate."
+    },
+    {
+      "id": "htlc-err-11",
+      "title": "Settling without a session cookie is 401",
+      "description": "The cookie middleware rejects before the handler runs, so no HTLC state is touched and no validation feedback is returned.",
+      "category": "error",
+      "preconditions": {
+        "session": "empty cookie jar"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/settle",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "contract_id": "{{CONTRACT_ID}}",
+          "secret": "6362776562332d746f6f6c626f782d68746c632d766563746f722d30312d6f6b"
+        }
+      },
+      "expectedOutput": {
+        "status": 401,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Safe to run against a stateless mock: it is the one HTLC assertion that needs no prior state."
+    },
+    {
+      "id": "htlc-edge-01",
+      "title": "Settling an already-settled HTLC succeeds idempotently",
+      "description": "Not an error. A repeated settle with the correct secret returns 200 and the ORIGINAL transaction hashes. The relay depends on this: it re-delivers settle events across spokes and must not be punished for an echo.",
+      "category": "edge-case",
+      "preconditions": {
+        "htlcState": "HTLC_STATE_SETTLED",
+        "session": "a counterparty of this HTLC"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/settle",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "contract_id": "{{SETTLED_CONTRACT_ID}}",
+          "secret": "6362776562332d746f6f6c626f782d68746c632d766563746f722d30312d6f6b"
         }
       },
       "expectedOutput": {
         "status": 200,
         "body": {
-          "contractId": "{{SAME_AS_INPUT}}",
-          "status": "REFUNDED"
+          "htlc_tx_hash": "{{SAME_AS_FIRST_SETTLE}}",
+          "zeto_tx_hash": "{{SAME_AS_FIRST_SETTLE}}"
         }
       },
-      "notes": "Refund returns UTXOs to the original sender's address."
+      "notes": "Assert that the hashes EQUAL those returned by htlc-hp-04 — that is what distinguishes idempotent replay from a second on-chain settlement. This is per-endpoint, payload-keyed replay safety, not a general mechanism: the platform has no Idempotency-Key header, no If-Match, no ETag and no operation-level header parameters anywhere. X-Correlation-Id is server-generated and overrides any client value, so it cannot serve as one either. A generic retry wrapper is not part of this API."
     },
     {
-      "id": "htlc-err-03",
-      "title": "Refund HTLC — not yet expired (409)",
-      "description": "Attempting refund before timeLock expiry returns 409.",
-      "category": "error",
-      "preconditions": {
-        "htlcExists": true,
-        "htlcStatus": "LOCKED",
-        "timeLockNotExpired": true
-      },
-      "input": {
-        "method": "POST",
-        "path": "/api/v1/htlc/refund",
-        "body": {
-          "contractId": "{{VALID_CONTRACT_ID}}"
-        }
-      },
-      "expectedOutput": {
-        "status": 409
-      },
-      "notes": "Refund is only valid after timeLock expiry. This prevents the sender from reclaiming funds while the receiver still has time to settle."
-    },
-    {
-      "id": "htlc-err-04",
-      "title": "Refund HTLC — already settled (409)",
-      "description": "Attempting to refund an HTLC that was already settled returns 409.",
-      "category": "error",
-      "preconditions": {
-        "htlcExists": true,
-        "htlcStatus": "SETTLED"
-      },
-      "input": {
-        "method": "POST",
-        "path": "/api/v1/htlc/refund",
-        "body": {
-          "contractId": "{{VALID_CONTRACT_ID}}"
-        }
-      },
-      "expectedOutput": {
-        "status": 409
-      },
-      "notes": "Once settled, funds belong to the receiver. Refund is impossible."
-    },
-    {
-      "id": "htlc-edge-01",
-      "title": "Lock HTLC — agreement not yet accepted",
-      "description": "Attempting to lock funds for an agreement still in PROPOSED status returns 400.",
+      "id": "htlc-edge-02",
+      "title": "Refunding an already-refunded HTLC succeeds idempotently",
+      "description": "The mirror of htlc-edge-01 on the timeout path. A repeated refund returns 200 with the original hashes rather than a conflict.",
       "category": "edge-case",
       "preconditions": {
-        "agreementExists": true,
-        "agreementStatus": "PROPOSED"
+        "htlcState": "HTLC_STATE_REFUNDED",
+        "session": "a counterparty of this HTLC"
       },
       "input": {
         "method": "POST",
-        "path": "/api/v1/htlc/lock",
+        "path": "/api/v1/htlc/refund",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
         "body": {
-          "agreementId": "{{PROPOSED_AGREEMENT_ID}}",
-          "hashLock": "0x7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
-          "timeLock": 1740000000
+          "contract_id": "{{REFUNDED_CONTRACT_ID}}"
         }
       },
       "expectedOutput": {
-        "status": 400
+        "status": 200,
+        "body": {
+          "htlc_tx_hash": "{{SAME_AS_FIRST_REFUND}}",
+          "zeto_tx_hash": "{{SAME_AS_FIRST_REFUND}}"
+        }
       },
-      "notes": "Lock should only be allowed when agreement status is READY_FOR_SETTLEMENT."
+      "notes": "Settling an HTLC that is already REFUNDED is NOT idempotent and NOT a 200: the state check refuses it. Its status is the same collapsed 500 as htlc-err-03, for the same reason."
+    },
+    {
+      "id": "htlc-edge-03",
+      "title": "A 0x-prefixed hash lock is rejected",
+      "description": "hash_lock must be exactly 64 lowercase hex characters with NO 0x prefix. The contract's own examples are inconsistent — the lock response example shows an 0x-prefixed ellipsis and the lock-with-hash request example is 66 characters — and copying either produces this failure.",
+      "category": "edge-case",
+      "preconditions": {
+        "session": "valid session with a mutating HTLC role"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/lock-with-hash",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "agreement_id": "{{TRADE_ID}}",
+          "receiver": "funded_operator@spoke-b-bank-d",
+          "amount": "850000",
+          "time_lock": 1798763400,
+          "hash_lock": "0xcd0a60b0332435927cb5648fe6d22a7be02f3d2cfacb1d4a0e8cce0b7a8d7338"
+        }
+      },
+      "expectedOutput": {
+        "status": 500,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Verified: hex.DecodeString fails on the 0x prefix and the orchestrator answers InvalidArgument ('hash_lock must be a 64-char hex string (32 bytes)', server.go:403-406), which the gateway's LockHTLCWithHashLock handler collapses to 500 (payment.go:282-285). The same 500 covers a 66-character value. The initiator's lock response returns the hash lock in the correct unprefixed form, so a client that passes it through verbatim is safe; a client that reads the contract examples is not."
+    },
+    {
+      "id": "htlc-edge-04",
+      "title": "Omitting both timelocks still yields the safe ordering",
+      "description": "When time_lock is absent the gateway defaults the initiator leg to now+3600 and the responder leg to now+1800. The defaults themselves encode the safety property, which is otherwise expressed only in prose.",
+      "category": "edge-case",
+      "preconditions": {
+        "agreementState": "ACCEPTED",
+        "reservePrelude": "completed on both spokes",
+        "initiatorLockedWithoutTimeLock": true
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/lock-with-hash",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{RESPONDER_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "agreement_id": "{{TRADE_ID}}",
+          "receiver": "funded_operator@spoke-b-bank-d",
+          "amount": "850000",
+          "hash_lock": "cd0a60b0332435927cb5648fe6d22a7be02f3d2cfacb1d4a0e8cce0b7a8d7338"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "contract_id": "{{NON_EMPTY_STRING}}",
+          "hash_lock": "cd0a60b0332435927cb5648fe6d22a7be02f3d2cfacb1d4a0e8cce0b7a8d7338"
+        }
+      },
+      "notes": "Verify the invariant, not just the 201: read both legs with GET /api/v1/htlc/status and assert initiator.time_lock > responder.time_lock. Nothing on the server enforces the relationship — a client that supplies an explicit responder timelock LONGER than the initiator's will be accepted and will have built an unsafe swap."
     }
   ]
 }

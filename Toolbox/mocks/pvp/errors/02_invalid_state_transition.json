@@ -1,0 +1,25 @@
+{
+  "id": "mock-pvp-err-02",
+  "title": "409 — accepting an agreement that is already ACCEPTED",
+  "description": "The FX lifecycle only allows PROPOSED -> ACCEPTED. Replaying step 9 of the happy path is refused, which is also why this API needs no idempotency key: replay safety is per-endpoint and payload-keyed, and there is no Idempotency-Key, If-Match or ETag anywhere.",
+  "notes": "BLOCKING DIVERGENCE, verified in the delivered gateway (grpcErrorToHTTP in internal/http/handlers): gRPC FailedPrecondition maps to HTTP 409 Conflict. Both the platform OpenAPI document and contracts/pvp declare 412 Precondition Failed on accept, reject, cancel and settle. A client written against the contract handles a status it will never receive. The body is the raw gRPC error string; the exact wording is implementation detail, so assert on 409 only.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/payments/fx/agreements/aaeca49d-89f2-4bf1-9410-0779f50b9754/accept",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {}
+  },
+  "response": {
+    "status": 409,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "67e37907ff99a856743abd94149c3d3a"
+    },
+    "body": {
+      "error": "rpc error: code = FailedPrecondition desc = FX agreement \"aaeca49d-89f2-4bf1-9410-0779f50b9754\" is in state ACCEPTED, expected PROPOSED"
+    }
+  }
+}

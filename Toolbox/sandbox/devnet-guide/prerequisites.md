@@ -55,11 +55,16 @@ pip install pytest requests
 ### 4. Verify everything works
 
 ```bash
-# Lint the OpenAPI spec
-npx @stoplight/spectral-cli lint Toolbox/contracts/pvp/openapi_pvp_v0.1.0.yaml
+# Lint all three OpenAPI contracts
+for spec in Toolbox/contracts/*/openapi_*.yaml; do
+  npx @stoplight/spectral-cli lint "$spec"
+done
 
 # List conformance tests (without running them)
-cd Toolbox/conformance && pytest --co -v && cd ../..
+cd Toolbox/conformance && pytest --co -q && cd ../..
 ```
+
+All three contracts — `auth`, `pvp` and `amm` — lint clean with no findings at any
+severity. If Spectral reports anything, the contract has drifted and that is a bug.
 
 If both commands succeed, you're ready to proceed to [mock-server-setup.md](mock-server-setup.md).

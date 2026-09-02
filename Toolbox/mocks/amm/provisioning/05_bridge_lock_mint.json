@@ -1,0 +1,34 @@
+{
+  "id": "mock-amm-prov-05",
+  "title": "Corridor step 4 — BCCR bridges 500,000 CRC of its own reserves to the Hub",
+  "description": "Lock spoke tCeBM, mint the mirrored Hub token against it. The position starts LOCKING; poll GET /api/v2/bridge/positions until it reads ACTIVE before doing anything with the Hub token.",
+  "notes": "Gateway: BCCR (Banco Central de Costa Rica) Central Bank gateway, spoke-crc. Requires the central_bank realm role — note that /api/v2 uses lowercase unprefixed roles, while /api/v1 uses the ROLE_-prefixed ones; both namespaces coexist in the same token's roles array. Accepts a bearer token as well as the cookie (RequireAnyAuth). Send only amount: owner_bank_id comes from the session bankId claim and spoke_network / native_asset / mirrored_asset come from gateway configuration; all four exist in the request struct but are deprecated. Divergences verified in the delivered gateway: the documented 200 is really 201, and mirrored_asset comes back as the W-token ADDRESS, not the W-tCeBM_CRC symbol the platform's example shows, while native_asset is a symbol — one field, two kinds of value. This is one of the two chokepoints where the daily transfer limit is checked and deducted before value moves; exhausting it yields 422 TRANSFER_LIMIT_EXCEEDED. The bridge-state vocabulary (LOCKING, ACTIVE, BURNING, BURNED, RELEASED, RECONCILIATION_REQUIRED) lives only in Go domain code; the PENDING/ACTIVE/CLOSED example in the platform document names two states that do not exist.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v2/bridge/lock-mint",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "amount": "500000000000000000000000"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "f49b33c281bc1a3405ba6f8a86a8884a"
+    },
+    "body": {
+      "position_id": "fb19b547-7c4c-4991-8eb3-cc5e1b0b466a",
+      "owner_bank_id": "central_bank_crc",
+      "spoke_network": "spoke-crc",
+      "native_asset": "tCeBM_CRC",
+      "mirrored_asset": "0x1a3e796c050839af5f0af526c1a562889e603d38",
+      "mirrored_amount": "500000000000000000000000",
+      "bridge_state": "LOCKING",
+      "relayer_retries": 0
+    }
+  }
+}

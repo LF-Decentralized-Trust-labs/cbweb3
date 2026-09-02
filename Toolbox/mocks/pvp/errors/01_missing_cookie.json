@@ -1,0 +1,28 @@
+{
+  "id": "mock-pvp-err-01",
+  "title": "401 — an HTLC lock with no access_token cookie",
+  "description": "The cookie-auth middleware rejects the request before the handler runs. There is no bearer scheme on the Scenario A surface: an Authorization header is ignored, not accepted.",
+  "notes": "Verified in the delivered gateway middleware (internal/http/middleware/auth.go). A missing cookie gives exactly this body; a present-but-invalid one gives {\"error\": \"invalid token\"}. There is no CSRF token anywhere on the platform — SameSite=Strict is the only cross-site mitigation, and inventing an X-CSRF-Token header will simply be ignored.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/htlc/lock",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "agreement_id": "aaeca49d-89f2-4bf1-9410-0779f50b9754",
+      "receiver": "funded_operator@spoke-crc-bank-heredia",
+      "amount": "5000000"
+    }
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "b7c71029ecc12949c5a7ed2b2ab04666"
+    },
+    "body": {
+      "error": "missing access_token cookie"
+    }
+  }
+}

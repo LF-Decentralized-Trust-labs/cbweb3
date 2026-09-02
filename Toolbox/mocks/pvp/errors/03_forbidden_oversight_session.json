@@ -1,0 +1,34 @@
+{
+  "id": "mock-pvp-err-03",
+  "title": "403 — a supervisor session cannot move value",
+  "description": "The four mutating HTLC routes are gated to ROLE_BANK, ROLE_COMMERCIAL_BANK, ROLE_TREASURY and ROLE_GOVERNANCE, so an oversight-only session (ROLE_SUPERVISOR or ROLE_NOC) holding a perfectly valid cookie still cannot lock, settle or refund.",
+  "notes": "Verified in the delivered gateway (internal/http/middleware/require_role.go and the router's HTLC group). The platform OpenAPI document declares no 403 on any HTLC operation; contracts/pvp adds it as implementation-observed. The body carries an undocumented required_role array alongside error — treat it as advisory and assert on the status. A second, different 403 exists on these routes: a caller with the right role who is not a counterparty of the HTLC gets {\"error\": \"not a counterparty of this HTLC\"} with no required_role.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/htlc/settle",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "contract_id": "382307e71ddcd22f2e345d29eb396e0880e9a194aa90bc09110d15ea097ed1f5",
+      "secret": "d2aec5d19f13a018dd1895ef2f97b1cb0ca95664ff69b99bde9303a7a5dda43c"
+    }
+  },
+  "response": {
+    "status": 403,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "6a73734d8efb05e4d583e00d7e311b88"
+    },
+    "body": {
+      "error": "insufficient permissions",
+      "required_role": [
+        "ROLE_BANK",
+        "ROLE_COMMERCIAL_BANK",
+        "ROLE_TREASURY",
+        "ROLE_GOVERNANCE"
+      ]
+    }
+  }
+}

@@ -1,0 +1,547 @@
+{
+  "contract": "CBWeb3 Scenario B — Hub-and-spoke settlement (quote and cross-currency swap)",
+  "contractVersion": "2.3.0",
+  "generatedAt": "2026-08-20",
+  "vectors": [
+    {
+      "id": "swap-hp-01",
+      "title": "Cross-currency quote — three parameters the upstream document does not declare",
+      "description": "Generates a short-lived quote for a full cross-border settlement. Public: no credentials required.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "none",
+        "poolStatus": "ACTIVE",
+        "circuitBreaker": "LIVE"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/amm/quote/cross-currency",
+        "query": {
+          "source_currency": "BRL",
+          "target_currency": "ARS",
+          "amount_out": "1000000000000000000000",
+          "pool_pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "max_slippage_pct": 0.01
+        },
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "quote_id": "{{NON_EMPTY_STRING}}",
+          "pool_pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "amount_out": "1000000000000000000000",
+          "amount_in": "{{BIGINT_STRING}}",
+          "valid_until": "{{UNIX_SECONDS}}",
+          "time_remaining_seconds": "{{POSITIVE_INTEGER}}"
+        }
+      },
+      "notes": "BLOCKING SPEC DIVERGENCE, mirrored to the implementation: the platform document declares ZERO parameters on this operation, while the handler requires source_currency, target_currency and amount_out and answers 400 INVALID_REQUEST without them (see swap-err-01). pool_pair and max_slippage_pct are genuinely optional; the handler defaults max_slippage_pct to 0.01. created_at and valid_until are UNIX SECONDS here, not RFC 3339 — unlike almost every other timestamp in this contract. THE QUOTE LIVES 15 SECONDS: issue the quote and the swap programmatically in one step. A fixture that pauses between them will flake."
+    },
+    {
+      "id": "swap-hp-02",
+      "title": "Single-pair exact-output quote uses amount_out, not amountOut",
+      "description": "The intra-Hub quote: how much input is needed to receive exactly amount_out on one pair.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "none",
+        "poolStatus": "ACTIVE"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/amm/quote/exact-output",
+        "query": {
+          "pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "amount_out": "1000000000000000000000"
+        },
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "required_input": "{{BIGINT_STRING}}",
+          "price_impact": "{{DECIMAL_STRING}}",
+          "quote_timestamp": "{{RFC3339}}"
+        }
+      },
+      "notes": "BLOCKING SPEC DIVERGENCE: the platform document names this parameter amountOut in camelCase; the delivered handler reads only amount_out. A client written strictly against the upstream document always gets 400 (see swap-err-02). Note also that this quote's timestamp IS RFC 3339, while the cross-currency quote's timestamps are Unix seconds — two conventions, same family."
+    },
+    {
+      "id": "swap-hp-03",
+      "title": "Initiate the cross-border payment — the one call an integrator makes",
+      "description": "Orchestrates bridge-in (the payer's Central Bank locks spoke tCeBM and mints its Hub W-token), Hub AMM swap, bridge-out (the BENEFICIARY's Central Bank burns and delivers on its spoke) and residue return. Returns a swap_id to poll.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "access_token COOKIE for the payer bank — this route is cookie-only",
+        "reservePrelude": "completed; payer holds at least max_amount_in of spoke tCeBM",
+        "poolStatus": "ACTIVE",
+        "circuitBreaker": "LIVE",
+        "quoteAgeSeconds": "under 15"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/amm/swap/cross-currency",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "source_currency": "BRL",
+          "target_currency": "ARS",
+          "pool_pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "amount_out": "1000000000000000000000",
+          "max_amount_in": "1200000000000000000000",
+          "beneficiary_bank_id": "bank-galicia",
+          "quote_id": "{{QUOTE_ID_FROM_SWAP_HP_01}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "swap_id": "{{NON_EMPTY_STRING}}",
+          "correlation_id": "{{NON_EMPTY_STRING}}",
+          "status": "{{IN_PROGRESS_OR_TERMINAL}}"
+        }
+      },
+      "notes": "THE FULL max_amount_in IS BRIDGED IN, not amount_in — the realised input is unknown until the swap executes, so the whole slippage ceiling crosses to the Hub and the unspent part comes back as a separate RESIDUE leg. Size max_amount_in accordingly. Do NOT send payer_bank_id: it is deprecated and ignored, and the payer is derived from the session bankId claim. Observed status values are QUOTING, BRIDGE_IN_PROGRESS, SWAP_IN_PROGRESS, BRIDGE_OUT_PROGRESS, COMPLETED and FAILED; that vocabulary is not in the platform OpenAPI at all and is recovered from internal/domain, so the contract publishes it as a documented free string rather than an enum."
+    },
+    {
+      "id": "swap-hp-04",
+      "title": "Poll to COMPLETED and verify SETTLEMENT, not just status",
+      "description": "The assertion that makes this a settlement test rather than an API test. Poll until status is COMPLETED or FAILED, then check the money.",
+      "category": "happy-path",
+      "preconditions": {
+        "swapInitiated": "swap-hp-03",
+        "payerBalanceBefore": "captured before the swap",
+        "session": "the payer's own cookie session"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/amm/swap/cross-currency/{id}",
+        "pathParams": {
+          "id": "{{SWAP_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "swap_id": "{{SWAP_ID}}",
+          "status": "COMPLETED",
+          "amount_in": "{{BIGINT_STRING_LESS_THAN_OR_EQUAL_TO_MAX_AMOUNT_IN}}",
+          "amount_out": "1000000000000000000000",
+          "bridge_in_position_id": "{{NON_EMPTY_STRING}}",
+          "bridge_out_position_id": "{{NON_EMPTY_STRING}}",
+          "residue_amount": "{{BIGINT_STRING}}",
+          "residue_position_id": "{{NON_EMPTY_STRING}}",
+          "residue_status": "RETURNED",
+          "completed_at": "{{RFC3339}}"
+        }
+      },
+      "notes": "Five settlement assertions, all of which a status-only test would miss. (1) The payer's tCeBM balance falls by amount_in, NOT by max_amount_in. (2) residue_amount equals max_amount_in minus amount_in. (3) residue_status is RETURNED — RETURN_FAILED means the payer has NOT been made whole and the buffer is stranded on the Hub swap signer. (4) The bridge-out position reaches BURNED or RELEASED. (5) GET /api/v2/amm/hub-reconciliation reports balanced true. Asserting status == COMPLETED alone is not conformance."
+    },
+    {
+      "id": "swap-hp-05",
+      "title": "Swap history is scoped to the calling bank and is the only paginated endpoint",
+      "description": "A bank can never list another bank's swaps and there is no parameter that would let it try — the scope comes from the session bankId claim.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "valid cookie",
+        "atLeastOneSwap": true
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/amm/swap/cross-currency",
+        "query": {
+          "from": "2026-06-01",
+          "to": "2026-06-30",
+          "page": 1,
+          "page_size": 20
+        },
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "operations": "{{ARRAY}}"
+        }
+      },
+      "notes": "page_size above 100 is silently CLAMPED to 100, not rejected — a client that asks for 1000 and receives 100 has not hit the end of the data. Date bounds are YYYY-MM-DD and inclusive. A gateway with no history reader wired answers 501 with a body typed as SovereignSeedError, whose error_code vocabulary has nothing to do with swaps; treat 501 as a deployment-shape skip."
+    },
+    {
+      "id": "swap-hp-06",
+      "title": "Single-pair exact-output swap on the Hub",
+      "description": "The intra-Hub leg only: swap on one pair, receive exactly amount_out and spend at most max_amount_in. This is NOT the cross-border flow.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "cookie session carrying the commercial_bank realm role",
+        "poolStatus": "ACTIVE",
+        "hubTokensHeld": true
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/amm/swap/exact-output",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "amount_out": "1000000000000000000000",
+          "max_amount_in": "1200000000000000000000",
+          "beneficiary_id": "bank-galicia"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "order_id": "{{NON_EMPTY_STRING}}",
+          "amount_in": "{{BIGINT_STRING_LESS_THAN_OR_EQUAL_TO_MAX_AMOUNT_IN}}",
+          "state": "{{NON_EMPTY_STRING}}",
+          "hub_sender_address": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "hub_sender_address is always a CENTRAL BANK address: the commercial bank never signs on the Hub itself. Do not send payer_id — deprecated and ignored, derived from the session bankId claim with a configured BANK_CODE fallback. The platform's shared 403 text on this operation claims it requires the CENTRAL_BANK role, which is wrong: the router gates it on commercial_bank."
+    },
+    {
+      "id": "swap-err-01",
+      "title": "Following the upstream document literally is a guaranteed 400",
+      "description": "The cross-currency quote is documented with no parameters at all. Calling it that way always fails.",
+      "category": "error",
+      "preconditions": {
+        "session": "none"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/amm/quote/cross-currency",
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "error_code": "INVALID_REQUEST"
+        }
+      },
+      "notes": "This vector exists to be run against a live gateway and against a Prism mock served from the upstream document, because the two disagree: the mock will happily return a 200. The disagreement IS the finding. Verified in the delivered handler (internal/http/handlers/quote_handler.go:74-79)."
+    },
+    {
+      "id": "swap-err-02",
+      "title": "Sending amountOut instead of amount_out is 400",
+      "description": "The camelCase spelling the platform document declares is not read by any handler; the parameter is simply absent as far as the gateway is concerned.",
+      "category": "error",
+      "preconditions": {
+        "session": "none"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/amm/quote/exact-output",
+        "query": {
+          "pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "amountOut": "1000000000000000000000"
+        },
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "error_code": "INVALID_REQUEST"
+        }
+      },
+      "notes": "The delivered error message is 'pair and amount_out are required query parameters'. Assert the status and, if anything, error_code — never the sentence."
+    },
+    {
+      "id": "swap-err-03",
+      "title": "An unknown currency is 422 under a misleading error code",
+      "description": "A currency pair with no registered corridor cannot be quoted. The handler reports it as insufficient pool liquidity because it collapses every quote-generation failure onto that one code.",
+      "category": "error",
+      "preconditions": {
+        "session": "none",
+        "corridorExists": false
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/amm/quote/cross-currency",
+        "query": {
+          "source_currency": "XYZ",
+          "target_currency": "ABC",
+          "amount_out": "1000000000000000000000"
+        },
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 422,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "error_code": "INSUFFICIENT_POOL_LIQUIDITY"
+        }
+      },
+      "notes": "The code is hard-coded on this branch regardless of the real cause (quote_handler.go:90-94), so INSUFFICIENT_POOL_LIQUIDITY here can mean 'unknown currency', 'no corridor', 'pool empty' or a genuine liquidity shortfall. Do not build client logic that distinguishes them; verify the corridor exists with GET /api/v2/hub/currencies and GET /api/v2/amm/pairs before quoting."
+    },
+    {
+      "id": "swap-err-04",
+      "title": "A bearer token does not work on the swap routes",
+      "description": "Twelve /api/v2 routes in Scenario B accept either a cookie or a bearer token. The two swap endpoints are NOT among them — they are cookie-only.",
+      "category": "error",
+      "preconditions": {
+        "session": "a valid JWT presented as Authorization: Bearer, with NO access_token cookie"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/amm/swap/cross-currency",
+        "headers": {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer {{VALID_JWT}}"
+        },
+        "body": {
+          "source_currency": "BRL",
+          "target_currency": "ARS",
+          "pool_pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "amount_out": "1000000000000000000000",
+          "max_amount_in": "1200000000000000000000",
+          "beneficiary_bank_id": "bank-galicia"
+        }
+      },
+      "expectedOutput": {
+        "status": 401,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "error_code": "UNAUTHENTICATED"
+        }
+      },
+      "notes": "The /api/v2 middleware fails closed when neither the session bankId claim nor the configured BANK_CODE fallback resolves a calling bank. The same 401 is returned for an empty jar. The bridge, liquidity, sovereign-add, token-approval and hub-reconciliation routes DO accept bearer — see amm_bridge_vectors.json."
+    },
+    {
+      "id": "swap-err-05",
+      "title": "Exceeding the daily transfer limit is 422",
+      "description": "A Central Bank can cap a participant's daily outflow. The refusal is a business decision, not a malformed request.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid payer cookie",
+        "transferLimit": "a limit exists for this participant and currency and is already exhausted"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/amm/swap/cross-currency",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "source_currency": "BRL",
+          "target_currency": "ARS",
+          "pool_pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "amount_out": "1000000000000000000000",
+          "max_amount_in": "1200000000000000000000",
+          "beneficiary_bank_id": "bank-galicia"
+        }
+      },
+      "expectedOutput": {
+        "status": 422,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "error_code": "TRANSFER_LIMIT_EXCEEDED",
+          "recommended_action": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "422 responses on this route carry a recommended_action string the other error shapes do not. No value moves: the limit is checked before the bridge-in leg."
+    },
+    {
+      "id": "swap-err-06",
+      "title": "Swapping against a pool that is not ACTIVE is 422",
+      "description": "Pre-condition failure inside the orchestrator, before any value moves.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid payer cookie",
+        "poolStatus": "EMPTY or PENDING_COUNTERPART"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/amm/swap/cross-currency",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "source_currency": "BRL",
+          "target_currency": "ARS",
+          "pool_pair": "{{UNSEEDED_PAIR_ID}}",
+          "amount_out": "1000000000000000000000",
+          "max_amount_in": "1200000000000000000000",
+          "beneficiary_bank_id": "bank-galicia"
+        }
+      },
+      "expectedOutput": {
+        "status": 422,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "error_code": "POOL_NOT_ACTIVE"
+        }
+      },
+      "notes": "Check GET /api/v2/amm/pool/{pair}/status first — it is public and free. An ACTIVE pair in the registry is not the same thing as an ACTIVE pool."
+    },
+    {
+      "id": "swap-err-07",
+      "title": "Swapping while the circuit breaker is halted is 422",
+      "description": "Governance can halt a pair 1-of-N. Every swap on it is refused until two Central Banks sign a resume.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid payer cookie",
+        "circuitBreaker": "HALTED for this pair"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/amm/swap/cross-currency",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "source_currency": "BRL",
+          "target_currency": "ARS",
+          "pool_pair": "{{HALTED_PAIR_ID}}",
+          "amount_out": "1000000000000000000000",
+          "max_amount_in": "1200000000000000000000",
+          "beneficiary_bank_id": "bank-galicia"
+        }
+      },
+      "expectedOutput": {
+        "status": 422,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "error_code": "CIRCUIT_BREAKER_HALTED"
+        }
+      },
+      "notes": "Pair the pre-flight check in registry-hp-05 with this, and remember registry-edge-01: a status call that omits pair can report LIVE for a different pair entirely."
+    },
+    {
+      "id": "swap-err-08",
+      "title": "Omitting pool_pair is 400",
+      "description": "Unlike the quote, the swap request requires an explicit pool_pair; it does not resolve one from the currency couple.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid payer cookie"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/amm/swap/cross-currency",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "source_currency": "BRL",
+          "target_currency": "ARS",
+          "amount_out": "1000000000000000000000",
+          "max_amount_in": "1200000000000000000000",
+          "beneficiary_bank_id": "bank-galicia"
+        }
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "error_code": "INVALID_REQUEST"
+        }
+      },
+      "notes": "Take the value from GET /api/v2/amm/pairs, or from the pool_pair field the quote echoes back. Never construct it."
+    },
+    {
+      "id": "swap-err-09",
+      "title": "Another bank's swap id is 404, not 403",
+      "description": "Visibility scoping is expressed as absence: a swap belonging to a different bank simply does not exist as far as this session is concerned.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid cookie for bank A",
+        "swapOwner": "bank B"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/amm/swap/cross-currency/{id}",
+        "pathParams": {
+          "id": "{{OTHER_BANKS_SWAP_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{BANK_A_ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 404,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "error_code": "SWAP_NOT_FOUND"
+        }
+      },
+      "notes": "Returning 404 rather than 403 avoids confirming that the identifier exists. The same 404 covers a genuinely unknown identifier, so a client cannot distinguish the two — which is the point."
+    },
+    {
+      "id": "swap-edge-01",
+      "title": "An expired quote_id fails as a generic 500, with no distinct code",
+      "description": "Supplying a quote_id older than its 15-second TTL fails the swap. There is no QUOTE_EXPIRED code: the failure falls through the handler's string-matching classifier to the generic branch.",
+      "category": "edge-case",
+      "preconditions": {
+        "session": "valid payer cookie",
+        "quoteAgeSeconds": "greater than 15"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/amm/swap/cross-currency",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "source_currency": "BRL",
+          "target_currency": "ARS",
+          "pool_pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "amount_out": "1000000000000000000000",
+          "max_amount_in": "1200000000000000000000",
+          "beneficiary_bank_id": "bank-galicia",
+          "quote_id": "{{EXPIRED_QUOTE_ID}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 500,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "error_code": "INTERNAL_ERROR"
+        }
+      },
+      "notes": "Verified: the orchestrator rejects the expired quote and marks the swap FAILED, and the handler's classifier matches none of its known substrings, so it returns 500 INTERNAL_ERROR (cross_currency_swap_handler.go:307-312). 500 is declared on the operation. The swap record is created and marked FAILED before the rejection, so a 500 here is NOT a no-op — the swap_id exists and is pollable. quote_id is optional; omitting it skips this validation entirely."
+    },
+    {
+      "id": "swap-edge-02",
+      "title": "A COMPLETED swap can still leave the payer short",
+      "description": "The residue return is a separate bridge leg and can fail on its own. status COMPLETED with residue_status RETURN_FAILED means the payment was delivered but the payer's unspent slippage buffer is stranded on the Hub swap signer.",
+      "category": "edge-case",
+      "preconditions": {
+        "swapStatus": "COMPLETED",
+        "residueReturnLegFailed": true
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/amm/swap/cross-currency/{id}",
+        "pathParams": {
+          "id": "{{SWAP_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "status": "COMPLETED",
+          "residue_status": "RETURN_FAILED",
+          "residue_amount": "{{NON_ZERO_BIGINT_STRING}}"
+        }
+      },
+      "notes": "This is why residue reconciliation must be asserted rather than status alone. Follow it with GET /api/v2/amm/hub-reconciliation, where the stranded value appears in unexplained and balanced reads false. The distinct BRIDGE_OUT_FAILED code on a 500 is the sibling case: the Hub swap SUCCEEDED and the beneficiary delivery did not, so it is never safe to blind-retry."
+    }
+  ]
+}

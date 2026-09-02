@@ -1,0 +1,29 @@
+{
+  "id": "mock-amm-prov-07",
+  "title": "Corridor step 6 — BCCR commits its own side of the pool",
+  "description": "Cooperative commit-reveal: each Central Bank commits only its own side, a Cacti watcher observes the match, and the relay executes both commits together. This is the path the platform's own end-to-end test uses.",
+  "notes": "Gateway: BCCR (Banco Central de Costa Rica) Central Bank gateway, spoke-crc. Requires the central_bank realm role — note that /api/v2 uses lowercase unprefixed roles, while /api/v1 uses the ROLE_-prefixed ones; both namespaces coexist in the same token's roles array. Send only pool_pair and amount. provider_id, side and w_token_address are labelled deprecated backward-compatibility fields in the delivered handler: the provider comes from the session and the side is resolved on-chain from the pair, because which side a Central Bank owns is not the caller's to choose. The alternative sovereign path (deposit-side / finalize / reclaim-side) is not interchangeable with this one. An earlier dual-sided liquidity/add endpoint that let one Central Bank supply both sides was removed as a sovereignty breach and does not exist.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v2/amm/liquidity/commit",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "pool_pair": "W-CRC-CLP",
+      "amount": "500000000000000000000000"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "26e25f3f8e218a18d75b2e650928af28"
+    },
+    "body": {
+      "commit_id": "cmt-504855b5",
+      "status": "PENDING"
+    }
+  }
+}

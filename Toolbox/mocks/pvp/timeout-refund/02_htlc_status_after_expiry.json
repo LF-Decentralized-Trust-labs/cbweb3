@@ -1,0 +1,33 @@
+{
+  "id": "mock-pvp-timeout-02",
+  "title": "Five minutes past the timelock the lock is still LOCKED — nothing expires by itself",
+  "description": "At 10:05, past the 10:00 timelock, the record still reads HTLC_STATE_LOCKED and counterparty_locked is still false. Expiry is a permission to refund, not a state transition.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway. There is no EXPIRED value in the HTLC state vocabulary and no background job that sets one, so a client must compare time_lock against its own clock — the gateway will not tell it. Same wrapping divergence as mock-pvp-hp-13: the body is the bare record, not {lock: ...}. The delivered domain also carries SETTLING and REFUNDING states that appear in no published enum; treat state as an open vocabulary and never assume the five documented values are exhaustive.",
+  "secretWithheld": "The refund scenario turns on the secret NEVER being revealed — that is what keeps the corridor safe. Publishing a preimage for this hash lock would contradict the flow it documents, so the digest is intentionally unaccompanied and cannot be recomputed.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/htlc/status/7ad86b6b574fae1af798923bb1c50138b94ec5c11b1b6bf4ea2b22e2fb2fa0cb",
+    "headers": {
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "db3449565e0a71873264ef3544904cc3"
+    },
+    "body": {
+      "contract_id": "7ad86b6b574fae1af798923bb1c50138b94ec5c11b1b6bf4ea2b22e2fb2fa0cb",
+      "sender": "funded_operator@spoke-crc-bank-sanjose",
+      "receiver": "funded_operator@spoke-crc-bank-heredia",
+      "hash_lock": "98939f97a8c572ec4c14bef348fab145342e080d0ea4150b3fd2d6ae63012a89",
+      "time_lock": 1781863200,
+      "zeto_lock_ref": "zeto-utxo-9c2cf4764894",
+      "state": "HTLC_STATE_LOCKED",
+      "counterparty_locked": false,
+      "amount": "5000000",
+      "created_at": "2026-06-19T09:00:00Z"
+    }
+  }
+}

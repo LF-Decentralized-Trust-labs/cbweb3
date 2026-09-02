@@ -1,0 +1,22 @@
+{
+  "id": "mock-amm-hp-01",
+  "title": "Discovery 1 — where the Hub contracts live (no credentials)",
+  "description": "The natural first call against an unknown CBWeb3 network. Registered on every gateway regardless of which AMM services are wired, and unauthenticated because the addresses are public on-chain.",
+  "notes": "Gateway: any. Twelve /api/v2 operations in this contract are fully public; this is the entry point of a zero-onboarding tutorial. Note the values are read from ONE gateway's environment, so this reports a deployment, not network state.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v2/amm/hub-config"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "05387c71fcfa09ddcb811106dea50352"
+    },
+    "body": {
+      "amm_address": "0xcbc2bfd758c87b8e6db22afa3dc7c83e00b65baf",
+      "pair_registry": "0xd9000b53fd4a419d9294540040d0f00f3b18d62d",
+      "currency_registry": "0x649d0250cbd2272e983e91792a1aedc37b64c473"
+    }
+  }
+}

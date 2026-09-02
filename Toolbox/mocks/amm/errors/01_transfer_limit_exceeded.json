@@ -1,0 +1,34 @@
+{
+  "id": "mock-amm-err-01",
+  "title": "422 TRANSFER_LIMIT_EXCEEDED — the payer's daily allowance is exhausted",
+  "description": "Daily transfer limits are set by Central Banks and enforced at the two chokepoints where value moves: bridge lock-mint and the cross-currency swap. The limit is checked and atomically deducted before anything moves, so a refused swap is a no-op.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway, spoke-crc. Verified in the delivered gateway (ErrTransferLimitExceeded in internal/services/transfer_limit_checker.go and the 422 mapping in cross_currency_swap_handler.go); none of it is in the platform OpenAPI document. Note the limit is quoted in wei in this message, while the max_amount a Central Bank SENDS to create the same limit is a human decimal like \"100000.00\" — one field name, two units, depending on direction. Limits are matched by specificity: (participant + currency) beats (participant) beats (currency) beats global.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v2/amm/swap/cross-currency",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "source_currency": "CRC",
+      "target_currency": "CLP",
+      "pool_pair": "W-CRC-CLP",
+      "amount_out": "1000000000000000000000",
+      "max_amount_in": "548181340558471952655",
+      "beneficiary_bank_id": "bank-valparaiso"
+    }
+  },
+  "response": {
+    "status": 422,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "525d7ec5db4b7a37faa5543e53077b3e"
+    },
+    "body": {
+      "error": "daily transfer limit exceeded for bank-sanjose/CRC (limit: 500000000000000000000000 wei)",
+      "error_code": "TRANSFER_LIMIT_EXCEEDED",
+      "recommended_action": "Contact your Central Bank to review or increase the daily transfer limit."
+    }
+  }
+}

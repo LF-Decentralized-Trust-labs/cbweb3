@@ -1,0 +1,43 @@
+{
+  "id": "mock-pvp-hp-10",
+  "title": "Step 10 — read the agreed terms back before locking any value",
+  "description": "The full agreement record, wrapped in a singular agreement key. Both banks read this to confirm the terms their HTLC legs must match: 5,000,000 CRC to CR_AGENT on spoke-crc, 37,000 PEN to PE_BENE on spoke-pen.",
+  "notes": "Gateway: either side. BLOCKING DIVERGENCE, verified in the delivered gateway (fxAgreementToResult calls ag.State.String() on the protobuf enum): state comes back as FX_STATE_ACCEPTED, not the ACCEPTED that both the platform OpenAPI document and contracts/pvp declare in their enum. A client switching on ACCEPTED never matches. group_id and contract_address are present only when Pente integration is active. No field of this record is declared required by the platform.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/payments/fx/agreements/aaeca49d-89f2-4bf1-9410-0779f50b9754",
+    "headers": {
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "d2aa34635bef8e30056b48249f9b8884"
+    },
+    "body": {
+      "agreement": {
+        "trade_id": "aaeca49d-89f2-4bf1-9410-0779f50b9754",
+        "originator": "funded_operator@spoke-crc-bank-sanjose",
+        "counterparty_b": "funded_operator@spoke-pen-bank-lima",
+        "settlement_agent": "funded_operator@spoke-crc-bank-heredia",
+        "custodian": "funded_operator@spoke-pen-bank-lima",
+        "beneficiary": "funded_operator@spoke-pen-bank-callao",
+        "origin_amount": "5000000",
+        "counter_amount": "37000",
+        "origin_currency": "CRC",
+        "counter_currency": "PEN",
+        "rate": "0.0074",
+        "source_spoke_id": "spoke-crc",
+        "dest_spoke_id": "spoke-pen",
+        "source_receiver": "funded_operator@spoke-crc-bank-heredia",
+        "dest_receiver": "funded_operator@spoke-pen-bank-callao",
+        "expiry_date": 1781820000,
+        "state": "FX_STATE_ACCEPTED",
+        "group_id": "pente-group-36f748d7ea87",
+        "contract_address": "0x55bfad3cbb8c8bdb557828830d07caac177c2fb8"
+      }
+    }
+  }
+}

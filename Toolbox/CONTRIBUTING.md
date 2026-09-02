@@ -87,9 +87,11 @@ Artifacts must include clear “how to validate” steps:
 
 - Reviews follow **CODEOWNERS** rules (area owners must approve).
 - Maintainership prioritizes:
+  - **fidelity to the delivered platform** — never an invented endpoint, field, status
+    code, enum value or schema; an absence stated explicitly beats a plausible guess
   - clarity and correctness of specs
   - deterministic behavior (mocks/vectors/tests)
-  - backward compatibility and explicit versioning
+  - explicit versioning, and compatibility with what integrators actually depend on
   - security posture (OWASP-minded hygiene)
 
 If a PR is blocked, reviewers should request specific changes and/or propose a follow-up issue.
@@ -98,11 +100,21 @@ If a PR is blocked, reviewers should request specific changes and/or propose a f
 
 ## Versioning and changelogs
 
-- Prefer **semantic versioning** for artifacts that are consumed externally:
+- **An interface contract's version tracks the gateway version it describes**, in both the
+  filename (`openapi_<domain>_v<gateway-version>.yaml`) and `info.version`. All three
+  contracts are currently at `2.3.0` because that is the delivered API Gateway version.
+  A contract does not get an independent version series: the Toolbox describes a platform,
+  it does not design one.
+- Prefer **semantic versioning** for artifacts that are not tied to a gateway version:
   - MAJOR: breaking changes
   - MINOR: backward-compatible additions
   - PATCH: backward-compatible fixes
 - For meaningful changes, include a short changelog entry near the relevant artifact.
+- **Compatibility is owed to real consumers, not to published files.** In the 2026-08
+  realignment the published PvP contract was deleted outright rather than deprecated,
+  because it described an API that no CBWeb3 gateway had ever served and no downstream
+  consumer existed. Where a contract *does* have consumers, a breaking change requires a
+  version bump plus updated mocks, vectors and conformance tests in the same PR.
 
 ---
 

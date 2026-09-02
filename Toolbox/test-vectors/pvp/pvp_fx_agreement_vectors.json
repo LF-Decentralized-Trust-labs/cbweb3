@@ -1,122 +1,604 @@
 {
-  "contract": "PvP Settlement — FX Agreement",
-  "contractVersion": "0.1.0",
-  "generatedAt": "2026-02-19",
+  "contract": "CBWeb3 Scenario A — PvP Settlement (FX agreement lifecycle)",
+  "contractVersion": "2.3.0",
+  "generatedAt": "2026-08-20",
   "vectors": [
     {
       "id": "fx-hp-01",
-      "title": "Create FX Agreement — happy path",
-      "description": "A valid FX agreement proposal with all required fields returns 201 and a new agreementId.",
+      "title": "Propose an FX agreement",
+      "description": "Creates the agreement in PROPOSED state — step 1 of a PvP settlement. Note the body carries the four spoke/receiver fields: the contract marks them optional (mirroring the platform document) but the delivered service requires all four, so this is the smallest body that actually works.",
       "category": "happy-path",
       "preconditions": {
-        "authenticatedAs": "CB-CountryA (0xCB001_CountryA)",
-        "counterpartyExists": true
+        "session": "access_token cookie for the originating bank",
+        "partyIdentitiesInRoster": "counterparty_b, source_receiver and dest_receiver must all be members of the Paladin roster",
+        "reservePrelude": "not required to propose, but required before any HTLC lock"
       },
       "input": {
         "method": "POST",
-        "path": "/api/v1/fx/agreement",
+        "path": "/api/v1/payments/fx/agreements",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
         "body": {
-          "sourceCurrency": "tCeBM-A",
-          "targetCurrency": "tCeBM-B",
-          "sourceAmount": "1000000",
-          "exchangeRate": "0.058",
-          "counterpartyAddress": "0xCB002_CountryB"
+          "counterparty_b": "funded_operator@spoke-b-bank-d",
+          "origin_amount": "1000000",
+          "counter_amount": "850000",
+          "origin_currency": "BRL",
+          "counter_currency": "ARS",
+          "rate": "0.85",
+          "expiry_date": 4102444800,
+          "source_spoke_id": "spoke-brl",
+          "dest_spoke_id": "spoke-usd",
+          "source_receiver": "funded_operator@spoke-brl-bank-c",
+          "dest_receiver": "funded_operator@spoke-usd-bank-b"
         }
       },
       "expectedOutput": {
         "status": 201,
         "body": {
-          "agreementId": "{{NON_EMPTY_STRING}}",
-          "status": "PROPOSED"
+          "trade_id": "{{NON_EMPTY_STRING}}",
+          "tx_hash": "{{STRING}}"
         }
       },
-      "notes": "agreementId is implementation-specific; test should assert it is a non-empty string."
+      "notes": "Rate consistency is checked as an ABSOLUTE difference: abs(counter_amount/origin_amount - rate) must be <= FX_RATE_TOLERANCE_PCT (default 0.001). Here 850000/1000000 = 0.85 exactly, so the difference is zero. expiry_date 4102444800 is 2100-01-01T00:00:00Z, chosen so the fixture stays valid; the only requirement is that it be in the future. tx_hash may be an empty string when no on-chain submit occurred (Pente off), so assert it is present, not that it is non-empty. Do not send originator: the gateway binds it to the authenticated caller and ignores a client-supplied value."
     },
     {
       "id": "fx-hp-02",
-      "title": "Accept FX Agreement — happy path",
-      "description": "Counterparty accepts a PROPOSED agreement. Status transitions to READY_FOR_SETTLEMENT.",
+      "title": "Counterparty accepts with no request body at all",
+      "description": "PROPOSED to ACCEPTED. The request body is genuinely optional — POST with no body is valid and means 'accept in my own name'. Once accepted, both spokes may proceed with their HTLC locks.",
       "category": "happy-path",
       "preconditions": {
-        "authenticatedAs": "CB-CountryB (0xCB002_CountryB)",
-        "agreementExists": true,
-        "agreementStatus": "PROPOSED"
+        "session": "access_token cookie for the counterparty_b party",
+        "agreementState": "PROPOSED"
       },
       "input": {
         "method": "POST",
-        "path": "/api/v1/fx/agreement/{agreementId}/accept"
+        "path": "/api/v1/payments/fx/agreements/{tradeId}/accept",
+        "pathParams": {
+          "tradeId": "{{TRADE_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{COUNTERPARTY_ACCESS_TOKEN}}"
+        }
       },
       "expectedOutput": {
         "status": 200,
         "body": {
-          "agreementId": "{{SAME_AS_PRECONDITION}}",
-          "status": "READY_FOR_SETTLEMENT"
+          "tx_hash": "{{STRING}}"
         }
       },
-      "notes": "Only the counterpartyAddress from the agreement should be allowed to accept."
+      "notes": "on_behalf is declared in the schema but is NEVER honoured from this user-facing route — the handler hard-codes false and the on-chain acceptOnBehalf path is driven by the Central Bank relay over direct gRPC. Sending on_behalf: true changes nothing; a client must not rely on it."
     },
     {
-      "id": "fx-err-01",
-      "title": "Create FX Agreement — missing required field",
-      "description": "Request without exchangeRate should return 400.",
-      "category": "error",
+      "id": "fx-hp-03",
+      "title": "Read the agreement back — wrapped in a singular key",
+      "description": "The record comes back under agreement (singular) while the path segment is agreements (plural) and the identifier placeholder is singular tradeId.",
+      "category": "happy-path",
       "preconditions": {
-        "authenticatedAs": "CB-CountryA (0xCB001_CountryA)"
+        "agreementState": "ACCEPTED"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v1/payments/fx/agreements/{tradeId}",
+        "pathParams": {
+          "tradeId": "{{TRADE_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "agreement": {
+            "trade_id": "{{TRADE_ID}}",
+            "state": "FX_STATE_ACCEPTED"
+          }
+        }
+      },
+      "notes": "NO field of FXAgreement is declared required by the platform document — not even trade_id or state. Guard every field access. state uses the British double-L spelling CANCELLED in its terminal branch. Divergence: the platform OpenAPI document declares the bare state vocabulary (ACCEPTED, PROPOSED, ...). The delivered gateway serialises the protobuf enum with State.String(), so the wire value is always prefixed — FX_STATE_ACCEPTED. The stored domain value is bare, which is why the preconditions below still read ACCEPTED; only the response is prefixed."
+    },
+    {
+      "id": "fx-hp-04",
+      "title": "Audit trail records the transition and its source",
+      "description": "The immutable append-only event log, ordered by occurrence ascending. source is the field that matters when debugging a cross-spoke flow: it separates a local call from a relay-delivered change made on the other spoke.",
+      "category": "happy-path",
+      "preconditions": {
+        "agreementState": "ACCEPTED",
+        "transitionsSoFar": "PROPOSED -> ACCEPTED"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v1/payments/fx/agreements/{tradeId}/audit",
+        "pathParams": {
+          "tradeId": "{{TRADE_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "events": "{{ARRAY}}",
+          "total": "{{POSITIVE_INTEGER}}"
+        }
+      },
+      "notes": "Expect at least one event with from_state PROPOSED, to_state ACCEPTED and source LOCAL_API. The source vocabulary is LOCAL_API | RELAY | SYSTEM_JOB | ON_BEHALF. SYSTEM_JOB is documented as a background expiration worker, yet there is no EXPIRED state for it to write — see fx-edge-01."
+    },
+    {
+      "id": "fx-hp-05",
+      "title": "Reject a proposed agreement (terminal)",
+      "description": "PROPOSED to REJECTED. Terminal: nothing further can be done with the agreement.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "counterparty_b",
+        "agreementState": "PROPOSED"
       },
       "input": {
         "method": "POST",
-        "path": "/api/v1/fx/agreement",
+        "path": "/api/v1/payments/fx/agreements/{tradeId}/reject",
+        "pathParams": {
+          "tradeId": "{{OTHER_PROPOSED_TRADE_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{COUNTERPARTY_ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
         "body": {
-          "sourceCurrency": "tCeBM-A",
-          "targetCurrency": "tCeBM-B",
-          "sourceAmount": "1000000",
-          "counterpartyAddress": "0xCB002_CountryB"
+          "tx_hash": "{{STRING}}"
+        }
+      },
+      "notes": "Use a different agreement from the one under test in fx-hp-02: reject and accept are mutually exclusive branches out of PROPOSED."
+    },
+    {
+      "id": "fx-hp-06",
+      "title": "Cancel an accepted agreement (terminal)",
+      "description": "Valid from PROPOSED or ACCEPTED, typically called by the originator when the deal falls through. This operation declares no request body at all and correspondingly declares no 400.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "a party to the agreement",
+        "agreementState": "ACCEPTED",
+        "htlcLocked": false
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/fx/agreements/{tradeId}/cancel",
+        "pathParams": {
+          "tradeId": "{{ACCEPTED_TRADE_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "tx_hash": "{{STRING}}"
+        }
+      },
+      "notes": "Cancelling does NOT unwind an HTLC that has already locked tokens against this agreement. The two state machines are independent; the HTLC must still be settled or refunded on its own timelock."
+    },
+    {
+      "id": "fx-hp-07",
+      "title": "List agreements filtered by state",
+      "description": "Returns agreements accessible to the caller, newest first. There is no pagination of any kind and total is the length of the array.",
+      "category": "happy-path",
+      "preconditions": {
+        "atLeastOneProposedAgreement": true
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v1/payments/fx/agreements",
+        "query": {
+          "state": "PROPOSED"
+        },
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "agreements": "{{ARRAY}}",
+          "total": "{{NON_NEGATIVE_INTEGER}}"
+        }
+      },
+      "notes": "The single counterparty filter matches EITHER side — it is applied against originator or counterparty_b. There is no originator-only filter, and the parameter is spelled counterparty while the record field it can match is counterparty_b."
+    },
+    {
+      "id": "fx-err-01",
+      "title": "Missing rate is 400",
+      "description": "counterparty_b, origin_amount, counter_amount, origin_currency, counter_currency, rate and expiry_date are all checked at the gateway before anything else happens.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/fx/agreements",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "counterparty_b": "funded_operator@spoke-b-bank-d",
+          "origin_amount": "1000000",
+          "counter_amount": "850000",
+          "origin_currency": "BRL",
+          "counter_currency": "ARS",
+          "expiry_date": 4102444800,
+          "source_spoke_id": "spoke-brl",
+          "dest_spoke_id": "spoke-usd",
+          "source_receiver": "funded_operator@spoke-brl-bank-c",
+          "dest_receiver": "funded_operator@spoke-usd-bank-b"
         }
       },
       "expectedOutput": {
         "status": 400,
         "body": {
-          "code": "{{ERROR_CODE}}",
-          "message": "{{NON_EMPTY_STRING}}"
+          "error": "{{NON_EMPTY_STRING}}"
         }
       },
-      "notes": "Exact error code is implementation-specific; test should assert 400 status and Error schema."
+      "notes": "Unlike the reserve endpoints, the FX handler validates required fields itself (payment.go:805-807) so this genuinely returns 400, and it routes downstream errors through grpcErrorToHTTP rather than collapsing them to 500."
     },
     {
       "id": "fx-err-02",
-      "title": "Accept FX Agreement — already accepted (409)",
-      "description": "Attempting to accept an agreement that is already READY_FOR_SETTLEMENT returns 409.",
+      "title": "Both legs in the same currency is 400",
+      "description": "An FX agreement whose two legs name the same ISO 4217 code is not an FX agreement. The comparison is case-insensitive, so BRL and brl are also rejected.",
       "category": "error",
       "preconditions": {
-        "authenticatedAs": "CB-CountryB (0xCB002_CountryB)",
-        "agreementExists": true,
-        "agreementStatus": "READY_FOR_SETTLEMENT"
+        "session": "valid"
       },
       "input": {
         "method": "POST",
-        "path": "/api/v1/fx/agreement/{agreementId}/accept"
+        "path": "/api/v1/payments/fx/agreements",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "counterparty_b": "funded_operator@spoke-b-bank-d",
+          "origin_amount": "1000000",
+          "counter_amount": "1000000",
+          "origin_currency": "BRL",
+          "counter_currency": "brl",
+          "rate": "1.0",
+          "expiry_date": 4102444800,
+          "source_spoke_id": "spoke-brl",
+          "dest_spoke_id": "spoke-usd",
+          "source_receiver": "funded_operator@spoke-brl-bank-c",
+          "dest_receiver": "funded_operator@spoke-usd-bank-b"
+        }
       },
       "expectedOutput": {
-        "status": 409
+        "status": 400,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
       },
-      "notes": "Agreement state machine: PROPOSED → READY_FOR_SETTLEMENT is the only valid accept transition."
+      "notes": "The currency codes are never validated against an ISO 4217 registry — an unknown code such as XYZ is accepted as long as the two differ. The only currency rule the platform enforces is inequality."
     },
     {
       "id": "fx-err-03",
-      "title": "Get non-existent agreement (404)",
-      "description": "Querying an agreement that does not exist returns 404.",
+      "title": "Omitting source_spoke_id is 400 although the contract marks it optional",
+      "description": "The highest-value validation vector in this file. A client that sends exactly the contract's required set and nothing else always fails, because the delivered service additionally requires source_spoke_id, dest_spoke_id, source_receiver and dest_receiver, and requires the two spoke ids to differ.",
       "category": "error",
       "preconditions": {
-        "authenticatedAs": "CB-CountryA (0xCB001_CountryA)"
+        "session": "valid"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/fx/agreements",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "counterparty_b": "funded_operator@spoke-b-bank-d",
+          "origin_amount": "1000000",
+          "counter_amount": "850000",
+          "origin_currency": "BRL",
+          "counter_currency": "ARS",
+          "rate": "0.85",
+          "expiry_date": 4102444800
+        }
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Blocking spec-vs-implementation divergence, verified in the delivered source (payment-orchestrator internal/grpc/server/server.go:1009-1021). The platform document and therefore the Toolbox contract list all four fields as optional. They are not. The status code asserted here (400) is declared on the operation, so the vector stays inside the contract while documenting the trap."
+    },
+    {
+      "id": "fx-err-04",
+      "title": "Expiry in the past is 400",
+      "description": "expiry_date must be a future Unix timestamp in seconds. The check runs before the currency and amount checks.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/fx/agreements",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "counterparty_b": "funded_operator@spoke-b-bank-d",
+          "origin_amount": "1000000",
+          "counter_amount": "850000",
+          "origin_currency": "BRL",
+          "counter_currency": "ARS",
+          "rate": "0.85",
+          "expiry_date": 1704067200,
+          "source_spoke_id": "spoke-brl",
+          "dest_spoke_id": "spoke-usd",
+          "source_receiver": "funded_operator@spoke-brl-bank-c",
+          "dest_receiver": "funded_operator@spoke-usd-bank-b"
+        }
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "1704067200 is 2024-01-01T00:00:00Z. Note the unit: seconds, not milliseconds. Sending a millisecond timestamp passes the future check and produces an agreement that expires in the year 57000."
+    },
+    {
+      "id": "fx-err-05",
+      "title": "Rate inconsistent with the amounts is 400",
+      "description": "The server recomputes counter_amount/origin_amount and refuses the proposal when it differs from the stated rate by more than the gateway's tolerance.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid",
+        "gatewayTolerance": "FX_RATE_TOLERANCE_PCT default 0.001"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/fx/agreements",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "counterparty_b": "funded_operator@spoke-b-bank-d",
+          "origin_amount": "1000000",
+          "counter_amount": "850000",
+          "origin_currency": "BRL",
+          "counter_currency": "ARS",
+          "rate": "0.90",
+          "expiry_date": 4102444800,
+          "source_spoke_id": "spoke-brl",
+          "dest_spoke_id": "spoke-usd",
+          "source_receiver": "funded_operator@spoke-brl-bank-c",
+          "dest_receiver": "funded_operator@spoke-usd-bank-b"
+        }
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "0.85 implied versus 0.90 stated is a difference of 0.05, far outside the 0.001 default. Open question flagged rather than resolved: FX_RATE_TOLERANCE_PCT is a gateway environment variable exposed by NO endpoint, so a client cannot discover the tolerance in force and cannot compute in advance whether a proposal will be accepted. The comparison is an absolute difference, not a percentage of the rate, despite the PCT in the variable name."
+    },
+    {
+      "id": "fx-err-06",
+      "title": "Unknown trade id is 404",
+      "description": "Reads of an agreement that does not exist are translated from the downstream NotFound into 404 by grpcErrorToHTTP.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid"
       },
       "input": {
         "method": "GET",
-        "path": "/api/v1/fx/agreement/agr-nonexistent-999"
+        "path": "/api/v1/payments/fx/agreements/{tradeId}",
+        "pathParams": {
+          "tradeId": "trade-does-not-exist-0000"
+        },
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
       },
       "expectedOutput": {
-        "status": 404
+        "status": 404,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
       },
-      "notes": null
+      "notes": "404 applies to the whole FX family: get, accept, reject, cancel, settle and audit all answer 404 for an unknown tradeId. The HTLC family does NOT — see htlc-err-07."
+    },
+    {
+      "id": "fx-err-07",
+      "title": "Double accept is refused 409, not 412",
+      "description": "Accepting an agreement that is already ACCEPTED is an invalid state transition. Only PROPOSED can be accepted.",
+      "category": "error",
+      "preconditions": {
+        "session": "counterparty_b",
+        "agreementState": "ACCEPTED"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/fx/agreements/{tradeId}/accept",
+        "pathParams": {
+          "tradeId": "{{ACCEPTED_TRADE_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{COUNTERPARTY_ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 409,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "CONTRACT DEFECT, deliberately not mirrored. The contract declares 412 on this operation (as does the platform document), but the delivered gateway NEVER emits 412 for a state-transition failure: the orchestrator returns codes.FailedPrecondition (server.go:1187) and grpcErrorToHTTP maps FailedPrecondition to fiber.StatusConflict, i.e. 409 (payment.go:1126-1127). The only 412 the Scenario A gateway can emit anywhere is the missing-participant-certificate case in onboarding_proxy.go:465, which is what the 412 on lockHTLCWithHash and on POST /api/v1/auth/pki-login actually means. See the file README, defect FX-409."
+    },
+    {
+      "id": "fx-err-08",
+      "title": "Settling an agreement that was never accepted is 409",
+      "description": "ACCEPTED is the only state from which an agreement can settle. Attempting to settle a PROPOSED agreement is refused.",
+      "category": "error",
+      "preconditions": {
+        "session": "a party to the agreement",
+        "agreementState": "PROPOSED"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/fx/agreements/{tradeId}/settle",
+        "pathParams": {
+          "tradeId": "{{PROPOSED_TRADE_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 409,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Same 409-versus-412 defect as fx-err-07 (orchestrator server.go:1367). In a normal cross-spoke flow an integrator never calls settle at all: the Cacti relay triggers it once both HTLC legs have settled. It is callable manually only when Pente integration is off — one of several ways FX behaviour differs materially between Pente-on and Pente-off deployments, with no capability endpoint to tell them apart."
+    },
+    {
+      "id": "fx-err-09",
+      "title": "Cancelling a terminal agreement is 409",
+      "description": "REJECTED, CANCELLED and SETTLED are terminal. Cancel is valid only from PROPOSED or ACCEPTED.",
+      "category": "error",
+      "preconditions": {
+        "session": "a party to the agreement",
+        "agreementState": "CANCELLED"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/fx/agreements/{tradeId}/cancel",
+        "pathParams": {
+          "tradeId": "{{CANCELLED_TRADE_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 409,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Same 409-versus-412 defect (orchestrator server.go:1319). Cancel is the only FX mutation with no request body and no declared 400."
+    },
+    {
+      "id": "fx-err-10",
+      "title": "A party identity outside the Paladin roster is 400",
+      "description": "Before proposing on chain, the gateway resolves the Paladin roster and rejects any party identity that is not a member, rather than letting the on-chain propose fail with an opaque Pente membership error.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid",
+        "rosterResolvable": true
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/fx/agreements",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "counterparty_b": "funded_operator@spoke-z-bank-nonexistent",
+          "origin_amount": "1000000",
+          "counter_amount": "850000",
+          "origin_currency": "BRL",
+          "counter_currency": "ARS",
+          "rate": "0.85",
+          "expiry_date": 4102444800,
+          "source_spoke_id": "spoke-brl",
+          "dest_spoke_id": "spoke-usd",
+          "source_receiver": "funded_operator@spoke-brl-bank-c",
+          "dest_receiver": "funded_operator@spoke-usd-bank-b"
+        }
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "The 400 body carries an extra invalid_identities array listing the offending identities. That field is not declared in the contract's ErrorResponse — treat it as advisory and assert on the status code. If the roster itself cannot be resolved the gateway fails closed with 503, which the contract does not declare on this operation; that gap is recorded in the file README."
+    },
+    {
+      "id": "fx-err-11",
+      "title": "Proposing without a session cookie is 401",
+      "description": "Every FX route is CookieAuth-guarded. The middleware rejects before the handler runs, so no validation feedback is returned.",
+      "category": "error",
+      "preconditions": {
+        "session": "empty cookie jar"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/fx/agreements",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "counterparty_b": "funded_operator@spoke-b-bank-d",
+          "origin_amount": "1000000",
+          "counter_amount": "850000",
+          "origin_currency": "BRL",
+          "counter_currency": "ARS",
+          "rate": "0.85",
+          "expiry_date": 4102444800,
+          "source_spoke_id": "spoke-brl",
+          "dest_spoke_id": "spoke-usd",
+          "source_receiver": "funded_operator@spoke-brl-bank-c",
+          "dest_receiver": "funded_operator@spoke-usd-bank-b"
+        }
+      },
+      "expectedOutput": {
+        "status": 401,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Note the ordering: 401 wins over the 400 that this same body would earn if it were malformed. A client debugging a 401 should not start by inspecting its payload."
+    },
+    {
+      "id": "fx-edge-01",
+      "title": "An expired agreement has no representable terminal state",
+      "description": "Every agreement carries expiry_date and the audit trail documents a SYSTEM_JOB background expiration worker, yet the state enum is PROPOSED | ACCEPTED | REJECTED | CANCELLED | SETTLED with no EXPIRED member. Reading an agreement past its expiry still shows its pre-expiry state.",
+      "category": "edge-case",
+      "preconditions": {
+        "agreementState": "PROPOSED",
+        "expiryDate": "in the past"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v1/payments/fx/agreements/{tradeId}",
+        "pathParams": {
+          "tradeId": "{{EXPIRED_TRADE_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "agreement": {
+            "state": "FX_STATE_PROPOSED"
+          }
+        }
+      },
+      "notes": "Open question, flagged rather than resolved. A client cannot distinguish a live PROPOSED agreement from an expired one by state alone; it must compare expiry_date against the current time itself. The expiry gate that IS enforced sits at HTLC lock time, not at accept time: locking against an expired agreement raises FailedPrecondition ('FX agreement has expired', orchestrator server.go:249/388) — see htlc-err-08. The contract's 412 description mentions expiry on accept, but the delivered accept path checks only the state. Divergence: the platform OpenAPI document declares the bare state vocabulary (ACCEPTED, PROPOSED, ...). The delivered gateway serialises the protobuf enum with State.String(), so the wire value is always prefixed — FX_STATE_ACCEPTED. The stored domain value is bare, which is why the preconditions below still read ACCEPTED; only the response is prefixed."
     }
   ]
 }

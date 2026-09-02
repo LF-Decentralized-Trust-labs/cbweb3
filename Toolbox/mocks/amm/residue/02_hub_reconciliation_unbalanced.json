@@ -1,0 +1,47 @@
+{
+  "id": "mock-amm-res-02",
+  "title": "The same failure seen from the Central Bank: unexplained is non-zero, balanced false",
+  "description": "BCCR's reconciliation shows 5.43 W-tCeBM_CRC on chain that no in-flight payment accounts for, flagged against the payer bank and the stranded RESIDUE position from mock-amm-res-01. This is the supervisory counterpart of the client-side symptom.",
+  "notes": "Gateway: BCCR Central Bank gateway. A non-zero unexplained is a reportable condition, not necessarily a loss. bridge_state RECONCILIATION_REQUIRED is part of the real bridge vocabulary recovered from Go domain code (LOCKING, ACTIVE, BURNING, BURNED, RELEASED, RECONCILIATION_REQUIRED); it is absent from the platform OpenAPI document entirely, and the PENDING/ACTIVE/CLOSED example that document gives names two states that do not exist.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v2/amm/hub-reconciliation",
+    "headers": {
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "90140918dfecf116d10349d586553327"
+    },
+    "body": {
+      "w_token": "0x1a3e796c050839af5f0af526c1a562889e603d38",
+      "holder_address": "0xacd4461e8f0d4a4d9a2949753a419568f9a1de97",
+      "on_chain_balance": "5427538025331405472",
+      "expected_in_flight": "0",
+      "unexplained": "5427538025331405472",
+      "stranded_total": "5427538025331405472",
+      "per_bank": [
+        {
+          "owner_bank_id": "bank-sanjose",
+          "amount": "5427538025331405472",
+          "positions": 1
+        }
+      ],
+      "stranded": [
+        {
+          "position_id": "d56cf828-40a7-42ad-b327-4d7398e94bc4",
+          "owner_bank_id": "bank-sanjose",
+          "leg": "RESIDUE",
+          "direction": "OUT",
+          "amount": "5427538025331405472",
+          "bridge_state": "RECONCILIATION_REQUIRED"
+        }
+      ],
+      "unattributed": [],
+      "balanced": false
+    }
+  }
+}

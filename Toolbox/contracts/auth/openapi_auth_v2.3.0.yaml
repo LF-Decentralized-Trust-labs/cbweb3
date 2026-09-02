@@ -1,0 +1,819 @@
+openapi: 3.0.3
+
+info:
+  title: CBWeb3 Toolbox — Authentication & Session Contract
+  version: 2.3.0
+  description: |
+    Normative interface contract for the **authentication and session surface** of the
+    CBWeb3 API Gateway, as delivered in gateway version **2.3.0**.
+
+    Every other CBWeb3 Toolbox contract (`contracts/pvp/`, `contracts/amm/`) depends on
+    this one: with the single exception of `GET /healthz` and a handful of public
+    read-only registry endpoints in Scenario B, **no CBWeb3 endpoint can be called
+    without first obtaining an `access_token` cookie through the flows described here.**
+
+    ## Why this is a separate contract
+
+    The authentication block of the platform's own OpenAPI document is *byte-identical*
+    between the Scenario A (single-ledger / PvP) and Scenario B (hub-and-spoke / AMM)
+    gateways. Publishing it once, rather than twice, guarantees the two scenario
+    contracts cannot drift on the one thing every integration starts with.
+
+    ## The two login flows — read this before writing a client
+
+    There is **one** login endpoint, `POST /api/v1/auth/login`, and it behaves in two
+    completely different ways depending on the calling participant's role. The server
+    decides which flow applies from the participant record; **the client cannot select
+    it**.
+
+    * **Direct flow** — `ROLE_GOVERNANCE`, `ROLE_SUPERVISOR`, `ROLE_NOC`,
+      `ROLE_GOVERNANCE_OFFICER`. The response body carries `accessToken` /
+      `refreshToken`, and `Set-Cookie` headers install the `access_token` and
+      `refresh_token` HttpOnly cookies. Login is complete.
+    * **PKI nonce flow** — `ROLE_COMMERCIAL_BANK`, `ROLE_TREASURY`. The response is
+      `{"nonce": "<hex>"}` with **no tokens and no cookies**. The client must sign that
+      nonce with the private key matching its Central-Bank-issued X.509 participant
+      certificate and complete login via `POST /api/v1/auth/wallet/bind`.
+
+    Commercial banks — the actors an external integrator is most likely to be building
+    for — therefore always perform a two-step dance. A fixture that stops after
+    `/auth/login` will never hold a session.
+
+    ## Session mechanics
+
+    * Two cookies are set: `access_token` and `refresh_token`. Both are
+      `Path=/; HttpOnly; SameSite=Strict`. The `Secure` attribute is controlled by the
+      gateway's `COOKIE_SECURE` environment variable (false on plain-HTTP local dev).
+    * Only `access_token` is a declared security scheme. `refresh_token` is undeclared
+      in the platform spec but is what `POST /auth/logout` revokes and what
+      `POST /auth/refresh` falls back to when the request body omits `refreshToken`.
+    * The `Max-Age` values shown in the `Set-Cookie` examples below are copied from the
+      platform spec and are mutually inconsistent there (300 / 900 / 3600 seconds on
+      three adjacent endpoints). They are illustrative, not a contract.
+
+    ## There is no CSRF protection, and there is no idempotency key
+
+    An exhaustive search of the delivered gateway found **no** `X-CSRF-Token`, no CSRF
+    endpoint, no double-submit cookie and no `Origin`/`Referer` check. The sole
+    mitigation against cross-site request forgery is `SameSite=Strict` on the auth
+    cookies. This contract deliberately does not declare a CSRF header, because the
+    platform does not implement one — do not add one to your client.
+
+    Likewise there is no `Idempotency-Key`, no `If-Match`/`ETag`, and no client-supplied
+    request id anywhere in the delivered surface. The `X-Correlation-Id` response header
+    that every response carries is *server*-generated (16 random bytes, hex) and
+    explicitly overrides any client-supplied value, so it cannot serve as an idempotency
+    key.
+
+    ## Role vocabularies
+
+    Two disjoint role namespaces coexist in the same JWT `roles` array:
+
+    * `/api/v1` (this contract, and all of `contracts/pvp/`) uses the **`ROLE_`-prefixed
+      uppercase** Keycloak realm roles: `ROLE_GOVERNANCE`, `ROLE_COMMERCIAL_BANK`,
+      `ROLE_TREASURY`, `ROLE_SUPERVISOR`, `ROLE_NOC`, `ROLE_GOVERNANCE_OFFICER`
+      (plus `ROLE_BANK` on Scenario A).
+    * `/api/v2` (all of `contracts/amm/`) uses **lowercase unprefixed** realm roles:
+      `central_bank`, `commercial_bank`, `mlp`.
+
+    ## Source of truth and known spec divergences
+
+    Derived from the delivered CBWeb3 API Gateway v2.3.0 OpenAPI document
+    (`scenario-{a,b}/backend/services/api-gateway/docs/openapi.yaml`, `openapi: 3.0.3`,
+    `info.version: 2.3.0`), cross-checked against the gateway's Go router and handlers.
+
+    Where the delivered implementation and the platform's own OpenAPI document disagree,
+    this contract documents **what a client actually observes**, and marks the
+    discrepancy inline with a `Spec divergence:` paragraph. Everywhere else it mirrors
+    the platform document field-for-field, including its inconsistencies (see the mixed
+    `clientId` / `user_id` / `current_client_secret` casings across three adjacent
+    endpoints — reproduced deliberately, not normalised).
+  contact:
+    name: CBWeb3 Toolbox Working Group
+    url: https://github.com/LFDT-Lab/cbweb3
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local development gateway (generic) — the platform's own default server
+  - url: http://127.0.0.1:4012
+    description: >-
+      Local Prism mock of this contract. The Toolbox convention is one Prism
+      instance per contract — 4010 pvp, 4011 amm, 4012 auth — so all three can run
+      side by side: npx @stoplight/prism-cli mock
+      Toolbox/contracts/auth/openapi_auth_v2.3.0.yaml --port 4012
+
+tags:
+  - name: Health
+    description: Unauthenticated readiness probe. The only endpoint callable with no credentials at all.
+  - name: Authentication
+    description: |
+      Login (direct and PKI nonce flows), PKI wallet bind, token refresh, logout,
+      caller claims introspection, and client-secret rotation.
+
+paths:
+
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: |
+        Liveness/readiness probe for a CBWeb3 gateway. Unauthenticated, and the only
+        endpoint in the entire platform surface that requires no credentials on both
+        scenarios.
+
+        Integration harnesses poll this endpoint before attempting any other call: a
+        gateway that is up but still wiring its per-role service dependencies will
+        answer here while returning 404 on routes whose backing service is not yet
+        registered.
+      operationId: healthCheck
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: ok
+
+  /api/v1/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Authenticate client credentials and obtain access + refresh tokens
+      description: |
+        Step 1 of every CBWeb3 session. Two authentication flows depending on the
+        participant role — the server chooses, the client cannot.
+
+        **Direct login** (`ROLE_GOVERNANCE`, `ROLE_SUPERVISOR`, `ROLE_NOC`, etc.):
+        returns `accessToken` plus optional `refreshToken` in the JSON body, and sets
+        the `access_token` and `refresh_token` HttpOnly cookies automatically. The
+        session is ready to use.
+
+        **PKI nonce flow** (`ROLE_COMMERCIAL_BANK`, `ROLE_TREASURY`): returns
+        `{"nonce": "<hex>"}` only — no tokens, no cookies. The client must sign the
+        nonce with the P-256 private key matching its participant certificate and
+        complete login via `POST /api/v1/auth/wallet/bind`.
+
+        `Spec divergence:` the platform document types this 200 response solely as
+        `AuthResponse`, which has no `nonce` property and marks `accessToken`,
+        `expiresIn` and `tokenType` required. A strict response validator built from
+        the platform document therefore **fails a perfectly correct commercial-bank
+        login**. This contract models the response as a `oneOf` over the two real
+        shapes; the nonce shape is described in the platform document in prose only.
+
+        `Undocumented status code:` the handler can also answer **503** with
+        `{"error":"authentication service unavailable"}` when the identity service is
+        unreachable. The two scenarios classify identity-service failures differently
+        (Scenario A matches on gRPC message strings, Scenario B on gRPC status codes),
+        so identical bad-credential input can yield 401 on one scenario and 503 on the
+        other. Do not write a cross-scenario negative-path assertion on login without
+        accounting for this.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            example:
+              clientId: bank-a
+              clientSecret: secret-a
+      responses:
+        "200":
+          description: |
+            Login successful. For direct flows the response body contains tokens and the
+            Set-Cookie headers inject HttpOnly cookies. For PKI flows only a nonce is
+            returned (no cookies).
+          headers:
+            Set-Cookie:
+              description: |
+                HttpOnly auth cookies set for direct login flows only. Two cookies are
+                emitted: access_token and refresh_token (when present). Not emitted at
+                all on the PKI nonce flow.
+              schema:
+                type: string
+                example: "access_token=eyJ...; Path=/; HttpOnly; SameSite=Strict; Max-Age=300"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/AuthResponse"
+                  - $ref: "#/components/schemas/LoginNonceResponse"
+              examples:
+                directFlow:
+                  summary: Direct flow (governance / supervisor / NOC) — tokens issued
+                  value:
+                    accessToken: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    refreshToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    expiresIn: 3600
+                    tokenType: Bearer
+                pkiNonceFlow:
+                  summary: PKI nonce flow (commercial bank / treasury) — sign and bind next
+                  value:
+                    nonce: "9f2c7a1de4b83056af11c2d9e7b40a3c"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/auth/wallet/bind:
+    post:
+      tags: [Authentication]
+      summary: Verify PKI login challenge and issue tokens
+      description: |
+        Step 2 of the PKI authentication flow, and the way a **commercial bank actually
+        obtains a session**. Public endpoint — no authentication required, because the
+        signature over the nonce *is* the credential.
+
+        The client submits the `user_id`, the DER-encoded ECDSA signature (hex) of the
+        login nonce obtained from `POST /api/v1/auth/login`, and the participant X.509
+        certificate PEM issued by the Central Bank CA. On success, `access_token` and
+        `refresh_token` HttpOnly cookies are set in addition to the JSON response body.
+
+        The subject's KYC status gates this call: binding against a participant whose
+        status is not `ACTIVE` fails with "kyc status does not allow wallet binding".
+
+        `Undocumented status codes:` the handler can also return **403** (identity
+        service answered `PermissionDenied`) and **500** (identity service answered
+        `Internal`). Neither is declared in the platform document.
+      operationId: walletBind
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WalletBindRequest"
+            example:
+              user_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+              nonce_signature_hex: "3045022100c1f0...022043ab..."
+              cert_pem: "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----\n"
+      responses:
+        "200":
+          description: PKI verification successful; tokens issued and cookies set
+          headers:
+            Set-Cookie:
+              description: access_token and refresh_token HttpOnly cookies set on successful PKI login.
+              schema:
+                type: string
+                example: "access_token=eyJ...; Path=/; HttpOnly; SameSite=Strict; Max-Age=900"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+              example:
+                accessToken: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+                refreshToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                expiresIn: 900
+                tokenType: Bearer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: PKI verification failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                pkiFailed:
+                  value:
+                    error: "PKI verification failed"
+                invalidChain:
+                  value:
+                    error: "INVALID_CERTIFICATE_CHAIN"
+                nonceMismatch:
+                  value:
+                    error: "NONCE_SIGNATURE_MISMATCH"
+        "501":
+          description: |
+            PKI authentication not configured in this deployment. 501 is used across the
+            CBWeb3 surface as a *deployment-shape* signal, not a client error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "PKI authentication not configured"
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Issue a new access token from a valid refresh token
+      description: |
+        Exchanges a valid refresh token for new access and refresh tokens. The response
+        also renews the `access_token` and `refresh_token` HttpOnly cookies.
+
+        Public endpoint (`security: []`) because the refresh token itself is the
+        credential.
+
+        `Spec divergence:` the platform document marks the request body required and
+        `refreshToken` a required property. The handler is more permissive: when
+        `refreshToken` is absent it falls back to the `refresh_token` cookie, and only
+        answers 400 when neither is present. A browser client can therefore call this
+        endpoint with an empty body. This contract mirrors the platform document
+        (body required) because that is the shape a non-browser client should send.
+      operationId: refreshToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+            example:
+              refreshToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+      responses:
+        "200":
+          description: New access token issued and cookies renewed
+          headers:
+            Set-Cookie:
+              description: Renewed access_token and refresh_token HttpOnly cookies.
+              schema:
+                type: string
+                example: "access_token=eyJ...; Path=/; HttpOnly; SameSite=Strict; Max-Age=3600"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+              example:
+                accessToken: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+                refreshToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                expiresIn: 3600
+                tokenType: Bearer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Invalid or expired refresh token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "invalid or expired refresh token"
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Revoke the current access token and clear auth cookies
+      description: |
+        Revokes the access token at the identity provider (Keycloak). The token is read
+        from the `access_token` HttpOnly cookie. On success, both `access_token` and
+        `refresh_token` cookies are expired (`Max-Age=-1`).
+
+        Note that although the platform document declares a 400 response, the route is
+        wrapped in the cookie-auth middleware: a request arriving with no `access_token`
+        cookie is rejected with 401 before the handler is reached.
+      operationId: logout
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Logged out successfully; auth cookies expired
+          headers:
+            Set-Cookie:
+              description: access_token and refresh_token cookies are expired (MaxAge=-1).
+              schema:
+                type: string
+                example: "access_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=-1"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+              example:
+                message: "logged out successfully"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/auth/me:
+    get:
+      tags: [Authentication]
+      summary: Return the authenticated caller's token claims
+      description: |
+        Validates the access token (read from the `access_token` cookie) and returns the
+        enriched claims embedded in the JWT by the identity service. Optional fields
+        (`wallet`, `country`, `bankId`, `privacyGroup`) are only present when populated
+        in the token.
+
+        This is how a client discovers the `bankId` the gateway will attribute its
+        writes to. That matters because across the whole CBWeb3 surface **caller
+        identity is never taken from the request body** — fields such as
+        `payer_bank_id`, `payer_id` and `owner_bank_id` exist in some request structs
+        but are deprecated and ignored; the handlers derive identity from this claim.
+
+        `Spec divergence (scenario-dependent):` when the JWT carries no bank id claim,
+        the **Scenario A** handler substitutes the gateway's configured `BANK_CODE`
+        environment variable into `bankId`; the **Scenario B** handler emits `bankId`
+        only when the claim is present. Same declared response schema, different runtime
+        behaviour. A fixture asserting the *absence* of `bankId` will pass on Scenario B
+        and fail on Scenario A.
+      operationId: getMe
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Token claims for the authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeResponse"
+              example:
+                subject: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                issuer: "http://keycloak:8080/realms/cbweb3-spoke-a"
+                roles: ["ROLE_COMMERCIAL_BANK"]
+                wallet: "0x4a3b..."
+                country: "BR"
+                bankId: "341"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/auth/pki-login:
+    post:
+      tags: [Authentication]
+      summary: PKI re-login after onboarding (Commercial Bank proxy mode)
+      description: |
+        Available only on Commercial Bank gateways that run a proxy handler. Reads the
+        saved participant certificate from `PKI_DIR/{bankCode}-participant.crt`, then
+        executes the two-step PKI login against the Central Bank on the caller's behalf:
+
+        1. `POST /auth/login` with `user_id` + `client_secret` → nonce
+        2. sign the nonce with the P-256 key → `POST /auth/wallet/bind` → `accessToken`
+
+        Returns the access token on success. Requires the participant to have completed
+        onboarding (`POST /onboarding/complete`) so that the certificate is on disk —
+        which is precisely what the 412 response means here.
+      operationId: pkiLogin
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PKILoginRequest"
+            example:
+              user_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+              client_secret: "SYNTHETIC-CLIENT-SECRET-DO-NOT-USE"
+      responses:
+        "200":
+          description: PKI login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PKILoginResponse"
+              example:
+                accessToken: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: PKI login failed (invalid credentials or signature)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "PKI login failed"
+        "412":
+          description: |
+            Precondition not met — the participant certificate is not on disk on this
+            gateway. Complete onboarding first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "participant certificate not found; complete onboarding first"
+
+  /api/v1/auth/client-secret/change:
+    post:
+      tags: [Authentication]
+      summary: Rotate the clientSecret for the authenticated participant
+      description: |
+        Allows an authenticated participant (`ROLE_COMMERCIAL_BANK`, `ROLE_TREASURY`) to
+        rotate its own `clientSecret` — the first factor of the PKI login flow. Requires
+        a valid `access_token` cookie *and* knowledge of the current secret. After
+        rotation the old `clientSecret` is immediately invalidated.
+
+        The role restriction above is stated in the platform document in prose only;
+        the route itself carries no role middleware.
+
+        Note the naming: this endpoint uses `current_client_secret` / `new_client_secret`
+        (snake_case), `POST /auth/pki-login` uses `client_secret`, and
+        `POST /auth/login` uses `clientSecret` (camelCase) — three casings for the same
+        concept across three adjacent endpoints. This contract reproduces the platform's
+        naming exactly rather than harmonising it.
+      operationId: changeClientSecret
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeClientSecretRequest"
+            example:
+              current_client_secret: "SYNTHETIC-CLIENT-SECRET-DO-NOT-USE"
+              new_client_secret: "SYNTHETIC-NEW-CLIENT-SECRET-DO-NOT-USE"
+      responses:
+        "200":
+          description: Client secret rotated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+              example:
+                message: "client secret changed successfully"
+        "400":
+          description: Missing current_client_secret or new_client_secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "current_client_secret and new_client_secret are required"
+        "401":
+          description: Invalid session or current_client_secret is incorrect
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "invalid current client secret"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "501":
+          description: Client secret rotation not available in this deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "client secret rotation not available"
+
+components:
+
+  securitySchemes:
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+      description: |
+        HttpOnly cookie set automatically by POST /auth/login (direct flow),
+        POST /auth/wallet/bind, and POST /auth/refresh.
+        All protected endpoints require this cookie to be present.
+        Attributes: HttpOnly, SameSite=Strict, Path=/; Secure flag depends on
+        the COOKIE_SECURE environment variable (true for HTTPS, false for HTTP).
+
+  responses:
+    BadRequest:
+      description: Invalid body or missing required fields
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "invalid request body"
+    Unauthorized:
+      description: Missing or invalid access_token cookie
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            missingCookie:
+              value:
+                error: "missing access_token cookie"
+            invalidToken:
+              value:
+                error: "invalid token"
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "internal server error"
+
+  schemas:
+
+    ErrorResponse:
+      type: object
+      description: |
+        The universal CBWeb3 error body. This is **not** RFC 7807 — there is no `type`,
+        `title`, `detail` or `instance`, no `application/problem+json` media type, and
+        crucially **no machine-readable error code** anywhere on the `/api/v1` surface.
+        `error` is a free-form human-readable message whose exact wording is
+        implementation detail and may change. Assert on the status code; treat the
+        string as diagnostic only.
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable failure message.
+          example: "invalid token"
+
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          description: Literal readiness marker.
+          example: ok
+
+    MessageResponse:
+      type: object
+      description: |
+        Acknowledgement body used by logout and client-secret rotation. Declared inline
+        (anonymously) in the platform document; named here so that clients and mocks can
+        reference it. No fields are required.
+      properties:
+        message:
+          type: string
+          description: Human-readable confirmation of the action performed.
+          example: "logged out successfully"
+
+    LoginRequest:
+      type: object
+      required: [clientId, clientSecret]
+      properties:
+        clientId:
+          type: string
+          description: Keycloak client identifier of the participant.
+          example: bank-a
+        clientSecret:
+          type: string
+          format: password
+          description: Participant client secret. First factor of the PKI login flow.
+          example: secret-a
+
+    LoginNonceResponse:
+      type: object
+      description: |
+        Response body returned by `POST /api/v1/auth/login` on the **PKI nonce flow**
+        (`ROLE_COMMERCIAL_BANK`, `ROLE_TREASURY`).
+
+        `Spec divergence:` this shape exists in the platform document in prose only —
+        the operation types its 200 as `AuthResponse`, which cannot represent it. The
+        shape here is taken from the platform's prose and from the gateway handler,
+        which emits exactly `{"nonce": <hex>}`.
+      x-cbweb3-source: implementation-observed
+      required: [nonce]
+      properties:
+        nonce:
+          type: string
+          description: |
+            Hex-encoded login challenge. Sign it with the P-256 private key matching the
+            participant certificate and submit the DER signature to
+            `POST /api/v1/auth/wallet/bind`.
+          example: "9f2c7a1de4b83056af11c2d9e7b40a3c"
+
+    RefreshTokenRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+          description: |
+            A refresh token previously issued by login, wallet bind or refresh. The
+            handler falls back to the `refresh_token` cookie when this field is empty,
+            but the platform document declares it required and clients should send it.
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+
+    AuthResponse:
+      type: object
+      required: [accessToken, expiresIn, tokenType]
+      properties:
+        accessToken:
+          type: string
+          description: JWT access token. Also installed as the `access_token` HttpOnly cookie.
+          example: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+        refreshToken:
+          type: string
+          description: JWT refresh token. Also installed as the `refresh_token` HttpOnly cookie when present.
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        expiresIn:
+          type: integer
+          description: Access token lifetime in seconds.
+          example: 3600
+        tokenType:
+          type: string
+          description: Token type. Always `Bearer` in the delivered gateway.
+          example: Bearer
+
+    MeResponse:
+      type: object
+      required: [subject, issuer, roles]
+      properties:
+        subject:
+          type: string
+          description: Keycloak user UUID
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        issuer:
+          type: string
+          description: Token issuer (Keycloak realm URL)
+          example: "http://keycloak:8080/realms/cbweb3-spoke-a"
+        roles:
+          type: array
+          description: |
+            Realm roles carried by the token. May mix the `ROLE_`-prefixed `/api/v1`
+            namespace and the lowercase `/api/v2` namespace in the same array.
+          items:
+            type: string
+          example: ["ROLE_COMMERCIAL_BANK"]
+        wallet:
+          type: string
+          description: EVM wallet address (present when bound)
+          example: "0x4a3b..."
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2 country code (present when set)
+          example: "BR"
+        bankId:
+          type: string
+          description: |
+            Regulatory bank identifier (present when set). This is the identity the
+            gateway attributes writes to. Never send it in a request body — it is
+            derived from the session.
+          example: "341"
+        privacyGroup:
+          type: string
+          description: Besu privacy group ID (present when set)
+          example: "pente-group-abc123"
+
+    WalletBindRequest:
+      type: object
+      description: |
+        PKI wallet-bind payload. Declared inline (anonymously) in the platform document;
+        named here so clients and mocks can reference it. Field names and required-ness
+        are reproduced exactly.
+      required: [user_id, nonce_signature_hex, cert_pem]
+      properties:
+        user_id:
+          type: string
+          description: Keycloak UUID of the participant being bound.
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        nonce_signature_hex:
+          type: string
+          description: DER-encoded ECDSA signature in hex format
+          example: "3045022100c1f0...022043ab..."
+        cert_pem:
+          type: string
+          description: PEM-encoded participant certificate
+          example: "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----\n"
+
+    PKILoginRequest:
+      type: object
+      required: [user_id, client_secret]
+      properties:
+        user_id:
+          type: string
+          description: Keycloak UUID of the participant
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        client_secret:
+          type: string
+          format: password
+          description: |
+            clientSecret obtained during onboarding (Phase 3 response).
+
+            The example is a **self-labelling placeholder**, not a credential. The
+            platform document ships a plausible-looking 32-byte base64 value here; it is
+            replaced throughout this contract so that nothing in the Toolbox can be
+            copy-pasted into a deployment and mistaken for a working secret. Real values
+            are base64 and are issued by onboarding — never chosen by the client.
+          example: "SYNTHETIC-CLIENT-SECRET-DO-NOT-USE"
+
+    PKILoginResponse:
+      type: object
+      required: [accessToken]
+      properties:
+        accessToken:
+          type: string
+          description: JWT access token
+          example: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+
+    ChangeClientSecretRequest:
+      type: object
+      required: [current_client_secret, new_client_secret]
+      properties:
+        current_client_secret:
+          type: string
+          description: |
+            The participant's current clientSecret (first factor for PKI login). The
+            example is a self-labelling placeholder — see `PKILoginRequest.client_secret`.
+          example: "SYNTHETIC-CLIENT-SECRET-DO-NOT-USE"
+        new_client_secret:
+          type: string
+          description: |
+            The new clientSecret to set. Must be a strong random value (256-bit base64
+            recommended). Store securely — it is not recoverable after this call.
+          example: "SYNTHETIC-NEW-CLIENT-SECRET-DO-NOT-USE"
