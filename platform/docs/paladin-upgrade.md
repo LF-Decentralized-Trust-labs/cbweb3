@@ -1,18 +1,23 @@
-# Paladin — pinned version, known defect and required upgrade
+# Paladin — pinned version, the Zeto defect, and the upgrade that closed it
 
-> **Status: upgrade required, not yet scheduled.** Both scenarios run Paladin
-> `v0.15.0-rc.1`, a release candidate published 2026-01-22. It carries a Zeto defect
-> that permanently strands central-bank money in ~1 of every 256 private locks. The
-> defect is fixed upstream. Nothing in this repository can fix it; only the upgrade can.
+> **Status: upgraded to `v1.0.0` and the defect is verified closed (2026-09-02).** The pin
+> was `v0.15.0-rc.1`, a release candidate published 2026-01-22 carrying a Zeto defect that
+> permanently stranded central-bank money in a fraction of private locks. On `v1.0.0`,
+> `transferLocked` spends the affected states: three zero-byte locked states were settled
+> three-for-three with receipts read, on a stack rebuilt from zero. See *Criterion 3b* below.
+>
+> Two caveats that belong with that result: the incidence measured here was **~4% of locks
+> (3 in 71), not ~1 in 256** as previously documented; and the `locked_state_id.go` guard must
+> stay until no deployed environment runs a pre-`v1.0.0` node.
 >
 > Tracked in Notion as *Upgrade Paladin off v0.15.0-rc.1*, referencing
 > [PR #147](https://github.com/LNetNetworks/cbweb3-platform/pull/147).
 
 | | |
 | --- | --- |
-| Pinned now | `docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1` (2026-01-22, prerelease) |
+| Pinned now | `docker.io/lfdecentralizedtrust/paladin:v1.0.0` (GA, 2026-06-25) — was `v0.15.0-rc.1` |
 | First upstream release with the fix | `v1.0.0-rc.8` (2026-04-13) |
-| Recommended target | `v1.0.0` (GA, 2026-06-25) — same image repository, tag change only |
+| Upgrade applied | `v1.0.0` (GA, 2026-06-25) — same image repository; the tag is the only edit, but it is not *only* a tag bump (see below) |
 | Scope | Scenario A **and** Scenario B (both run Paladin; only A has a Paladin adapter in the backend today) |
 | Containment already merged | [PR #147](https://github.com/LNetNetworks/cbweb3-platform/pull/147) — refuses the poisoned lock; does **not** cure the defect |
 
@@ -229,10 +234,51 @@ The lesson worth keeping is about method, not about the code: three layers were 
 blamed before the payload was checked. The internal listing and the relay mapping were both
 correct all along.
 
-### Criterion 4 — deliberately open
+### Criterion 3b — the defect itself is demonstrated CLOSED on v1.0.0
 
-Removing the `locked_state_id.go` guard before the defect it guards is demonstrated closed
-would be the wrong order.
+The decisive test is not that a lock succeeds; it is that `transferLocked` **spends a locked
+state whose first byte is zero**. On `v0.15.0-rc.1` that call failed permanently
+(`PD210134: Failed to query states by IDs. Wanted: 1, Found: 0`), retried or not.
+
+Three such states were obtained by looping locks of amount 1 on `bank-itau` until the guard
+in `locked_state_id.go` refused one, which logs the offending id. Each was then spent with a
+`transferLocked` built to match the adapter's call exactly (`client.go:476-493`) — same ABI,
+same `lockedInputs`/`delegate`/`transfers` shape — submitted straight to the bank's Paladin
+node, and each receipt was read rather than assumed:
+
+| locked state id | transaction | receipt |
+| --- | --- | --- |
+| `0x003b014366c41e58…d2ab389` | `41d2b590-57c8-4649-9acf-079d0aa75580` | `success: true`, block 1634 |
+| `0x0099834d9bf6b953…15aedc` | `860e70fc-3fbf-446c-8e77-19e2ca399506` | `success: true`, block 1651 |
+| `0x000659303c8dc207…b85c39` | `82508903-2435-4217-909f-eccdb8b280b6` | `success: true`, block 1651 |
+
+Three for three. Submission acceptance was explicitly **not** treated as the result: the old
+failure happened asynchronously at assemble, so `ptx_sendTransaction` returning an id proves
+nothing and every receipt was polled to `success`.
+
+This also refutes, for `v1.0.0`, the claim in `locked_state_id.go` that the tokens of a refused
+lock "cannot be recovered, because the rollback path uses the same call". That was true of the
+old build; on `v1.0.0` the same call releases them — these three transfers recovered the exact
+tokens the guard had written off.
+
+### Criterion 4 — the guard is now obsolete, but must not be removed yet
+
+`unsettleableLockedStateID` guards a defect that `v1.0.0` no longer has. It should be removed —
+but only once no deployed environment still runs an affected build, since with a pre-`v1.0.0`
+node the guard is what prevents an HTLC that can never settle. Removal is therefore gated on
+the rollout, not on this verification.
+
+Two things found while proving it, worth carrying into that change:
+
+- **The incidence is far higher than the guard's own comment assumes.** The comment tells the
+  operator to retry because "state ids are effectively random, so a fresh lock has ~255/256
+  odds of being usable". Observed: **3 zero-byte ids in 71 locks (~4%)**, where 1/256 predicts
+  0.3. Whatever generates these ids is not uniform in the top byte. On the old build that means
+  roughly one lock in twenty stranded funds — an order of magnitude worse than documented.
+- **A verification bypass was written and then discarded.** An env-gated escape from the guard
+  (`ZETO_ALLOW_LEADING_ZERO_LOCK`) was added to reach the settle path, then reverted unused:
+  calling Paladin directly proved the same thing without a rebuild or a new flag. Recorded so
+  the next person does not add the flag believing it is required.
 
 ### What the upgrade *is* verified to do
 

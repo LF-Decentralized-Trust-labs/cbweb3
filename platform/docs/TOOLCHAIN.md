@@ -33,9 +33,11 @@ Pinned container images are not developer prerequisites — they are pulled auto
 Keycloak, Postgres, Redis.
 
 > **The pin moved to `v1.0.0` to close the Zeto `transferLocked` defect**, which on
-> `v0.15.0-rc.1` permanently stranded a private lock in ~1 of every 256 attempts (fixed
-> upstream from `v1.0.0-rc.8`). `v1.0.0` was brought up from a clean host on both spokes with
-> no configuration change; what is verified and what is still outstanding is recorded in
+> `v0.15.0-rc.1` permanently stranded a private lock whenever the locked state id began with a
+> zero byte — measured at **~4% of locks (3 in 71)**, not the ~1 in 256 previously documented
+> (fixed upstream from `v1.0.0-rc.8`). `v1.0.0` was brought up from a clean host on both spokes
+> with no configuration change, and three affected states were then settled three-for-three
+> with receipts read. The evidence, and why the `locked_state_id.go` guard still stays, are in
 > [`docs/paladin-upgrade.md`](paladin-upgrade.md). Read it before relying on this pin.
 
 ---
