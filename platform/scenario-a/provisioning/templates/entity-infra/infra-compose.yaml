@@ -20,8 +20,20 @@
 # read back afterwards, so they are not values an operator has to invent. Exporting
 # either one overrides it, and an exported value is not written to disk.
 
+# Container log rotation, applied to every service in this file.
+#
+# Without it Docker's json-file driver has no size cap and no rotation: the
+# Scenario A Paladin containers reached 96 GB (~2.4 GB/day) and a full disk takes
+# the whole network down. 50m x 5 caps each service at 250 MB.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   postgres:
+    logging: *cbweb3_logging
     image: postgres:${POSTGRES_IMAGE_TAG:-17-alpine}
     container_name: ${ENTITY_INFRA_PREFIX:?ENTITY_INFRA_PREFIX is required}-postgres
     environment:
@@ -45,6 +57,7 @@ services:
       - entity_net
 
   redis:
+    logging: *cbweb3_logging
     image: redis:${REDIS_IMAGE_TAG:-7-alpine}
     container_name: ${ENTITY_INFRA_PREFIX}-redis
     # The auth service CAN keep its PKI login nonces here — single-use, consumed by a

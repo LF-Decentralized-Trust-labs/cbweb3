@@ -30,8 +30,20 @@
 #     design; see specs/026-tk4-compose-central-bank/plan.md addendum.
 #   Falls back to ${BACKEND_CONTEXT}/config/pki (repo default) if unset.
 
+# Container log rotation, applied to every service in this file.
+#
+# Without it Docker's json-file driver has no size cap and no rotation: the
+# Scenario A Paladin containers reached 96 GB (~2.4 GB/day) and a full disk takes
+# the whole network down. 50m x 5 caps each service at 250 MB.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   compliance:
+    logging: *cbweb3_logging
     build:
       context: ${BACKEND_CONTEXT:?BACKEND_CONTEXT is required}
       dockerfile: services/compliance/Dockerfile
@@ -59,6 +71,7 @@ services:
       - entity_net
 
   auth:
+    logging: *cbweb3_logging
     build:
       context: ${BACKEND_CONTEXT}
       dockerfile: services/auth/Dockerfile
@@ -80,6 +93,7 @@ services:
       - entity_net
 
   payment-orchestrator:
+    logging: *cbweb3_logging
     build:
       context: ${BACKEND_CONTEXT}
       dockerfile: services/payment-orchestrator/Dockerfile
@@ -124,6 +138,7 @@ services:
       - entity_net
 
   api-gateway:
+    logging: *cbweb3_logging
     build:
       context: ${BACKEND_CONTEXT}
       dockerfile: services/api-gateway/Dockerfile
