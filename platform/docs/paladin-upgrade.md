@@ -250,6 +250,34 @@ None of the changes this document warned about — package renames, the npm scop
 plugins, privacy-group access — affected this path. That is not the same as saying nothing
 changed; it is saying that what changed is not on the path we use.
 
+### Upstream containment, verified against the source repository
+
+The claim "the fix is in v1.0.0" no longer rests on release notes. Checked through the
+GitHub API on 2026-09-02:
+
+| tag | `compare` status vs. the fix commit | contains it |
+| --- | --- | --- |
+| `v1.0.0` (the new pin) | `ahead` | **yes** |
+| `v1.0.0-rc.8` | `ahead` | yes — confirms it as the first release carrying it |
+| `v0.15.0-rc.1` (the old pin) | `diverged` | **no** |
+
+And the commit is unambiguously ours. `5da12da7e72fb465ba0080bcbfbea00aa0a84565`, dated
+2026-03-17, message **"ensure fixed width ID string when loading states"**, changes exactly
+two files:
+
+```
+domains/zeto/internal/zeto/fungible/handler_transferLocked.go       (+1/-1)
+domains/zeto/internal/zeto/fungible/handler_transferLocked_test.go  (+37/-0)
+```
+
+The one-line change in `loadCoins` replaces `String()` with `HexUint256To32ByteHexString` —
+the exact mechanism this document describes — and upstream added a 37-line regression test
+alongside it, so the behaviour is now guarded there too.
+
+This is containment evidence, not a functional proof on our stack. It says the version we
+moved to carries the corrected code; it does not replace criterion 3, which is watching a
+leading-zero-byte state settle here.
+
 ### A static shortcut that does not work — recorded so it is not retried
 
 Checking whether `libzeto.so` contains `HexUint256To32ByteHexString` proves nothing: the helper
