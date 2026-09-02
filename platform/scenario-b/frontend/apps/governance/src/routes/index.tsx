@@ -20,7 +20,7 @@ import {
   RedeemsApprovalPage,
   RegistryPage,
   SettingsPage,
-  SwapMonitorPage,
+  ApprovalsOverviewPage,
   TransferLimitsPage,
 } from "../pages";
 
@@ -48,7 +48,7 @@ const scenarioAGovernanceOnlyChildren: RouteObject[] = [
 const scenarioBGovernanceOnlyChildren: RouteObject[] = [
   { index: true, element: <DashboardPage /> },
   { path: "accounts", element: <AccountsPage /> },
-  { path: "swap-monitor", element: <SwapMonitorPage /> },
+  { path: "approvals-overview", element: <ApprovalsOverviewPage /> },
   { path: "circuit-breaker", element: <CircuitBreakerPage /> },
   { path: "transfer-limits", element: <TransferLimitsPage /> },
   { path: "oversight", element: <OversightPage /> },

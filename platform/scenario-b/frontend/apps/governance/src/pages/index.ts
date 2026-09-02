@@ -12,5 +12,5 @@ export * from "./EscrowsApprovalPage";
 export * from "./RedeemsApprovalPage";
 export * from "./RegistryPage";
 export * from "./SettingsPage";
-export * from "./SwapMonitorPage";
+export * from "./ApprovalsOverviewPage";
 export * from "./TransferLimitsPage";
