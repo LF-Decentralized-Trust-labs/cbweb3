@@ -28,6 +28,7 @@ import {
   PaymentStatus,
   displayToBase,
   fiatCurrencyLabel,
+  formatFiatDisplayUnits,
   formatFiatUnits,
   formatTokenAmount,
   getPaymentStatusLabel,
@@ -166,7 +167,7 @@ export function DepositsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Confirm Issuance Request</CardTitle>
-            <CardDescription>{formatFiatUnits(amount, fDecimals, fCeBMSymbol)} will be submitted for central bank approval.</CardDescription>
+            <CardDescription>{formatFiatDisplayUnits(amount, fDecimals, fCeBMSymbol)} will be submitted for central bank approval.</CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
             <Button onClick={() => void onSubmit()} disabled={status === "loading"}>
