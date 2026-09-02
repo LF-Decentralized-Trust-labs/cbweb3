@@ -87,7 +87,7 @@ func (s *startPaladinStep) Run(ctx context.Context) error {
 func (s *startPaladinStep) composeEnv() []string {
 	image := s.paladinImage
 	if image == "" {
-		image = defaultPaladinImage
+		image = DefaultPaladinImage
 	}
 	// Derive Paladin CB host ports from the RPC URL. WS = RPC+1, gRPC = RPC+2 —
 	// deterministic and unique per spoke (the RPC port is per-spoke). Internal

@@ -13,13 +13,15 @@ import (
 	"time"
 )
 
-// defaultBesuImage is the pinned Besu image used for the spoke bootnode when the
+// DefaultBesuImage is the pinned Besu image used for the spoke bootnode when the
 // deps do not override it. Matches the project-pinned Hyperledger Besu version.
-const defaultBesuImage = "hyperledger/besu:25.8.0"
+// DefaultBesuImage is the pinned Besu image. Exported because engine/apply needs the
+// same value: a second literal there is how a version bump silently misses a tree.
+const DefaultBesuImage = "hyperledger/besu:25.8.0"
 
-// defaultPaladinImage is the pinned Paladin image used for the spoke's Paladin
-// nodes when the deps do not override it. Matches the reference network.
-const defaultPaladinImage = "docker.io/lfdecentralizedtrust/paladin:v1.0.0"
+// DefaultPaladinImage is the pinned Paladin image used for the spoke's Paladin nodes
+// when the deps do not override it. Exported for the same reason as DefaultBesuImage.
+const DefaultPaladinImage = "docker.io/lfdecentralizedtrust/paladin:v1.0.0"
 
 // startBesuFoundStep brings up the central-bank Besu node (the spoke bootnode)
 // for mode:found using the TK-4 central-bank compose template. It is the first

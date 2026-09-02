@@ -153,7 +153,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 
 	besuImage := deps.BesuImage
 	if besuImage == "" {
-		besuImage = defaultBesuImage
+		besuImage = DefaultBesuImage
 	}
 
 	steps := []Step{
@@ -639,7 +639,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 	// repository — resolve it to the default Besu image (same as mode:found).
 	besuImage := m.Spec.Image
 	if besuImage == "" || besuImage == "build" {
-		besuImage = defaultBesuImage
+		besuImage = DefaultBesuImage
 	}
 
 	// Local single-host adaptation (feature 018): the bundle carries the CB's

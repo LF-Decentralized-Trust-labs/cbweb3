@@ -314,8 +314,8 @@ func resolveLocalProfileFromInput(in ApplyInput) LocalProfile {
 		CommercialBankComposePath:        firstNonEmpty(in.CommercialBankComposePath, envOr("CBWEB3_COMMERCIAL_BANK_COMPOSE", "")),
 		BackendComposePath:               firstNonEmpty(in.BackendComposePath, envOr("CBWEB3_BACKEND_COMPOSE", "")),
 		CentralBankComposePath:           firstNonEmpty(in.CentralBankComposePath, envOr("CBWEB3_CENTRAL_BANK_COMPOSE", "")),
-		BesuImage:                        firstNonEmpty(in.BesuImage, envOr("CBWEB3_BESU_IMAGE", "hyperledger/besu:25.8.0")),
-		PaladinImage:                     firstNonEmpty(in.PaladinImage, envOr("CBWEB3_PALADIN_IMAGE", "docker.io/lfdecentralizedtrust/paladin:v1.0.0")),
+		BesuImage:                        firstNonEmpty(in.BesuImage, envOr("CBWEB3_BESU_IMAGE", orchestrator.DefaultBesuImage)),
+		PaladinImage:                     firstNonEmpty(in.PaladinImage, envOr("CBWEB3_PALADIN_IMAGE", orchestrator.DefaultPaladinImage)),
 		ContractsOutDir:                  firstNonEmpty(in.ContractsOutDir, envOr("CBWEB3_CONTRACTS_OUT", "")),
 		CommercialBankPaladinComposePath: firstNonEmpty(in.CommercialBankPaladinComposePath, envOr("CBWEB3_COMMERCIAL_BANK_PALADIN_COMPOSE", "")),
 	}
