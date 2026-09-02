@@ -25,10 +25,12 @@ DAVIVIENDA="http://localhost:18747"     # bank-davivienda
 
 # ── login credentials (username / password; passed to /auth/login) ─────────────
 # Brazil CB
-BR_GOV_USER="admin@brasil.governance.gov";  BR_GOV_PASS="brasil-governance-local"
+# approve-kyc is gated on ROLE_ADMISSION (spec 042), which the governance user does not
+# hold — with a governance token it answers 403 {"required_role":["ROLE_ADMISSION"]}.
+BR_ADM_USER="admin@brasil.admission.gov";   BR_ADM_PASS="brasil-admission-local"
 BR_TRE_USER="admin@brasil.treasury.gov";    BR_TRE_PASS="brasil-treasury-local"
 # Colombia CB
-CO_GOV_USER="admin@colombia.governance.gov"; CO_GOV_PASS="colombia-governance-local"
+CO_ADM_USER="admin@colombia.admission.gov";  CO_ADM_PASS="colombia-admission-local"
 CO_TRE_USER="admin@colombia.treasury.gov";   CO_TRE_PASS="colombia-treasury-local"
 # Banks
 ITAU_USER="admin@itau.brasil.com";               ITAU_PASS="itau-bank-local"
@@ -105,15 +107,15 @@ login() {
   printf '%s' "$tok"
 }
 
-# onboard BANK_URL BANK_TOK CB_URL GOV_TOK INSTITUTION COUNTRY EMAIL USERNAME
-# Runs initiate (bank) -> approve-kyc (governance). Exports ONB_USER_ID.
+# onboard BANK_URL BANK_TOK CB_URL ADM_TOK INSTITUTION COUNTRY EMAIL USERNAME
+# Runs initiate (bank) -> approve-kyc (admission operator). Exports ONB_USER_ID.
 #
 # Idempotent — safe to re-run against a warm stack:
 #   * already onboarded (ACTIVE/KYC_APPROVED/APPROVED) -> skip initiate + approve;
 #   * initiate returns 409 (Keycloak user already exists, approval never completed)
 #     -> recover user_id from my-status and proceed straight to approval.
 onboard() {
-  local bank_url=$1 bank_tok=$2 cb_url=$3 gov_tok=$4 inst=$5 country=$6 email=$7 user=$8 st
+  local bank_url=$1 bank_tok=$2 cb_url=$3 adm_tok=$4 inst=$5 country=$6 email=$7 user=$8 st
 
   # Already fully onboarded? Nothing to do.
   try GET "$bank_url/api/v1/onboarding/my-status" "$bank_tok"
@@ -143,7 +145,7 @@ onboard() {
     response: $BODY"
   fi
 
-  call POST "$cb_url/api/v1/governance/approve-kyc" "$gov_tok" \
+  call POST "$cb_url/api/v1/governance/approve-kyc" "$adm_tok" \
     "{\"subject\":\"$ONB_USER_ID\",\"reason\":\"tryout auto-approval\"}"
   ok "$inst KYC approved (tx_hash=$(printf '%s' "$BODY" | jget tx_hash))"
 }
@@ -195,35 +197,35 @@ printf '%s%s cbweb3 Scenario A — sample tryout %s\n' "$BOLD" "═════�
 # ═══════════════════════════════ ONBOARDING — BRAZIL ═══════════════════════════
 step "Login Itaú + request onboarding"
 ITAU_TOK=$(login "$ITAU" "$ITAU_USER" "$ITAU_PASS"); ok "logged in as Itaú"
-BR_GOV_TOK=$(login "$BR_CB" "$BR_GOV_USER" "$BR_GOV_PASS")
-onboard "$ITAU" "$ITAU_TOK" "$BR_CB" "$BR_GOV_TOK" "Itau" BR admin@itau.brasil.com itau_admin
+BR_ADM_TOK=$(login "$BR_CB" "$BR_ADM_USER" "$BR_ADM_PASS")
+onboard "$ITAU" "$ITAU_TOK" "$BR_CB" "$BR_ADM_TOK" "Itau" BR admin@itau.brasil.com itau_admin
 
 step "Login Bradesco + request onboarding"
 BRADESCO_TOK=$(login "$BRADESCO" "$BRADESCO_USER" "$BRADESCO_PASS"); ok "logged in as Bradesco"
-# Refresh the governance token: it was minted before Itaú's onboard and the access
+# Refresh the admission token: it was minted before Itaú's onboard and the access
 # token lifespan is 300s, so reusing it here can out-live the token on a slow stack
 # (approve-kyc would then 401 "invalid token"). Same pattern as the treasury refresh below.
-BR_GOV_TOK=$(login "$BR_CB" "$BR_GOV_USER" "$BR_GOV_PASS")
-onboard "$BRADESCO" "$BRADESCO_TOK" "$BR_CB" "$BR_GOV_TOK" "Bradesco" BR admin@bradesco.brasil.com bradesco_admin
+BR_ADM_TOK=$(login "$BR_CB" "$BR_ADM_USER" "$BR_ADM_PASS")
+onboard "$BRADESCO" "$BRADESCO_TOK" "$BR_CB" "$BR_ADM_TOK" "Bradesco" BR admin@bradesco.brasil.com bradesco_admin
 
-step "Brazil governance approved both (done inline above); verify onboarding status"
+step "Brazil admission approved both (done inline above); verify onboarding status"
 poll_onboarding Itau "$ITAU" "$ITAU_TOK"
 poll_onboarding Bradesco "$BRADESCO" "$BRADESCO_TOK"
 
 # ═══════════════════════════════ ONBOARDING — COLOMBIA ═════════════════════════
 step "Login Bancolombia + request onboarding"
 BANCOLOMBIA_TOK=$(login "$BANCOLOMBIA" "$BANCOLOMBIA_USER" "$BANCOLOMBIA_PASS"); ok "logged in as Bancolombia"
-CO_GOV_TOK=$(login "$CO_CB" "$CO_GOV_USER" "$CO_GOV_PASS")
-onboard "$BANCOLOMBIA" "$BANCOLOMBIA_TOK" "$CO_CB" "$CO_GOV_TOK" "Bancolombia" CO admin@bancolombia.colombia.com bancolombia_admin
+CO_ADM_TOK=$(login "$CO_CB" "$CO_ADM_USER" "$CO_ADM_PASS")
+onboard "$BANCOLOMBIA" "$BANCOLOMBIA_TOK" "$CO_CB" "$CO_ADM_TOK" "Bancolombia" CO admin@bancolombia.colombia.com bancolombia_admin
 
 step "Login Davivienda + request onboarding"
 DAVIVIENDA_TOK=$(login "$DAVIVIENDA" "$DAVIVIENDA_USER" "$DAVIVIENDA_PASS"); ok "logged in as Davivienda"
-# Refresh the governance token (see the Bradesco note): reused across two banks it
+# Refresh the admission token (see the Bradesco note): reused across two banks it
 # can out-live its 300s lifespan on a slow stack.
-CO_GOV_TOK=$(login "$CO_CB" "$CO_GOV_USER" "$CO_GOV_PASS")
-onboard "$DAVIVIENDA" "$DAVIVIENDA_TOK" "$CO_CB" "$CO_GOV_TOK" "Davivienda" CO admin@davivienda.colombia.com davivienda_admin
+CO_ADM_TOK=$(login "$CO_CB" "$CO_ADM_USER" "$CO_ADM_PASS")
+onboard "$DAVIVIENDA" "$DAVIVIENDA_TOK" "$CO_CB" "$CO_ADM_TOK" "Davivienda" CO admin@davivienda.colombia.com davivienda_admin
 
-step "Colombia governance approved both (done inline above); verify onboarding status"
+step "Colombia admission approved both (done inline above); verify onboarding status"
 poll_onboarding Bancolombia "$BANCOLOMBIA" "$BANCOLOMBIA_TOK"
 poll_onboarding Davivienda "$DAVIVIENDA" "$DAVIVIENDA_TOK"
 

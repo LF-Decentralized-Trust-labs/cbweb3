@@ -37,7 +37,8 @@ Keycloak, Postgres, Redis.
 > zero byte — measured at **~4% of locks (3 in 71)**, not the ~1 in 256 previously documented
 > (fixed upstream from `v1.0.0-rc.8`). `v1.0.0` was brought up from a clean host on both spokes
 > with no configuration change, and three affected states were then settled three-for-three
-> with receipts read. The evidence, and why the `locked_state_id.go` guard still stays, are in
+> with receipts read. The `locked_state_id.go` guard that refused such locks has been removed
+> with the defect it guarded; the evidence is in
 > [`docs/paladin-upgrade.md`](paladin-upgrade.md). Read it before relying on this pin.
 
 ---

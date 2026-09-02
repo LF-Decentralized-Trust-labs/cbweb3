@@ -261,12 +261,22 @@ lock "cannot be recovered, because the rollback path uses the same call". That w
 old build; on `v1.0.0` the same call releases them — these three transfers recovered the exact
 tokens the guard had written off.
 
-### Criterion 4 — the guard is now obsolete, but must not be removed yet
+### Criterion 4 — the guard is removed
 
-`unsettleableLockedStateID` guards a defect that `v1.0.0` no longer has. It should be removed —
-but only once no deployed environment still runs an affected build, since with a pre-`v1.0.0`
-node the guard is what prevents an HTLC that can never settle. Removal is therefore gated on
-the rollout, not on this verification.
+`unsettleableLockedStateID` guarded a defect that `v1.0.0` does not have. The removal was
+gated on the rollout — with a pre-`v1.0.0` node the guard is what prevents an HTLC that can
+never settle — and that gate is satisfied: **there is no production deployment**, so every
+environment moves with the pin in this repository.
+
+Gone with it: `locked_state_id.go`, its predicate tests, the `ports.ErrUnsettleableLock`
+sentinel and the two `FailedPrecondition` branches in the orchestrator's gRPC layer. What
+replaces them is a test that pins the opposite behaviour — `Lock` accepts the three zero-byte
+ids proven settleable above, plus `0x0a`/`0x0e`, which have a zero high nibble and settled even
+on the affected build.
+
+Leaving the guard in would not have been the cautious choice. At the measured ~4% incidence it
+refuses roughly one lock in twenty, and its own refusal path strands those funds — on `v1.0.0`
+that is money lost to a check defending against nothing.
 
 Two things found while proving it, worth carrying into that change:
 
