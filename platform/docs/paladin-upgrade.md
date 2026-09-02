@@ -162,3 +162,115 @@ These are separate from the version pin and stay on the board:
 - [`docs/scenario-drift.md`](scenario-drift.md) — where the Scenario A / Scenario B pin divergence belongs once classified
 - [`.specify/memory/constitution.md`](../.specify/memory/constitution.md) — privacy, atomicity and scenario-isolation rules cited above
 - [PR #147](https://github.com/LNetNetworks/cbweb3-platform/pull/147) — the containment guard and the live reproduction it is based on
+
+---
+
+## Upgrade executed — verification log (2026-09-02)
+
+The pin moved to `v1.0.0` in the commit that carries this section. What follows is what was
+measured, and what the acceptance criteria above still leave open. Read the last part before
+treating the defect as closed.
+
+### Method
+
+Absolute clean host, twice over: containers, volumes, **images** and build cache all removed
+(`docker system prune -a --volumes`, 17.4 GB reclaimed) and the sample data directories
+deleted, so nothing could come from a stale layer or a resumed state file. The toolkit CLI was
+rebuilt from the branch and the pin verified **inside the binary**, not only in the source.
+
+Topology: relay + `central-bank-brazil` (found) + `bank-itau` (join) + `central-bank-colombia`
+(found) + `bank-bancolombia` (join), with `CBWEB3_HOME` and `CBWEB3_SINGLE_HOST=1` exported as
+`samples/deploy-all.sh` does — see the note on that below.
+
+### Criterion 1 — every row on one explicit tag: **met**
+
+The grep this document prescribes returns nine hits across the seven files, all
+`docker.io/lfdecentralizedtrust/paladin:v1.0.0`, no `latest` anywhere.
+
+Two things worth recording beyond the table:
+
+- `lfdt-labs/paladin`, which the two Scenario B rows defaulted to, **does not exist on Docker
+  Hub** ("object not found"). The floating tag was pointing at nothing.
+- Those two rows are also dead configuration today. Only
+  `provisioning/templates/entity-besu.compose.yaml` declares a `paladin` service and it has
+  **zero references outside tests**: the live paths compose `entity-besu-founder` (found-spoke)
+  and `entity-besu-join` (join), neither of which runs Paladin. **Scenario B runs no Paladin at
+  all.** Fixed rather than deleted — whether Scenario B should run Paladin is a separate call.
+  Note also `step_join_test.go:198` asserts the join composes `entity-besu` with a substring
+  match that `entity-besu-join` satisfies, so the test passes while naming the dead template.
+
+### Criterion 2 — docs state the new pin: **met**
+
+`docs/TOOLCHAIN.md` carries `v1.0.0` in the image list, the advisory and the pin matrix. This
+section is the other half.
+
+### Criteria 3 and 4 — **not met, and blocked by something else**
+
+Criterion 3 (a leading-zero-byte locked state settles) could not be exercised, and the reason
+is **not** Paladin.
+
+The cross-spoke FX proposal never reaches the destination spoke. The relay forwards it and the
+call fails:
+
+```
+[spoke-brl] ProposeFXAgreement gRPC failed: 13 INTERNAL:
+ensure Pente context: EnsureFXContext: originator and counterparty identities are required
+```
+
+Root cause, in `interop/hub-and-spoke/cacti/src/htlc-relay.ts`: the forwarded payload is built
+by spreading the **camelCase** event object (`counterpartyB`, `sourceReceiver`,
+`settlementAgent`, …) into a gRPC request whose interface at line 137 is **snake_case**
+(`counterparty_b`, `source_receiver`, `settlement_agent`, …). Every field whose name differs
+between the two conventions arrives empty. `originator` survives only because it is one word.
+
+Without an ACCEPTED agreement on the source spoke, `FX_AGREEMENT_HTLC_STRICT` (default true)
+refuses the lock, so no locked state can be harvested and criterion 3 cannot start. Disabling
+the flag by hand was attempted and abandoned: the backend compose needs variables the toolkit
+injects from its own process environment, so recreating that one service outside the toolkit is
+not a clean operation.
+
+Criterion 4 (revisit the `locked_state_id.go` guard) is deliberately left open: removing a
+workaround before the defect it guards is demonstrated closed would be the wrong order.
+
+### What the upgrade *is* verified to do
+
+- **It comes up with our configuration, unchanged.** Four Paladin nodes on `v1.0.0` — both CBs
+  and both banks — across two independent spokes. Container image digest checked, not just the
+  tag.
+- **`create-zeto-token` succeeds**, which this document flagged as the main risk (`v1.0.0`
+  changed how Zeto contracts are installed, and the manifests declare
+  `core.paladin.io/v1alpha1`).
+- **The Zeto domain works.** `ptx_queryTransactions` returns a `private` transaction on the
+  `zeto` domain, and a tCeBM mint returns a Paladin receipt with `success: true` at a real block
+  height.
+- **Pente groups are created** on both spokes by the bank joins.
+- Every apply reported `rc=0`; 47 containers.
+
+None of the changes this document warned about — package renames, the npm scope, RPC auth
+plugins, privacy-group access — affected this path. That is not the same as saying nothing
+changed; it is saying that what changed is not on the path we use.
+
+### A static shortcut that does not work — recorded so it is not retried
+
+Checking whether `libzeto.so` contains `HexUint256To32ByteHexString` proves nothing: the helper
+is present in **both** `v0.15.0-rc.1` and `v1.0.0` (2 occurrences each). The fix changed the
+**call site** in `loadCoins`, not the existence of the helper. `go version -m` on the two
+libraries is also inconclusive — both report the Paladin modules as `(devel)`, with no version
+string. Only the functional test settles it.
+
+### Prerequisite discovered while running this
+
+`samples/deploy-all.sh` exports `CBWEB3_HOME` and `CBWEB3_SINGLE_HOST=1`. Invoking
+`cbweb3 apply` directly without them makes the toolkit treat each manifest's `advertisedHost`
+(a Docker network alias) as externally routable, which pins Paladin's peer gRPC port to the
+fixed 9000 — so the second founding spoke on one host fails with
+`Bind for 0.0.0.0:9000 failed: port is already allocated`. With the variables set, the ports
+derive per entity (31650 / 31750). Anyone reproducing this must export them.
+
+### To close the upgrade
+
+Fix the relay's camelCase/snake_case forwarding, then run criterion 3: loop locks of amount 1
+until a `zeto_lock_ref` beginning `0x00` appears (expect a few hundred locks at ~20s each,
+refreshing the access token every 5 minutes — it expires at 300s), lock the destination leg with
+the same `hash_lock`, and require HTTP 200 on settle. Then criterion 4, then the E2E suites and
+performance baselines of criterion 5.
