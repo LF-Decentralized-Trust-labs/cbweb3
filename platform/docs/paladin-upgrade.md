@@ -204,33 +204,35 @@ Two things worth recording beyond the table:
 `docs/TOOLCHAIN.md` carries `v1.0.0` in the image list, the advisory and the pin matrix. This
 section is the other half.
 
-### Criteria 3 and 4 — **not met, and blocked by something else**
+### Criterion 3 — the blocker was an operator error, not a defect
 
-Criterion 3 (a leading-zero-byte locked state settles) could not be exercised, and the reason
-is **not** Paladin.
+An earlier revision of this section claimed the cross-spoke FX proposal was broken by the
+relay spreading a camelCase event into a snake_case gRPC request. **That was wrong on both
+counts and is retracted.** `proposeOnCounterpart` maps every field explicitly and correctly
+(`counterparty_b: event.counterpartyB`, …), and the internal listing the relay reads returns
+all identities populated — checked directly against the running gateway.
 
-The cross-spoke FX proposal never reaches the destination spoke. The relay forwards it and the
-call fails:
+The real cause was a missing field in the *test* payload. When the relay forwards a proposal
+it sets `on_behalf: true`, and on that path the destination resolves its bilateral group as
+`{local CB, custodian}` rather than `{originator, counterparty}` — because the originator is
+remote and not a member of any group on that spoke (`server.go:1183-1190`, whose comment says
+exactly this). With no `custodian` in the proposal, `EnsureFXContext` refuses:
 
 ```
-[spoke-brl] ProposeFXAgreement gRPC failed: 13 INTERNAL:
 ensure Pente context: EnsureFXContext: originator and counterparty identities are required
 ```
 
-Root cause, in `interop/hub-and-spoke/cacti/src/htlc-relay.ts`: the forwarded payload is built
-by spreading the **camelCase** event object (`counterpartyB`, `sourceReceiver`,
-`settlementAgent`, …) into a gRPC request whose interface at line 137 is **snake_case**
-(`counterparty_b`, `source_receiver`, `settlement_agent`, …). Every field whose name differs
-between the two conventions arrives empty. `originator` survives only because it is one word.
+Setting `custodian` to the destination bank's Paladin identity fixes it: the proposal
+propagated to `spoke-cop` in ~20s and the counterparty accepted it on-chain.
 
-Without an ACCEPTED agreement on the source spoke, `FX_AGREEMENT_HTLC_STRICT` (default true)
-refuses the lock, so no locked state can be harvested and criterion 3 cannot start. Disabling
-the flag by hand was attempted and abandoned: the backend compose needs variables the toolkit
-injects from its own process environment, so recreating that one service outside the toolkit is
-not a clean operation.
+The lesson worth keeping is about method, not about the code: three layers were read and
+blamed before the payload was checked. The internal listing and the relay mapping were both
+correct all along.
 
-Criterion 4 (revisit the `locked_state_id.go` guard) is deliberately left open: removing a
-workaround before the defect it guards is demonstrated closed would be the wrong order.
+### Criterion 4 — deliberately open
+
+Removing the `locked_state_id.go` guard before the defect it guards is demonstrated closed
+would be the wrong order.
 
 ### What the upgrade *is* verified to do
 
