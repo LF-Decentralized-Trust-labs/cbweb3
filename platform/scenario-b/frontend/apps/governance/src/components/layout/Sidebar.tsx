@@ -45,7 +45,7 @@ const scenarioBNavItems: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/registry", label: "Registry", icon: ClipboardCheck, required: GOVERNANCE_OR_ADMISSION },
   { to: "/accounts", label: "Accounts", icon: Users },
-  { to: "/swap-monitor", label: "Swap Monitor", icon: ListChecks },
+  { to: "/approvals-overview", label: "Approvals Overview", icon: ListChecks },
   { to: "/circuit-breaker", label: "Circuit Breaker", icon: ShieldAlert },
   { to: "/transfer-limits", label: "Transfer Limits", icon: SlidersHorizontal },
   { to: "/oversight", label: "Oversight", icon: Eye },
