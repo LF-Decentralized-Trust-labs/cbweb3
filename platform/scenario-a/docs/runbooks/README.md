@@ -10,6 +10,7 @@ Operational documentation for deployment and configuration of the CBWeb3 platfor
 |----------|-------------|
 | [deployment-runbook.md](deployment-runbook.md) | Complete deployment guide: `cd samples && ./deploy-all.sh`, detailed phases, health checks, HTLC demo, teardown |
 | [environment-setup.md](environment-setup.md) | Prerequisites, tool installation, complete port reference per entity |
+| [container-log-disk-recovery.md](container-log-disk-recovery.md) | Reclaiming disk from unbounded container logs on hosts deployed before rotation was added, and confirming the growth rate actually fell |
 
 **Quick start:**
 
