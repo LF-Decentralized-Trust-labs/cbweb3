@@ -432,15 +432,8 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	var b strings.Builder
 	// Same password the compose env gave the Keycloak container; resolved from the
 	// entity secrets file, not a constant.
-	// Caveat, stated rather than glossed: kcadm takes the password as an argument, so
-	// it transits the Keycloak container's process list for the duration of this exec.
-	// There is no env equivalent for `kcadm config credentials` (unlike REDISCLI_AUTH,
-	// which is why Redis is handled differently). This is not new — the value used to be
-	// the constant admin — but the exposure window is real and belongs in a follow-up
-	// once realm provisioning moves to an imported realm file, as Scenario A does it.
 	b.WriteString(kcadmPreamble)
-	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password %[2]s && ",
-		kc, mustInfraSecret(secretsDirOf(c.SpokeEnvFile), "KC_ADMIN_PASSWORD"))
+	fmt.Fprintf(&b, "%s && ", kcadmLogin(kc))
 	fmt.Fprintf(&b, "(%[1]s create realms -s realm=%[2]s -s enabled=true || kcw 'create realm') && ", kc, spokeKeycloakRealm)
 	// Local lab uses plain HTTP; the NOC portal does a browser-direct password
 	// grant from the entity's IP, which Keycloak's default sslRequired=external
@@ -1247,7 +1240,6 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			Check: func(ctx context.Context) (bool, error) {
 				return adminUsersAlreadyProvisioned(ctx, c.Runner, c.keycloakContainer(),
 					keycloakAdminCLI, spokeKeycloakRealm,
-					mustInfraSecret(secretsDirOf(c.SpokeEnvFile), "KC_ADMIN_PASSWORD"),
 					c.reconcilableAdminUsers())
 			},
 			Run: func(ctx context.Context) error {
@@ -1262,7 +1254,6 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				}
 				return reconcileAdminUsers(ctx, c.Runner, c.keycloakContainer(),
 					keycloakAdminCLI, spokeKeycloakRealm,
-					mustInfraSecret(secretsDirOf(c.SpokeEnvFile), "KC_ADMIN_PASSWORD"),
 					c.reconcilableAdminUsers())
 			},
 		},
@@ -1277,7 +1268,6 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			Check: func(ctx context.Context) (bool, error) {
 				return nocOriginsAlreadyRegistered(ctx, c.Runner, c.keycloakContainer(),
 					keycloakAdminCLI, spokeKeycloakRealm,
-					mustInfraSecret(secretsDirOf(c.SpokeEnvFile), "KC_ADMIN_PASSWORD"),
 					nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...))
 			},
 			Run: func(ctx context.Context) error {
@@ -1291,7 +1281,6 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				}
 				return reconcileNOCOrigins(ctx, c.Runner, c.keycloakContainer(),
 					keycloakAdminCLI, spokeKeycloakRealm,
-					mustInfraSecret(secretsDirOf(c.SpokeEnvFile), "KC_ADMIN_PASSWORD"),
 					nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...))
 			},
 		},

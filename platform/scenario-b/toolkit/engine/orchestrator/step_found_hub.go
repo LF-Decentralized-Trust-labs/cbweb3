@@ -258,22 +258,16 @@ func (c HubConfig) buildBackendImage(ctx context.Context) error {
 func (c HubConfig) provisionKeycloakRealm(ctx context.Context) error {
 	kc := "/opt/keycloak/bin/kcadm.sh"
 	var b strings.Builder
-	// Caveat, stated rather than glossed: kcadm takes the password as an argument, so
-	// it transits the Keycloak container's process list for the duration of this exec.
-	// There is no env equivalent for `kcadm config credentials` (unlike REDISCLI_AUTH,
-	// which is why Redis is handled differently). This is not new — the value used to be
-	// the constant admin — but the exposure window is real and belongs in a follow-up
-	// once realm provisioning moves to an imported realm file, as Scenario A does it.
 	b.WriteString(kcadmPreamble)
 	fmt.Fprintf(&b,
-		"%[1]s config credentials --server http://localhost:8080 --realm master --user %[2]s --password %[3]s && "+
-			"(%[1]s create realms -s realm=%[4]s -s enabled=true || kcw 'create realm') && "+
+		"%[2]s && "+
+			"(%[1]s create realms -s realm=%[3]s -s enabled=true || kcw 'create realm') && "+
 			// Local lab HTTP: relax sslRequired so the browser-direct NOC portal
 			// password grant is not rejected with "HTTPS required" (never in prod).
-			"(%[1]s update realms/%[4]s -s sslRequired=NONE -s accessTokenLifespan=%[8]d || kcw 'update realm settings') && "+
-			"(%[1]s create clients -r %[4]s -s clientId=%[5]s -s secret=%[6]s -s enabled=true "+
-			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[7]s || kcw 'create backend client') && ",
-		kc, "admin", mustInfraSecret(secretsDirOf(c.HubEnvFile), "KC_ADMIN_PASSWORD"),
+			"(%[1]s update realms/%[3]s -s sslRequired=NONE -s accessTokenLifespan=%[7]d || kcw 'update realm settings') && "+
+			"(%[1]s create clients -r %[3]s -s clientId=%[4]s -s secret=%[5]s -s enabled=true "+
+			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[6]s || kcw 'create backend client') && ",
+		kc, kcadmLogin(kc),
 		hubKeycloakRealm, hubKeycloakClient, hubKeycloakSecret, audienceMapperArg(keycloakBackendAudience),
 		accessTokenLifespanSeconds)
 	// Public noc-portal client so the hub's co-located NOC portal can password-grant
@@ -512,7 +506,6 @@ func FoundHubSteps(c HubConfig) []Step {
 			Check: func(ctx context.Context) (bool, error) {
 				return nocOriginsAlreadyRegistered(ctx, c.Runner, c.keycloakContainer(),
 					keycloakAdminCLI, hubKeycloakRealm,
-					mustInfraSecret(secretsDirOf(c.HubEnvFile), "KC_ADMIN_PASSWORD"),
 					nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...))
 			},
 			Run: func(ctx context.Context) error {
@@ -525,7 +518,6 @@ func FoundHubSteps(c HubConfig) []Step {
 				}
 				return reconcileNOCOrigins(ctx, c.Runner, c.keycloakContainer(),
 					keycloakAdminCLI, hubKeycloakRealm,
-					mustInfraSecret(secretsDirOf(c.HubEnvFile), "KC_ADMIN_PASSWORD"),
 					nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...))
 			},
 		},

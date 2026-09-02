@@ -164,17 +164,8 @@ var bankRoles = []string{"commercial_bank", "ROLE_COMMERCIAL_BANK"}
 func (c JoinConfig) provisionKeycloakRealm(ctx context.Context) error {
 	kc := "/opt/keycloak/bin/kcadm.sh"
 	var b strings.Builder
-	// Same password the compose env gave the Keycloak container; resolved from the
-	// entity secrets file, not a constant.
-	// Caveat, stated rather than glossed: kcadm takes the password as an argument, so
-	// it transits the Keycloak container's process list for the duration of this exec.
-	// There is no env equivalent for `kcadm config credentials` (unlike REDISCLI_AUTH,
-	// which is why Redis is handled differently). This is not new — the value used to be
-	// the constant admin — but the exposure window is real and belongs in a follow-up
-	// once realm provisioning moves to an imported realm file, as Scenario A does it.
 	b.WriteString(kcadmPreamble)
-	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password %[2]s && ",
-		kc, mustInfraSecret(c.DataDir, "KC_ADMIN_PASSWORD"))
+	fmt.Fprintf(&b, "%s && ", kcadmLogin(kc))
 	fmt.Fprintf(&b, "(%[1]s create realms -s realm=%[2]s -s enabled=true || kcw 'create realm') && ", kc, bankKeycloakRealm)
 	// Local lab uses plain HTTP and the portal does a browser-direct password grant, which
 	// Keycloak's default sslRequired=external rejects with "HTTPS required". Relax it for
