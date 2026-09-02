@@ -220,11 +220,10 @@ Three summary cards:
 | **Pending Escrows** | Tokenisation requests awaiting approval. |
 | **Pending Redeems** | Redemption requests awaiting approval. |
 
-These counts are informational only. In Scenario B the deposit, escrow and redeem approval
-screens are **not** part of this portal — the components exist in the codebase but only the
-Scenario A route set registers them — so there is nothing to open from here and nothing to act on.
-The cards used to carry links to those routes; in Scenario B every one of them fell through to the
-dashboard, so they were removed. Verified on a live stack.
+These counts are informational only. Approving is done in the **treasury portal**, which carries
+the issuance, tokenisation and redeem approval screens and lists them in its own navigation. This
+portal has no approval screens — the cards used to link to routes it never registered, and every
+one of them fell through to the dashboard, so the links were removed. Verified on a live stack.
 
 #### Swap tracking was removed
 
@@ -489,7 +488,7 @@ Click **Save Settings** to confirm. These preferences are display-only client-si
 
 1. Navigate to **Approvals Overview** (`/approvals-overview`).
 2. Review the three pending count cards (Deposits, Escrows, Redeems). Elevated counts indicate a processing backlog in the payment pipeline.
-3. An elevated count is a signal to chase, not something to action here: these approval screens are not part of this portal in Scenario B.
+3. Work the queue down in the **treasury portal**, which carries the issuance, tokenisation and redeem approval screens. This portal has none — an elevated count here is a signal to chase, not something to action.
 4. Individual swaps cannot be inspected from this portal — that read is answered only to the bank that owns the swap. For a specific swap, escalate to the payment team or the NOC with the swap ID.
 
 ### Setting a daily transfer limit
