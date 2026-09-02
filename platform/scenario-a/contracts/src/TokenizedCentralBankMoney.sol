@@ -8,7 +8,7 @@ import {AccessControl} from "@openzeppelin-contracts/access/AccessControl.sol";
 
 /// @title TokenizedCentralBankMoney (tCeBm)
 /// @dev Core asset mocked implementation for the CBWeb3 MVP
-/// @notice This contract acts as the base fiat-pegged asset for the HTLC and AMM pools. It includes RBAC to restrict minting and burning capabilities strictly to the designated Central Bank Authority.
+/// @notice This contract acts as the base fiat-pegged asset for the HTLC. It includes RBAC to restrict minting and burning capabilities strictly to the designated Central Bank Authority.
 contract TokenizedCentralBankMoney is ERC20, AccessControl {
     /// @dev Utilises the SafeERC20 library for all IERC20 token operations within this contract, ensuring safer interactions with ERC20 tokens by handling potential failures and return values according to the ERC20 standard.
     using SafeERC20 for IERC20;

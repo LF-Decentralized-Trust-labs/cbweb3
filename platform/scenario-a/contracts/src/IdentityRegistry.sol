@@ -40,9 +40,10 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
         bytes32 zkPointer,
         bytes32 institutionId
     ) external override onlyRole(GOVERNANCE_ROLE) {
-        // A zero institutionId is rejected rather than stored: the AMM resume quorum counts
-        // distinct institutions, and an unset id would collide across every participant that
-        // also left it unset — turning the institution check into a no-op for all of them.
+        // A zero institutionId is rejected rather than stored: institution attribution is
+        // read back off-chain through getInstitutionId (the auth and compliance services),
+        // and an unset id would collide across every participant that also left it unset —
+        // turning that attribution into a no-op for all of them.
         if (account == address(0) || institutionId == bytes32(0)) {
             revert InvalidIdentityData();
         }

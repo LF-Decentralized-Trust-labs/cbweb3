@@ -424,7 +424,7 @@ func TestOnboardParticipant_CommercialBank_FullFlow(t *testing.T) {
 }
 
 // The institutionId written on-chain must come from the bank code, not the display name:
-// it is what makes two wallets of one institution count as one in the AMM resume quorum,
+// it is what makes two wallets of one institution count as one institution,
 // and a name-derived id would split them the moment the name is spelled differently.
 func TestOnboardParticipant_DerivesInstitutionIDFromBankCode(t *testing.T) {
 	t.Parallel()

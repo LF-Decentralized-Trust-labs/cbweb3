@@ -16,7 +16,6 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/grpc/server"
 	compliancepki "github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/pki"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/repository"
-	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/amm"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
 )
 
@@ -49,7 +48,10 @@ func main() {
 	}
 
 	bc := newBlockchainClient()
-	breaker := newAMMBreakerClient()
+	// The circuit breaker is a governance flag recorded in the database. It was
+	// once mirrored onto an on-chain AMM; Scenario A has no swaps for a breaker to
+	// protect, and that path was never wired in any environment.
+	log.Println("compliance: circuit breaker is a database-recorded governance flag")
 
 	// Bootstrap PKI files for commercial banks (idempotent).
 	if bankCode := os.Getenv("BANK_CODE"); bankCode != "" {
@@ -73,7 +75,7 @@ func main() {
 		}
 	}
 
-	grpcServer, err := server.New(repo, ca, bc, breaker)
+	grpcServer, err := server.New(repo, ca, bc)
 	if err != nil {
 		log.Fatalf("compliance: configure gRPC server: %v", err)
 	}
@@ -121,46 +123,6 @@ func newBlockchainClient() registry.RegistryWriter {
 		log.Println("compliance: blockchain noop mode (no on-chain writes)")
 		return registry.NoopRegistryClient{}
 	}
-}
-
-// newAMMBreakerClient builds the on-chain AutomatedMarketMaker circuit-breaker
-// client. It returns nil (database-only mode) unless the node is a Central Bank
-// with a governance key (CB_PRIVATE_KEY) and a deployed AMM_ADDRESS. The breaker
-// enforces the asymmetric model: pause = 1-of-N, resume = 2-of-N quorum. Distinct
-// Central Banks each run their own compliance instance with their own key, so a
-// single instance can never reach the resume quorum on its own.
-func newAMMBreakerClient() amm.Breaker {
-	if getEnv("BLOCKCHAIN_CLIENT", "noop") != "besu" {
-		log.Println("compliance: AMM circuit breaker disabled (blockchain noop mode)")
-		return nil
-	}
-
-	ammAddr := os.Getenv("AMM_ADDRESS")
-	cbKey := os.Getenv("CB_PRIVATE_KEY")
-	if ammAddr == "" || cbKey == "" {
-		log.Println("compliance: AMM_ADDRESS/CB_PRIVATE_KEY not set — on-chain circuit breaker disabled (database-only toggle)")
-		return nil
-	}
-
-	signer, err := registry.NewStaticKeySigner(cbKey)
-	if err != nil {
-		log.Printf("WARN: invalid CB_PRIVATE_KEY for AMM breaker: %v — circuit breaker disabled", err)
-		return nil
-	}
-
-	chainID, _ := strconv.ParseInt(getEnv("BESU_CHAIN_ID", "1337"), 10, 64)
-	breaker, err := amm.NewBesuBreaker(amm.BesuConfig{
-		RPCURL:         os.Getenv("BESU_RPC_URL"),
-		AMMAddress:     ammAddr,
-		ChainID:        chainID,
-		RequestTimeout: time.Duration(15) * time.Second,
-	}, signer)
-	if err != nil {
-		log.Printf("WARN: AMM breaker init failed: %v — circuit breaker disabled", err)
-		return nil
-	}
-	log.Println("compliance: on-chain AMM circuit breaker connected at", ammAddr)
-	return breaker
 }
 
 func getEnv(key, fallback string) string {

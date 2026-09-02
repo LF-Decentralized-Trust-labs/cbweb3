@@ -55,8 +55,8 @@ func EnsureGovernanceParticipant(
 
 	// Resolve the governance bank code once. The persisted record and the on-chain institutionId
 	// must derive from the same value: reading it twice with divergent defaults would let the
-	// database and the chain disagree about which institution this wallet belongs to, and the AMM
-	// resume quorum trusts the chain's answer.
+	// database and the chain disagree about which institution this wallet belongs to, and the
+	// chain's answer is the one every consumer reads.
 	const institutionName = "Banco Central"
 	bankCode := getEnv("GOVERNANCE_BANK_CODE", "governance-bootstrap")
 
