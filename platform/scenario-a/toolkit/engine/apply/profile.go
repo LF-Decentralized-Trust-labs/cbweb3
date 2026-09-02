@@ -131,7 +131,7 @@ func LocalProfileFromExDir(exDir, dataDir string, rpcPort int) LocalProfile {
 
 	p.BesuImage = envOr("CBWEB3_BESU_IMAGE", "hyperledger/besu:25.8.0")
 
-	p.PaladinImage = envOr("CBWEB3_PALADIN_IMAGE", "docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1")
+	p.PaladinImage = envOr("CBWEB3_PALADIN_IMAGE", "docker.io/lfdecentralizedtrust/paladin:v1.0.0")
 
 	p.ContractsOutDir = envOr("CBWEB3_CONTRACTS_OUT", filepath.Join(root, "contracts", "out"))
 

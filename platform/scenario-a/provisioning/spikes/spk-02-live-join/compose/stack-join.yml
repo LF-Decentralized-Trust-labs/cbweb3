@@ -42,7 +42,7 @@ services:
     restart: "no"
 
   paladin-bank-x:
-    image: docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1
+    image: docker.io/lfdecentralizedtrust/paladin:v1.0.0
     container_name: spk02-paladin-bank-x
     networks:
       - spk02_join_net

@@ -48,7 +48,7 @@ type Deps struct {
 	BesuImage string
 
 	// PaladinImage is the pinned Paladin Docker image for the spoke's Paladin
-	// nodes (e.g. docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1).
+	// nodes (e.g. docker.io/lfdecentralizedtrust/paladin:v1.0.0).
 	PaladinImage string
 
 	// ContractsOutDir is the Foundry build output dir (contracts/out) from which
