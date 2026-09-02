@@ -11,10 +11,10 @@ import { PaymentStatus, normalizePaymentStatus } from "../types";
  * Scenario B the deposit, escrow and redeem approval screens are not part of this portal, so
  * there is nowhere here to link to and nothing to act on from this page.
  *
- * The cards used to carry links to /deposits-approval, /escrows-approval and /redeems-approval.
- * Those routes exist only in the Scenario A route set, so in Scenario B every one of them fell
- * through to the dashboard. Removed rather than left as three dead links — verified on a live
- * stack.
+ * The cards used to carry links to /deposits-approval, /escrows-approval and /redeems-approval,
+ * which fell through to the dashboard because this portal never registered them for Scenario B.
+ * The approving belongs to the treasury portal, which routes all three and lists them in its own
+ * navigation, so this portal's copies were retired rather than wired up.
  *
  * This was the Swap Monitor, which also let an operator track a swap by id. That half never
  * worked: a swap read is answered only to the bank that owns the swap, so a governance session
