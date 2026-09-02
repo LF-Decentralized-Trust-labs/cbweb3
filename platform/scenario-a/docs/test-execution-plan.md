@@ -41,7 +41,7 @@ The complete test case catalog is maintained in [`scenario-a/tests/TEST-CATALOG.
 
 The following components and layers are explicitly **in scope**:
 
-- **Smart Contracts**: HTLC escrow state machine, tCeBM/fCeBM token logic, IdentityRegistry on-chain RBAC, FXAgreement lifecycle, SpokeBridge, AutomatedMarketMaker
+- **Smart Contracts**: HTLC escrow state machine, tCeBM/fCeBM token logic, IdentityRegistry on-chain RBAC, FXAgreement lifecycle, SpokeBridge
 - **Backend API Services**: api-gateway (REST), auth (gRPC), compliance (gRPC), payment-orchestrator (gRPC) — all 6 entities
 - **Escrow Flow**: full deposit → fCeBM mint → escrow (fCeBM burn + tCeBM Zeto mint) → redeem (tCeBM Zeto transfer + fCeBM mint) lifecycle
 - **FX Agreement Lifecycle**: PROPOSED → ACCEPTED → SETTLED / REJECTED / CANCELLED
@@ -172,7 +172,7 @@ The following are explicitly **out of scope**:
 - [ ] k6 burst/spike profile executed
 - [ ] Caliper smart contract benchmarks: TTF < 5 s, error rate < 1 %
 - [ ] OWASP ZAP baseline scan: zero critical or high-severity findings
-- [ ] Foundry fuzz security invariants executed (HTLC, AMM)
+- [ ] Foundry fuzz security invariants executed (HTLC)
 - [ ] Performance report (k6 HTML + Caliper JSON) archived
 
 #### Phase 5 — User Acceptance Testing (Weeks 6–7)
@@ -218,7 +218,7 @@ The following are explicitly **out of scope**:
 
 | Layer | Framework | Scope |
 |-------|-----------|-------|
-| **Smart Contracts** | [Foundry](https://getfoundry.sh/) (`forge test`) | Solidity unit tests with full EVM isolation; fuzz tests for HTLC and AMM invariants |
+| **Smart Contracts** | [Foundry](https://getfoundry.sh/) (`forge test`) | Solidity unit tests with full EVM isolation; fuzz tests for HTLC invariants |
 | **Backend API** | Go standard `testing` package | Unit tests with mocked gRPC and blockchain dependencies; isolated per-service |
 | **Integration** | Go `testing` + local Besu/Paladin testnet | Live infrastructure; tests sign real transactions and verify on-chain state |
 | **E2E** | Bash scripts (`tryout-*.sh`) + API-First runner | Full lifecycle execution via REST API; on-chain finality confirmed via `eth_getTransactionReceipt` |
@@ -238,7 +238,7 @@ The following are explicitly **out of scope**:
 
 Validates discrete, isolated functions with all external dependencies mocked.
 
-- **Smart Contracts**: function-level tests via Foundry (EVM state isolated per test); covers HTLC lock/settle/refund, tCeBM mint/burn, FXAgreement lifecycle, IdentityRegistry RBAC, AMM constant-product formula
+- **Smart Contracts**: function-level tests via Foundry (EVM state isolated per test); covers HTLC lock/settle/refund, tCeBM mint/burn, FXAgreement lifecycle, IdentityRegistry RBAC
 - **Backend API**: Go unit tests; database connections, blockchain clients, and gRPC channels are substituted with mocks; covers request handlers, middleware (JWT validation, RBAC), routing, and service-layer logic
 
 ### Integration Testing
@@ -438,8 +438,7 @@ All endpoints defined in the OpenAPI spec (`scenario-a/apis/openapi/api-gateway.
 
 - **Access Control**: administrative functions restricted to `GOVERNANCE_ROLE` / `CENTRAL_BANK_ROLE` (OpenZeppelin `AccessControl`)
 - **HTLC Invariants (Foundry Fuzz)**: funds cannot be claimed without the exact pre-image; refund cannot execute before `timeLock` expiry; `INVALID → LOCKED → SETTLED/REFUNDED` FSM cannot be violated
-- **AMM Invariants (Foundry Fuzz)**: constant-product formula `x · y = k` is maintained after every swap; `swapExactOutput` reverts when calculated input exceeds `maxInput`; circuit breaker blocks all state changes when paused
-- **Pause / Circuit Breaker**: `GOVERNANCE_ROLE` can pause; unauthorized callers receive 403; all state-changing operations revert with `"Contract Paused"` while paused
+- **Halt control**: Scenario A has no `Pausable` contract. The circuit breaker is a governance flag recorded by the compliance service in the database, covered by service tests rather than Foundry
 
 ### Resilience and "Fail Closed" Behavior
 

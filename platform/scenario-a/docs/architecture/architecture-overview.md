@@ -137,7 +137,6 @@ The same set of contracts is deployed independently on each spoke:
 | `IdentityRegistry` | On-chain participant registry and RBAC | `GOVERNANCE_ROLE` for registration and status changes |
 | `FXAgreement` | Bilateral FX trade lifecycle state machine | `IdentityRegistry` gating |
 | `SpokeBridge` | Cross-spoke message coordination | `IdentityRegistry` gating |
-| `AutomatedMarketMaker` | Constant-product AMM liquidity pool (Scenario B) | `GOVERNANCE_ROLE` for circuit breaker |
 
 Contracts are deployed via Foundry scripts (`make contracts.deploy-spoke-{a,b}`). Addresses are propagated to service `.env` files via `make contracts.sync-addresses`.
 

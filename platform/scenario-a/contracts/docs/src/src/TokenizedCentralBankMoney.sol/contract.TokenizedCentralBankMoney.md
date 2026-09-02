@@ -7,7 +7,7 @@ ERC20, AccessControl
 **Title:**
 TokenizedCentralBankMoney (tCeBm)
 
-This contract acts as the base fiat-pegged asset for the HTLC and AMM pools. It includes RBAC to restrict minting and burning capabilities strictly to the designated Central Bank Authority.
+This contract acts as the base fiat-pegged asset for the HTLC. It includes RBAC to restrict minting and burning capabilities strictly to the designated Central Bank Authority.
 
 Core asset mocked implementation for the CBWeb3 MVP
 

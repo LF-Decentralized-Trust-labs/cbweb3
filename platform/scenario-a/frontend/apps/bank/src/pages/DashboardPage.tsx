@@ -28,7 +28,6 @@ import { Link } from "react-router-dom";
 // } from "recharts";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import {
-  useAmmStore,
   useHtlcStore,
   usePaymentStore,
   useStatementStore,
@@ -68,9 +67,6 @@ export function DashboardPage() {
   const fetchHtlc = useHtlcStore((state) => state.fetchAll);
   const htlcLocks = useHtlcStore((state) => state.locks);
 
-  const refreshPool = useAmmStore((state) => state.refreshPool);
-  // const pool = useAmmStore((state) => state.pool);
-
   const fetchPayments = usePaymentStore((state) => state.fetchAll);
   const paymentBalance = usePaymentStore((state) => state.balance);
   const fiatBalance = usePaymentStore((state) => state.fiatBalance);
@@ -85,10 +81,9 @@ export function DashboardPage() {
   useEffect(() => {
     void fetchToken();
     void fetchHtlc();
-    void refreshPool();
     void fetchPayments();
     void fetchStatement();
-  }, [fetchToken, fetchHtlc, refreshPool, fetchPayments, fetchStatement]);
+  }, [fetchToken, fetchHtlc, fetchPayments, fetchStatement]);
 
   // const liquidityData = [
   //   { name: "Public", value: Number(tokenBalance?.publicBalance ?? 0) },
@@ -99,11 +94,6 @@ export function DashboardPage() {
   //   name: `${tx.kind}-${index + 1}`,
   //   amount: Number(tx.amount),
   // }));
-
-  // const poolData = [
-  //   { name: pool?.tokenA ?? "Token A", value: Number(pool?.reserveA ?? 0) },
-  //   { name: pool?.tokenB ?? "Token B", value: Number(pool?.reserveB ?? 0) },
-  // ];
 
   // const chartConfig = {
   //   value: { label: "Amount", color: "hsl(var(--primary))" },
@@ -199,17 +189,6 @@ export function DashboardPage() {
             <Badge variant="outline">Shielded</Badge>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Pool Health</CardDescription>
-            <CardTitle>{pool?.imbalanceFlag ? "Imbalanced" : "Healthy"}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Badge variant={statusVariant(pool?.imbalanceFlag ? "FAILED" : "CONFIRMED")}>
-              {pool?.imbalanceFlag ? "FAILED" : "CONFIRMED"}
-            </Badge>
-          </CardContent>
-        </Card>
       </section>
 
       <section className="grid gap-4 md:grid-cols-2">
@@ -221,22 +200,6 @@ export function DashboardPage() {
         <CardContent>
         <p className="text-sm">Public: {tokenBalance?.publicBalance ?? "-"} tCeBM</p>
         <p className="text-sm">Private: {tokenBalance?.privateBalance ?? "-"} tCeBM</p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>AMM Pool Status</CardTitle>
-          <CardDescription>Scenario B structural status</CardDescription>
-        </CardHeader>
-        <CardContent>
-        <p className="text-sm">{pool?.tokenA ?? "-"} Reserve: {pool?.reserveA ?? "-"}</p>
-        <p className="text-sm">{pool?.tokenB ?? "-"} Reserve: {pool?.reserveB ?? "-"}</p>
-        <p className="mt-2">
-          <Badge variant={statusVariant(pool?.imbalanceFlag ? "FAILED" : "CONFIRMED")}>
-            {pool?.imbalanceFlag ? "FAILED" : "CONFIRMED"}
-          </Badge>
-        </p>
         </CardContent>
       </Card>
       </section> */}
@@ -290,28 +253,6 @@ export function DashboardPage() {
                   dataKey="amount"
                   fill="var(--color-value)"
                   radius={[6, 6, 0, 0]}
-                />
-              </BarChart>
-            </ChartContainer>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">AMM Reserves</CardTitle>
-            <CardDescription>Current pool composition</CardDescription>
-          </CardHeader>
-          <CardContent className="h-56">
-            <ChartContainer config={chartConfig} className="h-full w-full">
-              <BarChart data={poolData} layout="vertical" margin={{ left: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis type="number" hide />
-                <YAxis type="category" dataKey="name" width={90} />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <Bar
-                  dataKey="value"
-                  fill="hsl(var(--chart-2))"
-                  radius={[0, 6, 6, 0]}
                 />
               </BarChart>
             </ChartContainer>

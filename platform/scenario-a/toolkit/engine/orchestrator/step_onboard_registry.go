@@ -68,8 +68,8 @@ type onboardRegistryStep struct {
 	// institutionCode identifies the central bank as an INSTITUTION (the manifest's
 	// metadata.name). It is rendered into the CB's env as GOVERNANCE_BANK_CODE, so the
 	// wallet registered here and any wallet the compliance service registers later derive
-	// the same institutionId. They must agree: the AMM resume quorum counts institutions,
-	// and two ids for one central bank would let it resume alone with two keys.
+	// the same institutionId. They must agree: institution attribution is read back from
+	// the registry, and two ids for one central bank would read as two institutions.
 	institutionCode     string
 	dataDir             string
 	besuRPCURL          string
@@ -212,8 +212,8 @@ func (s *onboardRegistryStep) Run(ctx context.Context) error {
 	// institutionId identifies the INSTITUTION, not this wallet: it is keccak256 of the central
 	// bank's code, the same derivation the Go services use
 	// (backend/shared/blockchain/registry.InstitutionIDForParticipant) and the seed script uses
-	// (contracts/script/RegisterParticipants.s.sol). The AMM resume quorum counts distinct
-	// institutions, so a second CB wallet provisioned later must land on this same value — which is
+	// (contracts/script/RegisterParticipants.s.sol). Institution attribution must be stable, so a
+	// second CB wallet provisioned later must land on this same value — which is
 	// why it is derived from the spoke's central-bank code and not from the wallet address. The
 	// contract rejects a zero id, so this can never be left unset.
 	institutionID := institutionIDFromCode(s.institutionCode)
