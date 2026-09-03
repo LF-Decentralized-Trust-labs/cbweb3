@@ -4,11 +4,15 @@
 // CSRF token.
 //
 // This is a sweep over the registered route table rather than a list, because a
-// list is exactly what failed: the CSRF control was wired to the v1 tree and the v2
-// tree was added later with 27 mutating routes and no guard. A hand-maintained list
-// would have been just as incomplete as the wiring it was meant to check, and would
-// have gone stale the same way. Asking the router what it actually registered
-// cannot.
+// list would have gone stale exactly as the protection itself did: Scenario A
+// carried 54 mutating routes across 11 cookie-authenticated groups with no CSRF at
+// all, and nothing failed to say so. A hand-maintained inventory would have been
+// just as incomplete as the wiring it was meant to check. Asking the router what it
+// actually registered cannot.
+//
+// The sibling scenario has the sharper version of the same lesson — a whole v2 tree
+// added after the guard, with 27 unguarded mutating routes — which is why both
+// scenarios now mount the guard app-wide rather than group by group.
 package router
 
 import (
@@ -177,9 +181,9 @@ func sweepDependencies() Dependencies {
 
 // TestCSRFGuardCoversTheWholeAPITree is the assertion that actually closes finding 2.
 //
-// The sweep above can only judge routes this harness registers, and the v2 tree —
-// the 27 unguarded mutating routes the review found — needs a dozen service stubs to
-// come into existence. Enumeration therefore cannot prove v2 is covered.
+// The sweep above can only judge the routes this harness registers — 13 of Scenario
+// A's 54 mutating routes, because most groups come into existence only when their
+// services are injected. Enumeration therefore cannot prove the other 41 are covered.
 //
 // Mounting is structural, so it can be proven structurally: the guard is app-wide,
 // so it answers for a path that has NO route at all. A request that never reaches
