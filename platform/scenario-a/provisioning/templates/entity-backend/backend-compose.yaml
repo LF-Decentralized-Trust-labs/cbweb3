@@ -155,6 +155,11 @@ services:
       - path: ${ENTITY_ENV_FILE}
         required: true
     environment:
+      # Local stacks are served over plain HTTP, and the Secure flag would make the
+      # browser discard the session cookie outright. COOKIE_SECURE now defaults to
+      # TRUE in the gateway, so this opt-out has to be explicit — which is the point:
+      # the unsafe setting is the one that requires someone to type it.
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
       APP_PORT: "8080"
       REQUEST_TIMEOUT_SEC: "30"
       AUTH_GRPC_ADDR: ${ENTITY_PREFIX}-auth:9091

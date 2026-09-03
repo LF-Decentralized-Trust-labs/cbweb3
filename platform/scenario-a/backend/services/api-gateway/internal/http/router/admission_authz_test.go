@@ -90,6 +90,7 @@ func admissionProbe(t *testing.T, app *fiber.App, method, path, body string) int
 	t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.AddCookie(&http.Cookie{Name: "access_token", Value: "fake-token"})
+	attachCSRF(t, req, "fake-token")
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
 	if err != nil {

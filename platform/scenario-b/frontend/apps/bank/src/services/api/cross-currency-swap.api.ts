@@ -18,6 +18,7 @@ export const CROSS_CURRENCY_QUOTE_REFRESH_MS = 10_000;
 const crossCurrencyExecuteClient = axios.create({
   baseURL: apiBaseV2,
   withCredentials: true,
+  withXSRFToken: true,
   timeout: 300_000,
 });
 

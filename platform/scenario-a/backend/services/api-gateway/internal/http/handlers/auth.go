@@ -4,9 +4,11 @@
 package handlers
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/middleware"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/gofiber/fiber/v2"
 	"google.golang.org/grpc/codes"
@@ -22,6 +24,16 @@ type AuthHandler struct {
 	kycManager          interfaces.KYCManager
 	cookieSecure        bool   // mirrors COOKIE_SECURE env var; true = HTTPS only
 	bankCode            string // entity bank code; returned from /me when JWT lacks bank_id claim
+	csrfSecret          []byte // keys the HMAC binding a CSRF token to its session
+}
+
+// WithCSRFSecret sets the key that binds CSRF tokens to their session.
+//
+// A setter rather than a constructor parameter: NewAuthHandler has many call sites
+// across tests, and a test that does not exercise CSRF should not have to name a key.
+func (h *AuthHandler) WithCSRFSecret(secret []byte) *AuthHandler {
+	h.csrfSecret = secret
+	return h
 }
 
 type loginRequest struct {
@@ -103,7 +115,11 @@ func NewAuthHandler(
 // The refresh cookie uses its own MaxAge (refreshExpiresIn) so it outlives the
 // access token, enabling silent refresh. When refreshExpiresIn is 0 the access
 // token lifetime is used as fallback.
-func setAuthCookies(c *fiber.Ctx, accessToken, refreshToken string, expiresIn, refreshExpiresIn int, secure bool) {
+// The CSRF token is minted HERE, alongside the session, rather than at login only.
+// It binds to the access token, and a refresh issues a new one — so a token minted at
+// login would stop validating at the first refresh. Every path that establishes a
+// session already funnels through this function.
+func setAuthCookies(c *fiber.Ctx, accessToken, refreshToken string, expiresIn, refreshExpiresIn int, secure bool, csrfSecret []byte) error {
 	c.Cookie(&fiber.Cookie{
 		Name:     "access_token",
 		Value:    accessToken,
@@ -128,10 +144,39 @@ func setAuthCookies(c *fiber.Ctx, accessToken, refreshToken string, expiresIn, r
 			SameSite: "Strict",
 		})
 	}
+
+	csrfToken, err := middleware.NewCSRFToken(csrfSecret, accessToken)
+	if err != nil {
+		// Propagated, never swallowed: an empty XSRF-TOKEN cookie would lock the
+		// browser out of every mutating request with a 403 and no stated cause.
+		return fmt.Errorf("mint csrf token: %w", err)
+	}
+	// Deliberately NOT HttpOnly: the browser must read this one to echo it back in
+	// the X-XSRF-TOKEN header. That IS the double-submit mechanism, and it is safe
+	// because the session cookie beside it stays HttpOnly.
+	c.Cookie(&fiber.Cookie{
+		Name:     middleware.CSRFCookieName,
+		Value:    csrfToken,
+		Path:     "/",
+		MaxAge:   expiresIn,
+		HTTPOnly: false,
+		Secure:   secure,
+		SameSite: "Strict",
+	})
+	return nil
 }
 
 // clearAuthCookies removes the auth cookies from the browser by expiring them immediately.
 func clearAuthCookies(c *fiber.Ctx, secure bool) {
+	c.Cookie(&fiber.Cookie{
+		Name:     middleware.CSRFCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HTTPOnly: false,
+		Secure:   secure,
+		SameSite: "Strict",
+	})
 	c.Cookie(&fiber.Cookie{
 		Name:     "access_token",
 		Value:    "",
@@ -233,7 +278,10 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials", "code": CodeInvalidCredentials})
 	}
-	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure)
+	if err := setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure, h.csrfSecret); err != nil {
+		log.Printf("[auth] %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "could not establish a session"})
+	}
 	resp := fiber.Map{
 		"accessToken": token.AccessToken,
 		"expiresIn":   token.ExpiresIn,
@@ -266,7 +314,10 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid or expired refresh token", "code": CodeInvalidRefreshToken})
 	}
-	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure)
+	if err := setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure, h.csrfSecret); err != nil {
+		log.Printf("[auth] %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "could not establish a session"})
+	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"accessToken":  token.AccessToken,
 		"refreshToken": token.RefreshToken,
@@ -337,7 +388,10 @@ func (h *AuthHandler) WalletBind(c *fiber.Ctx) error {
 		return c.Status(httpStatus).JSON(fiber.Map{"error": errMsg})
 	}
 
-	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure)
+	if err := setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure, h.csrfSecret); err != nil {
+		log.Printf("[auth] %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "could not establish a session"})
+	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"accessToken":  token.AccessToken,
 		"refreshToken": token.RefreshToken,

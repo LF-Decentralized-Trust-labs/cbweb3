@@ -165,7 +165,10 @@ services:
       # Unset it to fall back to per-process memory — the gateway then says so at boot.
       REDIS_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-redis:6379"
       REDIS_PASSWORD: "${REDIS_PASSWORD:?}"
-      COOKIE_SECURE: "false"
+      # Local stacks are plain HTTP, where the Secure flag would make the browser
+      # discard the session cookie. Overridable now rather than pinned to false, so a
+      # TLS-fronted deployment does not have to edit the template to be safe.
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
       AUTH_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-auth:9091"
       COMPLIANCE_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-compliance:9093"
       # Payment orchestrator (deposit/escrow/redeem). Presence of PAYMENT_GRPC_ADDR

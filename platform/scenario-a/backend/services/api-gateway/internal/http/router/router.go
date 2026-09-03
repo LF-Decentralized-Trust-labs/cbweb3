@@ -4,6 +4,8 @@
 package router
 
 import (
+	"strings"
+
 	"os"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
@@ -28,12 +30,31 @@ type Dependencies struct {
 	IdentityHandler        *handlers.IdentityHandler        // Paladin identity choices for the FX agreement form
 	StatementHandler       *handlers.StatementHandler       // Commercial Bank: consolidated fCeBM/tCeBM statement (extrato)
 	AuthProvider           interfaces.IAuthProvider
+	// CSRFSecret keys the HMAC binding a CSRF token to its session. When empty the
+	// guard still runs and refuses every mutating request: a gateway that silently
+	// stopped enforcing CSRF because a value was missing is the failure this control
+	// exists to prevent.
+	CSRFSecret []byte
 }
 
 // Setup registers all gateway HTTP routes and middleware.
 func Setup(app *fiber.App, deps Dependencies) {
 	// X-Correlation-Id: generated/propagated on ALL requests (Complemento D / NFR-OPS-001).
 	app.Use(middleware.CorrelationID())
+
+	// CSRF is mounted app-wide, BEFORE any route is registered, so a route added
+	// later is protected without anyone remembering to protect it. Scenario A had 54
+	// mutating routes across 11 cookie-authenticated groups and no CSRF at all;
+	// per-group wiring is what let that happen in the sibling scenario too.
+	//
+	// An independent copy of the guard, not a shared module: Constitution Principle I
+	// forbids reaching across scenarios, and the R2-H-13 plan justified per-scenario
+	// copies for exactly this control.
+	app.Use(middleware.CSRF(middleware.CSRFConfig{
+		Secret:    deps.CSRFSecret,
+		SessionID: func(c *fiber.Ctx) string { return c.Cookies("access_token") },
+		Exempt:    csrfExempt,
+	}))
 
 	app.Get("/openapi.yaml", handlers.OpenAPIYAML)
 	app.Get("/docs", handlers.SwaggerUI)
@@ -315,4 +336,27 @@ func Setup(app *fiber.App, deps Dependencies) {
 		proxyGroup.Post("/redeems", deps.PaymentProxyHandler.RequestRedeem)
 		proxyGroup.Get("/redeems", deps.PaymentProxyHandler.ListRedeems)
 	}
+}
+
+// csrfExempt reports whether a request is outside the CSRF guard's scope.
+//
+// Two kinds of route qualify, each for a reason that has to survive being read aloud:
+//
+//   - The auth entry points run BEFORE a session exists. Login and refresh have no
+//     token to present. Logout is exempt for a different reason: it is idempotent and
+//     harmless to force, while gating it would strand a user whose CSRF cookie expired
+//     before their session did — unable to log out, with no recourse in the UI.
+//   - The /internal tree is authenticated by a relay signature, not by a cookie. CSRF
+//     defends against AMBIENT credentials the browser attaches on its own; a signed
+//     service call carries none.
+//
+// There is deliberately no exemption for Bearer-authenticated requests: skipping the
+// check whenever a caller authenticates by header lets that caller opt out by omitting
+// the cookie, and an exemption anyone can select is not a control.
+func csrfExempt(c *fiber.Ctx) bool {
+	switch c.Path() {
+	case "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/logout":
+		return true
+	}
+	return strings.HasPrefix(c.Path(), "/internal/")
 }
