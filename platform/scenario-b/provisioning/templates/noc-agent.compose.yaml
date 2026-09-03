@@ -1,0 +1,45 @@
+# noc-agent template (TK-B11) — a single NOC agent for ONE entity (a CB or a
+# bank). It joins the entity's network to probe local components by container
+# DNS, mounts a rendered multi-component agent.yaml (seeded by the toolkit into a
+# named volume), and pushes health to the NOC backend (an observe deployment)
+# over the routable backend URL carried in the agent.yaml. No secrets embedded.
+services:
+  noc-agent:
+    image: "${NOC_AGENT_IMAGE:-cbweb3b/noc-agent:local}"
+    container_name: "${CONTAINER_PREFIX:?}-noc-agent-${NOC_AGENT_ENTITY:?}"
+    environment:
+      AGENT_CONFIG_PATH: "/etc/noc-agent/agent.yaml"
+    # Supplementary group for the read-only Docker socket below. The image is non-root
+    # (uid 65532, finding R2-M-12) and the socket is root:docker mode 0660, so an
+    # unprivileged uid outside that group is denied every log read — and the agent
+    # discards that error, so the portal's Log Viewer simply goes empty with nothing in
+    # the agent's own output. The toolkit and the NOC make targets compute
+    # NOC_DOCKER_GID from the socket itself. The default is the agent's own gid, which
+    # grants nothing: the agent then reports the problem at startup rather than
+    # collecting no logs in silence.
+    group_add:
+      - "${NOC_DOCKER_GID:-65532}"
+    volumes:
+      - noc_agent_cfg:/etc/noc-agent:ro
+      # Read-only Docker socket: the agent tails each component's container logs
+      # (by container_name) for the portal's Log Viewer. Without it, health is
+      # collected but logs are empty.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    extra_hosts:
+      # Lets the agent reach the NOC backend published on the host (single-host
+      # dev) via host.docker.internal:<NOC_BACKEND_PORT>.
+      - "host.docker.internal:host-gateway"
+    networks:
+      - entity_net
+    restart: always
+
+networks:
+  entity_net:
+    name: "${ENTITY_NET_PREFIX:?}_net"
+    external: true
+
+volumes:
+  # Seeded with agent.yaml by the toolkit (writeVolumeFile) before compose up.
+  noc_agent_cfg:
+    name: "${NOC_AGENT_VOLUME:?}"
+    external: true

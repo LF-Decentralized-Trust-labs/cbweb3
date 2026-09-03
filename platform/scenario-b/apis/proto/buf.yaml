@@ -1,0 +1,38 @@
+version: v2
+
+modules:
+  - path: .
+
+deps:
+  - buf.build/protocolbuffers/wellknowntypes
+
+lint:
+  use:
+    - STANDARD
+  # Legacy naming, grandfathered per FILE and per RULE — never blanket-disabled.
+  #
+  # These names are on the wire today: the generated Go constants are referenced across
+  # the backends, the TypeScript relay and the portals, and protojson serialises enum
+  # values BY NAME. Renaming them is a breaking change to the API surface, which is
+  # exactly what `make proto-breaking` exists to stop — so it is a deliberate, scheduled
+  # migration, not lint cleanup.
+  #
+  # Scoping the exceptions to these files keeps the rules live for every OTHER proto:
+  # a new file that violates them still fails the gate. Shrink this list as the
+  # migration lands; do not add to it without recording why in the PR.
+  ignore_only:
+    ENUM_VALUE_PREFIX:
+      - payment_orchestrator/v1/payment_orchestrator.proto
+    ENUM_ZERO_VALUE_SUFFIX:
+      - payment_orchestrator/v1/payment_orchestrator.proto
+    RPC_REQUEST_RESPONSE_UNIQUE:
+      - compliance/v1/compliance.proto
+    RPC_REQUEST_STANDARD_NAME:
+      - auth/v1/auth.proto
+      - compliance/v1/compliance.proto
+    RPC_RESPONSE_STANDARD_NAME:
+      - auth/v1/auth.proto
+
+breaking:
+  use:
+    - FILE

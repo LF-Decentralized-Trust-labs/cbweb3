@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=../../../scenario-b/provisioning/schema/v1/participant-deployment.schema.yaml
+# LNET deploy — Scenario B. VM ${IP_CB5} — commercial bank cb5, JOINS spoke-peru.
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: cb5
+spec:
+  scenario: "b"
+  environment: local
+  mode: join
+  topology:
+    role: commercial-bank
+  bankId: cb5
+  displayName: Commercial Bank cb5 (Peru)
+  spoke:
+    id: spoke-peru
+    chainId: 2028
+    currency: PEN
+  joinBundleRef: ../../bundles/scenario-b/spoke-peru/spoke-peru.bundle.yaml
+  node:
+    advertisedHost: ${IP_CB5}
+    rpc: { port: 8845 }
+    ws:  { port: 8846 }
+    p2p: { port: 30304 }
+    dataDir: bundles/scenario-b/cb5
+    validator: false
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: ca://central-bank-peru
+  relay:
+    endpoint: http://${IP_HUB}:7000
+  noc:
+    backendURL: http://${IP_CB_PERU}:8090
+  frontendHost: cb5-peru.cbweb3.l-net.io
+  launcher: enable
+  launcherPort: 5190
+  proxy: enable
+  adminUsers:
+    - { role: BANK, username: admin@cb5.l-net.io, password: change-me-local }

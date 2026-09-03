@@ -1,0 +1,50 @@
+# entity-compliance template — Compliance service (gRPC) for on-chain participant
+# registration. Wired on the hub: it holds the GOVERNANCE signer key and turns a
+# spoke self-registration API call into an on-chain registerParticipant on the
+# hub IdentityRegistry. Joins the shared entity network; reaches the hub Besu via
+# the published host port. No secrets embedded beyond the local-dev signer key.
+services:
+  compliance:
+    image: "${COMPLIANCE_IMAGE:-cbweb3b/compliance:local}"
+    container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-compliance"
+    environment:
+      COMPLIANCE_GRPC_PORT: "9093"
+      BLOCKCHAIN_CLIENT: "besu"
+      # Compliance reads the hub (IdentityRegistry/CurrencyRegistry): use the
+      # routable hub RPC (toolkit-provided) with the single-host published-port fallback.
+      BESU_RPC_URL: "${HUB_BESU_RPC_URL:-http://host.docker.internal:${HUB_RPC_PORT}}"
+      BESU_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
+      PARTICIPANT_REGISTRY_ADDRESS: "${HUB_IDENTITY_REGISTRY_ADDRESS:?}"
+      # Institution identity for on-chain participant registration: institutionId =
+      # keccak256(INSTITUTION_CODE). Deliberately not BANK_CODE, which is the entity ROLE and
+      # identical on every central bank — hashing that would collapse them into one institution
+      # and leave the AMM 2-of-N resume quorum unreachable.
+      INSTITUTION_CODE: "${INSTITUTION_CODE:-}"
+      CURRENCY_REGISTRY_ADDRESS: "${CURRENCY_REGISTRY_ADDRESS:?}"
+      PAIR_REGISTRY_ADDRESS: "${PAIR_REGISTRY_CONTRACT_ADDRESS:-}"
+      CB_PRIVATE_KEY: "${HUB_ADMIN_PRIVATE_KEY:?}"
+      # POSTGRES_DSN intentionally unset → in-memory repo (on-chain register still works).
+      # R2-H-8 service-mesh mTLS — hub compliance is a gRPC server (hub gateway→compliance).
+      # Opt-in via GRPC_MTLS_ENABLE (empty by default → plaintext, unchanged).
+      GRPC_MTLS_CERT_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/compliance.crt}"
+      GRPC_MTLS_KEY_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/compliance.key}"
+      GRPC_MTLS_CA_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/svc-ca.crt}"
+      GRPC_AUTHZ_ENFORCE: "${GRPC_AUTHZ_ENFORCE:-}"
+    volumes:
+      - "svc_tls:/svc-tls:ro"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - entity_net
+    restart: always
+
+networks:
+  entity_net:
+    name: "${ENTITY_NET_PREFIX:?}_net"
+    external: true
+
+volumes:
+  # Service-mesh mTLS material (svc-ca.crt + hub leaf certs), seeded by
+  # gen-svc-tls-hub. Read-only; consumed only when GRPC_MTLS_ENABLE is set.
+  svc_tls:
+    name: "${SVC_TLS_VOLUME:?}"

@@ -1,0 +1,107 @@
+# Template Compose — commercial-bank (TK-8)
+# Provisioning toolkit for Scenario A — Enhanced Correspondent Banking.
+#
+# USAGE: Invoked by the mode:join orchestration engine (TK-9). Do NOT run directly
+# without setting all required variables.
+#
+# DIFFERENCE FROM TK-4 (central-bank): there is NO genesis-init service. The
+# genesis is supplied by the join bundle (TK-6) and seeded by the engine directly
+# into the genesis named volume (engine/dockervolume, step_write_genesis.go)
+# BEFORE `docker compose up` runs. This node is a JOINER: it requires
+# BOOTNODE_ENODE and syncs from the spoke.
+#
+# REQUIRED variables (no default — docker compose fails explicitly if absent):
+#   SPOKE_ID              Spoke identifier (e.g. spoke-brl)
+#   BANK_ID               Commercial bank identifier within the spoke (e.g. commercial-bank-alpha)
+#   BESU_RPC_PORT         Host port mapped to Besu RPC HTTP (internal: 8545)
+#   BESU_WS_PORT          Host port mapped to Besu RPC WS  (internal: 8546)
+#   BESU_P2P_PORT         Host port mapped to Besu P2P     (internal: 30303)
+#   BESU_IMAGE            Besu Docker image (e.g. hyperledger/besu:25.8.0)
+#   BESU_ADVERTISED_HOST  Host declared for this node's enode (never inferred)
+#   BOOTNODE_ENODE        Enode of the spoke bootnode (REQUIRED — this is a joiner)
+#
+# STORAGE: no SPOKE_DATA_DIR bind mount — genesis and Besu chain data both live on
+# named Docker volumes (besu_data, genesis), seeded/written by containers or by
+# the engine via engine/dockervolume; no host filesystem involved. See the
+# deviation addendum in specs/032-commercial-bank-join/research.md.
+#
+# OPTIONAL variables (with sensible defaults):
+#   SPOKE_NETWORK_NAME    Docker network name (default: cbweb3-${SPOKE_ID}-besu)
+#   BESU_CONTAINER_NAME   Container name for the Besu node
+#   BESU_NAT_PROFILE      NAT addressing profile: DOCKER (default) or NONE (ADR-001)
+#   BESU_LOGGING          Besu log level (default: INFO)
+#   BESU_HOST_ALLOWLIST   Comma-separated host allowlist for RPC (default: '*')
+#   BESU_CORS_ORIGINS     CORS origins for RPC HTTP (default: 'all')
+
+services:
+
+  # ─── Besu node (commercial-bank / joiner) ──────────────────────────────────
+  # No genesis-init: the genesis.json is written from the join bundle by TK-9
+  # (step_write_genesis.go) directly into the genesis named volume below.
+  besu:
+    image: ${BESU_IMAGE?BESU_IMAGE is required (e.g. hyperledger/besu:25.8.0)}
+    container_name: ${BESU_CONTAINER_NAME:-cbweb3-${SPOKE_ID}-besu.${BANK_ID}}
+    restart: always
+    volumes:
+      - besu_data:/opt/besu/data
+      - genesis:/opt/besu/genesis:ro
+      - ./scripts/entry.sh:/entry.sh:ro
+    ports:
+      - "${BESU_RPC_PORT?BESU_RPC_PORT is required}:8545"
+      - "${BESU_WS_PORT?BESU_WS_PORT is required}:8546"
+      - "${BESU_P2P_PORT?BESU_P2P_PORT is required}:30303"
+      - "${BESU_P2P_PORT}:30303/udp"
+    environment:
+      SPOKE_ID: ${SPOKE_ID?SPOKE_ID is required}
+      BANK_ID: ${BANK_ID?BANK_ID is required}
+      BESU_NAT_PROFILE: ${BESU_NAT_PROFILE:-DOCKER}
+      BESU_ADVERTISED_HOST: ${BESU_ADVERTISED_HOST:?BESU_ADVERTISED_HOST is required}
+      BESU_P2P_PORT: "30303"
+      BESU_RPC_PORT_INTERNAL: "8545"
+      BESU_WS_PORT_INTERNAL: "8546"
+      BESU_LOGGING: ${BESU_LOGGING:-INFO}
+      BESU_HOST_ALLOWLIST: ${BESU_HOST_ALLOWLIST:-*}
+      BESU_CORS_ORIGINS: ${BESU_CORS_ORIGINS:-all}
+      # BOOTNODE_ENODE is REQUIRED for a joiner (no default — fail fast if absent).
+      BOOTNODE_ENODE: ${BOOTNODE_ENODE:?BOOTNODE_ENODE is required for mode:join}
+    entrypoint: ["/bin/sh", "/entry.sh"]
+    healthcheck:
+      # The pinned hyperledger/besu image ships no curl/wget/nc, so an HTTP client
+      # cannot be shelled out to (the old curl-based probe always failed with
+      # "curl: not found", flapping the node to unhealthy despite a working RPC).
+      # The image does ship bash, so probe the JSON-RPC endpoint with a /dev/tcp
+      # POST and assert eth_blockNumber returns a "result".
+      test:
+        - CMD
+        - bash
+        - -c
+        - |
+          body='{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+          exec 3<>/dev/tcp/localhost/8545 || exit 1
+          printf 'POST / HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s' "$${#body}" "$$body" >&3
+          grep -q '"result"' <&3
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 15s
+    networks:
+      - spoke_besu
+
+networks:
+  spoke_besu:
+    name: ${SPOKE_NETWORK_NAME:-cbweb3-${SPOKE_ID}-besu}
+    driver: bridge
+
+volumes:
+  # Named (not a SPOKE_DATA_DIR bind mount) — deviation from the original TK-8
+  # design (specs/032-commercial-bank-join/research.md, contracts/compose-template.md),
+  # which mirrored TK-4's bind-mount choice. No init container is needed for either
+  # volume: nothing writes into these paths as a non-root host user — the besu
+  # service has no `user:` override (root by default) and step_write_genesis.go
+  # writes via engine/dockervolume, which also runs its throwaway container as
+  # root — so a root-owned fresh volume works the same way the root-owned
+  # bind-mount directory did before.
+  besu_data:
+    name: ${SPOKE_ID}_${BANK_ID}_besu_data
+  genesis:
+    name: ${SPOKE_ID}_${BANK_ID}_genesis

@@ -1,0 +1,144 @@
+services:
+  besu-boot:
+    image: hyperledger/besu:25.8.0
+    container_name: spk02-besu-boot
+    networks:
+      - spk02_found_net
+    ports:
+      - "${HOST_P2P_BOOT:-32303}:30303/tcp"
+      - "${HOST_P2P_BOOT:-32303}:30303/udp"
+      - "${HOST_RPC_BOOT:-9645}:8545"
+      - "${HOST_WS_BOOT:-9655}:8546"
+    volumes:
+      - ../data/genesis.json:/opt/besu/genesis/genesis.json:ro
+      - ../data/key0:/opt/besu/data/key
+      - besu_boot_data:/opt/besu/data
+    command:
+      - --nat-method=DOCKER
+      - --p2p-port=30303
+      - --rpc-http-enabled=true
+      - --rpc-http-port=8545
+      - --rpc-http-api=ETH,NET,QBFT,ADMIN
+      - --rpc-ws-enabled=true
+      - --rpc-ws-port=8546
+      - --rpc-http-host=0.0.0.0
+      - --rpc-ws-host=0.0.0.0
+      - --host-allowlist=*
+      - --rpc-http-cors-origins=all
+      - --genesis-file=/opt/besu/genesis/genesis.json
+      - --data-path=/opt/besu/data
+      - --node-private-key-file=/opt/besu/data/key
+      - --min-gas-price=0
+
+  besu-v1:
+    image: hyperledger/besu:25.8.0
+    container_name: spk02-besu-v1
+    networks:
+      - spk02_found_net
+    ports:
+      - "${HOST_P2P_V1:-32304}:30303/tcp"
+      - "${HOST_P2P_V1:-32304}:30303/udp"
+      - "${HOST_RPC_V1:-9643}:8545"
+    volumes:
+      - ../data/genesis.json:/opt/besu/genesis/genesis.json:ro
+      - ../data/key1:/opt/besu/data/key
+      - ../scripts/validator-entry.sh:/validator-entry.sh:ro
+      - besu_v1_data:/opt/besu/data
+    environment:
+      - BOOTNODE_PUBKEY=${BOOTNODE_PUBKEY}
+      - ENABLE_RPC=true
+    entrypoint: ["/bin/bash", "/validator-entry.sh"]
+
+  besu-v2:
+    image: hyperledger/besu:25.8.0
+    container_name: spk02-besu-v2
+    networks:
+      - spk02_found_net
+    ports:
+      - "${HOST_P2P_V2:-32305}:30303/tcp"
+      - "${HOST_P2P_V2:-32305}:30303/udp"
+      - "${HOST_RPC_V2:-9644}:8545"
+    volumes:
+      - ../data/genesis.json:/opt/besu/genesis/genesis.json:ro
+      - ../data/key2:/opt/besu/data/key
+      - ../scripts/validator-entry.sh:/validator-entry.sh:ro
+      - besu_v2_data:/opt/besu/data
+    environment:
+      - BOOTNODE_PUBKEY=${BOOTNODE_PUBKEY}
+      - ENABLE_RPC=true
+    entrypoint: ["/bin/bash", "/validator-entry.sh"]
+
+  paladin-data-init:
+    image: alpine:3.23
+    user: "0:0"
+    volumes:
+      - paladin_cb_data:/data/cb
+      - paladin_ba_data:/data/ba
+    command: ["sh", "-c", "chmod -R 777 /data/cb /data/ba"]
+    restart: "no"
+
+  paladin-cb:
+    image: docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1
+    container_name: spk02-paladin-cb
+    networks:
+      - spk02_found_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${HOST_PALADIN_CB_RPC:-9648}:8548"
+      - "${HOST_PALADIN_CB_GRPC:-9700}:9000"
+    environment:
+      - PALADIN_LOG_LEVEL=debug
+    volumes:
+      - ../data/paladin/cb/config.yaml:/etc/paladin/config.yaml:ro
+      - ../data/paladin/cb/tls.crt:/etc/paladin/tls.crt:ro
+      - ../data/paladin/cb/tls.key:/etc/paladin/tls.key:ro
+      - paladin_cb_data:/data
+    tmpfs:
+      - /app/jna:exec,mode=1777
+      - /data/keystore:mode=0777
+    command: ["/etc/paladin/config.yaml", "engine"]
+    depends_on:
+      paladin-data-init:
+        condition: service_completed_successfully
+      besu-boot:
+        condition: service_started
+
+  paladin-bank-a:
+    image: docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1
+    container_name: spk02-paladin-bank-a
+    networks:
+      - spk02_found_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${HOST_PALADIN_BA_RPC:-9649}:8548"
+      - "${HOST_PALADIN_BA_GRPC:-9701}:9000"
+    environment:
+      - PALADIN_LOG_LEVEL=debug
+    volumes:
+      - ../data/paladin/bank-a/config.yaml:/etc/paladin/config.yaml:ro
+      - ../data/paladin/bank-a/tls.crt:/etc/paladin/tls.crt:ro
+      - ../data/paladin/bank-a/tls.key:/etc/paladin/tls.key:ro
+      - paladin_ba_data:/data
+    tmpfs:
+      - /app/jna:exec,mode=1777
+      - /data/keystore:mode=0777
+    command: ["/etc/paladin/config.yaml", "engine"]
+    depends_on:
+      paladin-data-init:
+        condition: service_completed_successfully
+      besu-boot:
+        condition: service_started
+
+networks:
+  spk02_found_net:
+    name: spk02_found_net
+    driver: bridge
+
+volumes:
+  besu_boot_data:
+  besu_v1_data:
+  besu_v2_data:
+  paladin_cb_data:
+  paladin_ba_data:

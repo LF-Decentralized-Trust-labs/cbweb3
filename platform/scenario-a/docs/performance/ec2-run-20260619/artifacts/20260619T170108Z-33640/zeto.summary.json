@@ -1,0 +1,153 @@
+{
+    "metrics": {
+        "data_received": {
+            "count": 416031,
+            "rate": 3466.764457604733
+        },
+        "vus_max": {
+            "value": 30,
+            "min": 30,
+            "max": 30
+        },
+        "http_req_duration{expected_response:true}": {
+            "min": 3.023422,
+            "med": 4.418926,
+            "max": 11.899936,
+            "p(90)": 5.298647,
+            "p(95)": 5.641855,
+            "avg": 4.515514724042192
+        },
+        "http_req_waiting": {
+            "avg": 4.430300381454744,
+            "min": 2.952081,
+            "med": 4.340393,
+            "max": 11.704341,
+            "p(90)": 5.197275,
+            "p(95)": 5.513042
+        },
+        "zeto_escrow_submitted_total": {
+            "rate": 15.007638344609232,
+            "count": 1801
+        },
+        "http_req_blocked": {
+            "min": 0.00287,
+            "med": 0.00569,
+            "max": 0.460131,
+            "p(90)": 0.00832,
+            "p(95)": 0.010401,
+            "avg": 0.010485003331482494
+        },
+        "data_sent": {
+            "count": 2978854,
+            "rate": 24822.63382198367
+        },
+        "http_req_connecting": {
+            "p(95)": 0,
+            "avg": 0.002442769572459745,
+            "min": 0,
+            "med": 0,
+            "max": 0.239886,
+            "p(90)": 0
+        },
+        "iteration_duration": {
+            "avg": 4.779247528039975,
+            "min": 3.229427,
+            "med": 4.677662,
+            "max": 12.662814,
+            "p(90)": 5.624535,
+            "p(95)": 5.962712
+        },
+        "http_req_tls_handshaking": {
+            "med": 0,
+            "max": 0,
+            "p(90)": 0,
+            "p(95)": 0,
+            "avg": 0,
+            "min": 0
+        },
+        "vus": {
+            "value": 0,
+            "min": 0,
+            "max": 0
+        },
+        "zeto_escrow_submit_rate": {
+            "fails": 0,
+            "passes": 1801,
+            "thresholds": {
+                "rate>0.99": false
+            },
+            "value": 1
+        },
+        "checks": {
+            "passes": 1801,
+            "fails": 0,
+            "value": 1
+        },
+        "http_reqs": {
+            "count": 1801,
+            "rate": 15.007638344609232
+        },
+        "http_req_duration": {
+            "avg": 4.515514724042192,
+            "min": 3.023422,
+            "med": 4.418926,
+            "max": 11.899936,
+            "p(90)": 5.298647,
+            "p(95)": 5.641855
+        },
+        "http_req_sending": {
+            "avg": 0.03397247307051633,
+            "min": 0.01416,
+            "med": 0.030661,
+            "max": 0.320478,
+            "p(90)": 0.046031,
+            "p(95)": 0.054472
+        },
+        "zeto_escrow_admit_latency_ms": {
+            "p(90)": 5.298647,
+            "p(95)": 5.641855,
+            "avg": 4.515514724042192,
+            "min": 3.023422,
+            "med": 4.418926,
+            "max": 11.899936,
+            "thresholds": {
+                "p(95)<1500": false
+            }
+        },
+        "http_req_receiving": {
+            "avg": 0.05124186951693494,
+            "min": 0.024581,
+            "med": 0.047131,
+            "max": 0.215765,
+            "p(90)": 0.077462,
+            "p(95)": 0.087002
+        },
+        "iterations": {
+            "count": 1801,
+            "rate": 15.007638344609232
+        },
+        "http_req_failed": {
+            "passes": 0,
+            "fails": 1801,
+            "thresholds": {
+                "rate<0.01": false
+            },
+            "value": 0
+        }
+    },
+    "root_group": {
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {},
+        "checks": {
+                "escrow 201": {
+                    "name": "escrow 201",
+                    "path": "::escrow 201",
+                    "id": "5a01e98c0de552eaf5f0f87bb7c33506",
+                    "passes": 1801,
+                    "fails": 0
+                }
+            },
+        "name": "",
+        "path": ""
+    }
+}

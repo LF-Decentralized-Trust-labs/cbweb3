@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+name: License Headers
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  spdx-headers:
+    name: SPDX header check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Runs first: proves the checker still fails on a header-less fixture. Without
+      # it the gate can silently regress to reporting success without verifying.
+      - name: Self-test the header checker (fail path must fail)
+        run: bash tools/check-license-headers.test.sh
+
+      - name: Verify SPDX-License-Identifier headers (Go + TypeScript)
+        run: bash tools/check-license-headers.sh

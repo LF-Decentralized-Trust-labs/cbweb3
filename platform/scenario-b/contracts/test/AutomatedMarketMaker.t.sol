@@ -1,0 +1,1018 @@
+// SPDX-License-Identifier: Apache-2.0
+pragma solidity 0.8.20;
+
+import {Test} from "forge-std/Test.sol";
+import {stdError} from "forge-std/StdError.sol";
+import {AutomatedMarketMaker} from "../src/AutomatedMarketMaker.sol";
+import {IAutomatedMarketMaker} from "../src/interfaces/IAutomatedMarketMaker.sol";
+import {TokenizedCentralBankMoney} from "../src/TokenizedCentralBankMoney.sol";
+import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IIdentityRegistry} from "../src/interfaces/IIdentityRegistry.sol";
+import {IdentityRegistryLibrary} from "../src/libraries/IdentityRegistryLibrary.sol";
+import {DeployAMM} from "../script/AutomatedMarketMaker.s.sol";
+import {IERC20Errors} from "@openzeppelin-contracts/interfaces/draft-IERC6093.sol";
+import {Math} from "@openzeppelin-contracts/utils/math/Math.sol";
+
+/// @title AutomatedMarketMakerTest
+/// @notice Unit tests for the LP-share AMM: proportional mint/burn, home-currency zap-out
+///         withdrawal, drain protection, empty-pool guard, emergency exit, fees, circuit breaker.
+contract AutomatedMarketMakerTest is Test {
+    AutomatedMarketMaker public amm;
+    IdentityRegistry public identityRegistry;
+    TokenizedCentralBankMoney public tokenA;
+    TokenizedCentralBankMoney public tokenB;
+
+    address public admin = makeAddr("admin");
+    address public centralBank = makeAddr("centralBank");
+    address public governanceA = makeAddr("governanceA");
+    address public governanceB = makeAddr("governanceB");
+    address public governanceC = makeAddr("governanceC");
+    address public liquidityProvider = makeAddr("liquidityProvider");
+    address public swapper = makeAddr("swapper");
+
+    uint256 public constant INITIAL_LIQUIDITY = 100_000 * 10 ** 18;
+    uint256 public constant SWAPPER_BALANCE = 10_000 * 10 ** 18;
+    uint256 public constant MINIMUM_LIQUIDITY = 1000;
+
+    function setUp() public {
+        tokenA = new TokenizedCentralBankMoney("Token BRL", "tCeBM_BRL", admin, centralBank);
+        tokenB = new TokenizedCentralBankMoney("Token EUR", "tCeBM_EUR", admin, centralBank);
+
+        identityRegistry = new IdentityRegistry(admin);
+        vm.startPrank(admin);
+        identityRegistry.registerParticipant(
+            liquidityProvider,
+            "LP Bank",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            bytes32("inst-liquidityProvider")
+        );
+        identityRegistry.verifyParticipant(liquidityProvider);
+        identityRegistry.registerParticipant(
+            swapper,
+            "Commercial Bank A",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            bytes32("inst-swapper")
+        );
+        identityRegistry.verifyParticipant(swapper);
+        identityRegistry.registerParticipant(
+            governanceA,
+            "Central Bank A",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-governanceA")
+        );
+        identityRegistry.verifyParticipant(governanceA);
+        identityRegistry.registerParticipant(
+            governanceB,
+            "Central Bank B",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-governanceB")
+        );
+        identityRegistry.verifyParticipant(governanceB);
+        identityRegistry.registerParticipant(
+            governanceC,
+            "Central Bank C",
+            IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK,
+            bytes32(0),
+            bytes32("inst-governanceC")
+        );
+        identityRegistry.verifyParticipant(governanceC);
+        vm.stopPrank();
+
+        amm = new AutomatedMarketMaker(address(tokenA), address(tokenB), address(identityRegistry));
+
+        // Large balances so the §2.2 worked-example reserves (5M / 1M) are fundable.
+        vm.startPrank(centralBank);
+        tokenA.mint(liquidityProvider, 10_000_000 * 10 ** 18);
+        tokenB.mint(liquidityProvider, 10_000_000 * 10 ** 18);
+        tokenA.mint(swapper, SWAPPER_BALANCE);
+        tokenB.mint(swapper, SWAPPER_BALANCE);
+        vm.stopPrank();
+
+        vm.startPrank(liquidityProvider);
+        tokenA.approve(address(amm), type(uint256).max);
+        tokenB.approve(address(amm), type(uint256).max);
+        vm.stopPrank();
+
+        vm.startPrank(swapper);
+        tokenA.approve(address(amm), type(uint256).max);
+        tokenB.approve(address(amm), type(uint256).max);
+        vm.stopPrank();
+    }
+
+    // ---------- Liquidity: proportional mint + MINIMUM_LIQUIDITY lock (TASK-12/13) ----------
+
+    function test_AddLiquidity_FirstDeposit_MintsSharesAndLocksMinimum() public {
+        vm.prank(liquidityProvider);
+        uint256 shares = amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        // sqrt(k) total, minus the permanently-locked MINIMUM_LIQUIDITY.
+        uint256 expectedTotal = INITIAL_LIQUIDITY; // sqrt(L*L) = L
+        assertEq(shares, expectedTotal - MINIMUM_LIQUIDITY, "first-deposit shares");
+        assertEq(amm.balanceOf(liquidityProvider), shares, "LP holds its shares");
+        assertEq(amm.balanceOf(amm.BURN_ADDRESS()), MINIMUM_LIQUIDITY, "MINIMUM_LIQUIDITY locked");
+        assertEq(amm.totalSupply(), expectedTotal, "total supply = sqrt(k)");
+        assertEq(amm.reserveA(), INITIAL_LIQUIDITY);
+        assertEq(amm.reserveB(), INITIAL_LIQUIDITY);
+    }
+
+    function test_AddLiquidity_SecondDeposit_Proportional() public {
+        vm.startPrank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+        uint256 supplyBefore = amm.totalSupply();
+        // Add 50% more at the same ratio → ~50% more shares.
+        uint256 shares = amm.addLiquidity(INITIAL_LIQUIDITY / 2, INITIAL_LIQUIDITY / 2);
+        vm.stopPrank();
+
+        assertEq(shares, supplyBefore / 2, "proportional second-deposit shares");
+    }
+
+    function test_Revert_AddLiquidity_FirstDepositBelowMinimum() public {
+        // sqrt(amountA*amountB) must exceed MINIMUM_LIQUIDITY.
+        vm.prank(liquidityProvider);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__InsufficientLiquidity.selector);
+        amm.addLiquidity(10, 10); // sqrt(100)=10 <= 1000
+    }
+
+    function test_Revert_AddLiquidity_ZeroAmount() public {
+        vm.prank(liquidityProvider);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__ZeroAmount.selector);
+        amm.addLiquidity(0, INITIAL_LIQUIDITY);
+    }
+
+    // ---------- Withdrawal: home-currency zap-out (decision D1, §2.2 numbers) ----------
+
+    /// @dev §2.2 large exit: 10% of a 5M/1M pool, single-currency BRL out ≈ 948,785 (≈5.1% haircut).
+    function test_RemoveLiquidity_HomeCurrency_LargeExit_MatchesWorkedExample() public {
+        _seedWorkedExamplePool(); // 5,000,000 BRL (A) / 1,000,000 EUR (B)
+
+        uint256 supply = amm.totalSupply();
+        uint256 tenPct = supply / 10;
+        uint256 balBefore = tokenA.balanceOf(liquidityProvider);
+
+        vm.prank(liquidityProvider);
+        uint256 out = amm.removeLiquidity(tenPct, address(tokenA), 0);
+
+        // ≈ 948,785e18 (500k pro-rata + ≈448,785 swap proceeds).
+        assertApproxEqRel(out, 948_785 * 10 ** 18, 0.005e18, "large-exit BRL out");
+        assertEq(tokenA.balanceOf(liquidityProvider), balBefore + out, "received BRL");
+
+        // Notional value at 5 BRL/EUR was 1,000,000 → haircut ~5.1%.
+        uint256 notional = 1_000_000 * 10 ** 18;
+        uint256 haircutBps = ((notional - out) * 10000) / notional;
+        assertGt(haircutBps, 480, "haircut > 4.8%");
+        assertLt(haircutBps, 540, "haircut < 5.4%");
+    }
+
+    /// @dev §2.2 small exit: 1% of the same pool ≈ 99,353 BRL out (≈0.65% haircut). Size drives slippage.
+    function test_RemoveLiquidity_HomeCurrency_SmallExit_LowerSlippage() public {
+        _seedWorkedExamplePool();
+
+        uint256 onePct = amm.totalSupply() / 100;
+        vm.prank(liquidityProvider);
+        uint256 out = amm.removeLiquidity(onePct, address(tokenA), 0);
+
+        assertApproxEqRel(out, 99_353 * 10 ** 18, 0.005e18, "small-exit BRL out");
+        uint256 notional = 100_000 * 10 ** 18;
+        uint256 haircutBps = ((notional - out) * 10000) / notional;
+        assertLt(haircutBps, 100, "small exit haircut < 1%");
+    }
+
+    function test_RemoveLiquidity_HomeCurrency_TokenBSide() public {
+        _seedWorkedExamplePool();
+        uint256 onePct = amm.totalSupply() / 100;
+        uint256 balBefore = tokenB.balanceOf(liquidityProvider);
+
+        vm.prank(liquidityProvider);
+        uint256 out = amm.removeLiquidity(onePct, address(tokenB), 0);
+
+        assertGt(out, 0, "received EUR");
+        assertEq(tokenB.balanceOf(liquidityProvider), balBefore + out, "EUR credited");
+    }
+
+    function test_Revert_RemoveLiquidity_SlippageGuard() public {
+        _seedWorkedExamplePool();
+        uint256 tenPct = amm.totalSupply() / 10;
+        // Demand more than achievable → revert.
+        vm.prank(liquidityProvider);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__InsufficientOutputAmount.selector);
+        amm.removeLiquidity(tenPct, address(tokenA), 1_000_000 * 10 ** 18);
+    }
+
+    function test_Revert_RemoveLiquidity_InvalidTokenOut() public {
+        _seedWorkedExamplePool();
+        vm.prank(liquidityProvider);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__InvalidToken.selector);
+        amm.removeLiquidity(1000, address(0x1234), 0);
+    }
+
+    // ---------- Drain protection (TASK-12 core) ----------
+
+    /// @dev A verified participant who never provided liquidity holds zero shares and therefore
+    ///      cannot withdraw anything — the prior pool-drain vector is closed by ERC20 burn.
+    function test_Revert_RemoveLiquidity_NonProviderCannotDrain() public {
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        // `swapper` is verified but owns no LP shares.
+        assertEq(amm.balanceOf(swapper), 0);
+        vm.prank(swapper);
+        vm.expectRevert(
+            abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, swapper, 0, INITIAL_LIQUIDITY / 2)
+        );
+        amm.removeLiquidity(INITIAL_LIQUIDITY / 2, address(tokenA), 0);
+    }
+
+    function test_Revert_RemoveLiquidity_CannotBurnMoreThanOwned() public {
+        vm.prank(liquidityProvider);
+        uint256 shares = amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        vm.prank(liquidityProvider);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IERC20Errors.ERC20InsufficientBalance.selector, liquidityProvider, shares, shares + 1
+            )
+        );
+        amm.removeLiquidity(shares + 1, address(tokenA), 0);
+    }
+
+    // ---------- Emergency exit (paused, both sides, no swap) ----------
+
+    function test_RemoveLiquidityEmergency_WhenPaused_ReturnsBothSides() public {
+        _seedWorkedExamplePool();
+        uint256 tenPct = amm.totalSupply() / 10;
+
+        vm.prank(governanceA);
+        amm.pause("incident");
+
+        uint256 aBefore = tokenA.balanceOf(liquidityProvider);
+        uint256 bBefore = tokenB.balanceOf(liquidityProvider);
+
+        vm.prank(liquidityProvider);
+        (uint256 amountA, uint256 amountB) = amm.removeLiquidityEmergency(tenPct);
+
+        // ~10% of 5M / 1M, no swap, no slippage.
+        assertApproxEqRel(amountA, 500_000 * 10 ** 18, 0.001e18, "pro-rata A");
+        assertApproxEqRel(amountB, 100_000 * 10 ** 18, 0.001e18, "pro-rata B");
+        assertEq(tokenA.balanceOf(liquidityProvider), aBefore + amountA);
+        assertEq(tokenB.balanceOf(liquidityProvider), bBefore + amountB);
+    }
+
+    function test_Revert_RemoveLiquidityEmergency_WhenNotPaused() public {
+        _seedWorkedExamplePool();
+        vm.prank(liquidityProvider);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__NotPaused.selector);
+        amm.removeLiquidityEmergency(1000);
+    }
+
+    function test_Revert_RemoveLiquidity_WhenPaused() public {
+        _seedWorkedExamplePool();
+        vm.prank(governanceA);
+        amm.pause("incident");
+        vm.prank(liquidityProvider);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__AlreadyPaused.selector);
+        amm.removeLiquidity(1000, address(tokenA), 0);
+    }
+
+    // ---------- Swap math (fee-in-reserve) ----------
+
+    function test_GetAmountIn_Math() public view {
+        uint256 reserveIn = 1000 * 10 ** 18;
+        uint256 reserveOut = 1000 * 10 ** 18;
+        uint256 amountOut = 100 * 10 ** 18;
+        uint256 expectedIn = ((reserveIn * amountOut) / (reserveOut - amountOut)) + 1;
+        assertEq(amm.getAmountIn(reserveIn, reserveOut, amountOut), expectedIn);
+    }
+
+    function test_GetAmountOut_Math() public view {
+        // §2.2 zap: sell 100,000 EUR into RB=900,000 / RA=4,500,000 @0.3% ≈ 448,785.
+        uint256 out = amm.getAmountOut(100_000 * 10 ** 18, 900_000 * 10 ** 18, 4_500_000 * 10 ** 18, 30);
+        assertApproxEqRel(out, 448_785 * 10 ** 18, 0.001e18, "getAmountOut worked example");
+    }
+
+    function test_GetAmountOut_EmptyReserves_ReturnsZero() public view {
+        assertEq(amm.getAmountOut(100, 0, 1000, 30), 0);
+        assertEq(amm.getAmountOut(100, 1000, 0, 30), 0);
+        assertEq(amm.getAmountOut(0, 1000, 1000, 30), 0);
+    }
+
+    /// @dev getAmountIn reverts when the requested output is not strictly less than the output reserve.
+    function test_Revert_GetAmountIn_OutputExceedsReserve() public {
+        vm.expectRevert(IAutomatedMarketMaker.AMM__InsufficientLiquidity.selector);
+        amm.getAmountIn(1000 * 10 ** 18, 1000 * 10 ** 18, 1000 * 10 ** 18); // amountOut == reserveOut
+    }
+
+    /// @dev resumeQuorum() exposes the 2-of-N resume constant.
+    function test_ResumeQuorum_Value() public view {
+        assertEq(amm.resumeQuorum(), 2);
+    }
+
+    function test_SwapTokensForExactTokens_Success() public {
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        uint256 amountOutDesired = 1_000 * 10 ** 18;
+        uint256 grossIn = _expectedGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired, amm.feeBps());
+        uint256 swapperABef = tokenA.balanceOf(swapper);
+        uint256 swapperBBef = tokenB.balanceOf(swapper);
+
+        vm.prank(swapper);
+        uint256 actualIn =
+            amm.swapTokensForExactTokens(address(tokenA), address(tokenB), amountOutDesired, grossIn, swapper);
+
+        assertEq(actualIn, grossIn, "gross amount in (incl. fee)");
+        assertEq(tokenA.balanceOf(swapper), swapperABef - actualIn, "TokenA spent");
+        assertEq(tokenB.balanceOf(swapper), swapperBBef + amountOutDesired, "TokenB received");
+        assertEq(amm.reserveA(), INITIAL_LIQUIDITY + actualIn, "reserveA grows incl. fee");
+        assertEq(amm.reserveB(), INITIAL_LIQUIDITY - amountOutDesired, "reserveB drops by output");
+    }
+
+    function test_SwapTokensForExactTokens_ReverseDirection() public {
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        uint256 amountOutDesired = 1_000 * 10 ** 18;
+        uint256 grossIn = _expectedGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired, amm.feeBps());
+
+        vm.prank(swapper);
+        uint256 actualIn =
+            amm.swapTokensForExactTokens(address(tokenB), address(tokenA), amountOutDesired, grossIn, swapper);
+
+        assertEq(actualIn, grossIn, "gross amount in");
+        assertEq(amm.reserveB(), INITIAL_LIQUIDITY + actualIn, "reserveB grows");
+        assertEq(amm.reserveA(), INITIAL_LIQUIDITY - amountOutDesired, "reserveA drops");
+    }
+
+    function test_Revert_Swap_SlippageExceeded() public {
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        uint256 amountOutDesired = 1_000 * 10 ** 18;
+        uint256 grossIn = _expectedGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired, amm.feeBps());
+        uint256 maxAmountIn = grossIn - 1;
+
+        vm.prank(swapper);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAutomatedMarketMaker.AMM__SlippageExceeded.selector, grossIn, maxAmountIn)
+        );
+        amm.swapTokensForExactTokens(address(tokenA), address(tokenB), amountOutDesired, maxAmountIn, swapper);
+    }
+
+    function test_Revert_Swap_EmptyPool() public {
+        // No liquidity added → empty-pool guard (TASK-13).
+        vm.prank(swapper);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__InsufficientLiquidity.selector);
+        amm.swapTokensForExactTokens(address(tokenA), address(tokenB), 100, type(uint256).max, swapper);
+    }
+
+    function test_Revert_Swap_InvalidToken() public {
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+        vm.prank(swapper);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__InvalidToken.selector);
+        amm.swapTokensForExactTokens(address(tokenA), address(tokenA), 100, 100, swapper);
+    }
+
+    function test_Revert_Swap_ZeroAmount() public {
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__ZeroAmount.selector);
+        vm.prank(swapper);
+        amm.swapTokensForExactTokens(address(tokenA), address(tokenB), 0, 100, swapper);
+    }
+
+    // ---------- R2-H-3: fee-rounding (single ceiling division) ----------
+
+    /// @dev Correct fee-aware exact-output quote: ONE ceiling division that folds the
+    ///      constant-product input and the fee gross-up. Rounds up exactly once, in favor of the
+    ///      pool. This mirrors `AutomatedMarketMaker.swapTokensForExactTokens` after R2-H-3.
+    function _expectedGrossIn(uint256 reserveIn, uint256 reserveOut, uint256 amountOut, uint256 fee)
+        internal
+        pure
+        returns (uint256)
+    {
+        return Math.mulDiv(reserveIn * amountOut, 10000, (reserveOut - amountOut) * (10000 - fee), Math.Rounding.Ceil);
+    }
+
+    /// @dev Legacy two-step form that rounded up TWICE (the R2-H-3 bug): once in getAmountIn
+    ///      (`+1`) and once in the fee gross-up (`+1`). Used only to prove the corrected charge is
+    ///      never larger and, at zero fee, strictly smaller.
+    function _legacyGrossIn(uint256 reserveIn, uint256 reserveOut, uint256 amountOut, uint256 fee)
+        internal
+        pure
+        returns (uint256)
+    {
+        uint256 baseIn = (reserveIn * amountOut) / (reserveOut - amountOut) + 1;
+        return (baseIn * 10000) / (10000 - fee) + 1;
+    }
+
+    /// @dev R2-H-3 over-charge (zero fee): the charge must be the single-ceiling amount, which is
+    ///      strictly below the old double-rounded amount. FAILS against the buggy contract.
+    function test_R2H3_SwapChargeIsSingleCeiling_NoFee() public {
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        uint256 amountOut = 1_000 * 10 ** 18;
+        uint256 fee = amm.feeBps(); // 0 by default
+        uint256 expected = _expectedGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOut, fee);
+        uint256 legacy = _legacyGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOut, fee);
+
+        vm.prank(swapper);
+        uint256 actualIn =
+            amm.swapTokensForExactTokens(address(tokenA), address(tokenB), amountOut, type(uint256).max, swapper);
+
+        assertEq(actualIn, expected, "swap must charge the single-ceiling amount");
+        assertLt(actualIn, legacy, "double round-up removed: strictly less than the legacy charge");
+    }
+
+    /// @dev R2-H-3 over-charge (non-zero fee): corrected charge equals the single-ceiling amount and
+    ///      never exceeds the legacy double-rounded charge, while the fee still accrues to the pool.
+    function test_R2H3_SwapChargeIsSingleCeiling_WithFee() public {
+        vm.prank(governanceA);
+        amm.setFeeBps(30);
+
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        uint256 amountOut = 1_000 * 10 ** 18;
+        uint256 fee = 30;
+        uint256 expected = _expectedGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOut, fee);
+        uint256 legacy = _legacyGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOut, fee);
+        uint256 kBefore = amm.reserveA() * amm.reserveB();
+
+        vm.prank(swapper);
+        uint256 actualIn =
+            amm.swapTokensForExactTokens(address(tokenA), address(tokenB), amountOut, type(uint256).max, swapper);
+
+        assertEq(actualIn, expected, "single-ceiling gross including fee");
+        assertLe(actualIn, legacy, "never charges more than the legacy double-rounded amount");
+        assertGt(amm.reserveA() * amm.reserveB(), kBefore, "fee still accrues to the pool (k grows)");
+    }
+
+    /// @dev Invariant baseline: for arbitrary reserves, output and fee, the constant product must
+    ///      never decrease after a swap — rounding always favors the pool. Holds for the buggy and
+    ///      the fixed contract (the fix keeps k monotonic while removing the over-charge).
+    function testFuzz_R2H3_SwapPreservesConstantProduct(
+        uint256 rA,
+        uint256 rB,
+        uint256 amountOut,
+        uint256 fee,
+        bool aToB
+    ) public {
+        rA = bound(rA, 1e12, 1e24);
+        rB = bound(rB, 1e12, 1e24);
+        fee = bound(fee, 0, amm.MAX_FEE_BPS());
+
+        vm.prank(governanceA);
+        amm.setFeeBps(fee);
+
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(rA, rB); // first deposit sets reserves exactly to (rA, rB)
+
+        uint256 reserveOut = aToB ? rB : rA;
+        amountOut = bound(amountOut, 1, reserveOut / 2); // <= 50% of the output reserve keeps input fundable
+
+        TokenizedCentralBankMoney tin = aToB ? tokenA : tokenB;
+        TokenizedCentralBankMoney tout = aToB ? tokenB : tokenA;
+        vm.prank(centralBank);
+        tin.mint(swapper, 1e26); // fund the gross input generously
+
+        uint256 kBefore = amm.reserveA() * amm.reserveB();
+
+        vm.prank(swapper);
+        amm.swapTokensForExactTokens(address(tin), address(tout), amountOut, type(uint256).max, swapper);
+
+        assertGe(amm.reserveA() * amm.reserveB(), kBefore, "k_after >= k_before");
+    }
+
+    /// @dev Bounded over-charge: the charged gross input is the MINIMAL integer that funds the swap
+    ///      plus fee (a single ceiling). Sufficiency `actualIn*D >= N` guarantees k; minimality
+    ///      `(actualIn-1)*D < N` bounds the over-charge to < 1 base unit. FAILS against the buggy
+    ///      contract, whose double round-up charges up to ~2 units too much.
+    /// forge-config: default.fuzz.runs = 10001
+    function testFuzz_R2H3_SwapChargeIsMinimalCeiling(uint256 rA, uint256 rB, uint256 amountOut, uint256 fee, bool aToB)
+        public
+    {
+        rA = bound(rA, 1e12, 1e24);
+        rB = bound(rB, 1e12, 1e24);
+        fee = bound(fee, 0, amm.MAX_FEE_BPS());
+
+        vm.prank(governanceA);
+        amm.setFeeBps(fee);
+
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(rA, rB);
+
+        uint256 reserveIn = aToB ? rA : rB;
+        uint256 reserveOut = aToB ? rB : rA;
+        amountOut = bound(amountOut, 1, reserveOut / 2);
+
+        TokenizedCentralBankMoney tin = aToB ? tokenA : tokenB;
+        TokenizedCentralBankMoney tout = aToB ? tokenB : tokenA;
+        vm.prank(centralBank);
+        tin.mint(swapper, 1e26);
+
+        vm.prank(swapper);
+        uint256 actualIn =
+            amm.swapTokensForExactTokens(address(tin), address(tout), amountOut, type(uint256).max, swapper);
+
+        uint256 n = reserveIn * amountOut * 10000; // fee-adjusted requirement numerator
+        uint256 d = (reserveOut - amountOut) * (10000 - fee); // denominator
+        assertGe(actualIn * d, n, "charge is sufficient (k preserved)");
+        assertLt((actualIn - 1) * d, n, "charge is minimal (over-charge < 1 base unit)");
+
+        // R2-H-3 single source of truth: the public quote view returns the EXACT swap charge, so
+        // off-chain callers can size maxAmountIn from it without ever tripping AMM__SlippageExceeded.
+        assertEq(
+            amm.quoteExactOutput(reserveIn, reserveOut, amountOut, fee),
+            actualIn,
+            "quoteExactOutput mirrors the swap charge exactly"
+        );
+    }
+
+    /// @dev The public quote view equals the swap charge for concrete no-fee and with-fee cases,
+    ///      and its arithmetic matches the fixed single-ceiling helper.
+    function test_R2H3_QuoteExactOutput_MatchesSwapCharge() public {
+        vm.prank(governanceA);
+        amm.setFeeBps(30);
+
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        uint256 amountOut = 1_000 * 10 ** 18;
+        uint256 quoted = amm.quoteExactOutput(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOut, 30);
+        assertEq(
+            quoted, _expectedGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOut, 30), "quote == single ceiling"
+        );
+
+        vm.prank(swapper);
+        uint256 actualIn =
+            amm.swapTokensForExactTokens(address(tokenA), address(tokenB), amountOut, type(uint256).max, swapper);
+        assertEq(quoted, actualIn, "quote == realized swap charge");
+    }
+
+    /// @dev The quote view rejects the same degenerate inputs the swap does, with the same errors,
+    ///      so callers see one consistent contract for both.
+    function test_Revert_QuoteExactOutput_ZeroAmount() public {
+        vm.expectRevert(IAutomatedMarketMaker.AMM__ZeroAmount.selector);
+        amm.quoteExactOutput(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, 0, 30);
+    }
+
+    function test_Revert_QuoteExactOutput_OutputExceedsReserve() public {
+        vm.expectRevert(IAutomatedMarketMaker.AMM__InsufficientLiquidity.selector);
+        amm.quoteExactOutput(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, 30);
+    }
+
+    // ---------- Fee accrual to share value ----------
+
+    function test_Fees_AccrueToShareValue() public {
+        // LP1 seeds; a swap leaves a 0.3% fee in reserves; LP1's redeemable value rises.
+        // The default swap fee is now 0, so set a non-zero fee explicitly to exercise accrual.
+        vm.prank(governanceA);
+        amm.setFeeBps(30);
+
+        vm.prank(liquidityProvider);
+        uint256 shares = amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        uint256 kBefore = amm.reserveA() * amm.reserveB();
+
+        uint256 amountOutDesired = 1_000 * 10 ** 18;
+        uint256 grossIn = _expectedGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired, amm.feeBps());
+        vm.prank(swapper);
+        amm.swapTokensForExactTokens(address(tokenA), address(tokenB), amountOutDesired, grossIn, swapper);
+
+        // Constant product grew because the fee stayed in the pool.
+        assertGt(amm.reserveA() * amm.reserveB(), kBefore, "k grew from retained fee");
+        assertEq(amm.balanceOf(liquidityProvider), shares, "share count unchanged");
+    }
+
+    // ---------- Restricted LP-share transfers (D2) ----------
+
+    function test_Transfer_BetweenVerified_Succeeds() public {
+        vm.prank(liquidityProvider);
+        uint256 shares = amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        vm.prank(liquidityProvider);
+        amm.transfer(swapper, shares / 4); // swapper is verified
+        assertEq(amm.balanceOf(swapper), shares / 4);
+    }
+
+    function test_Revert_Transfer_ToUnverified() public {
+        vm.prank(liquidityProvider);
+        uint256 shares = amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        address outsider = makeAddr("outsider");
+        vm.prank(liquidityProvider);
+        vm.expectRevert(abi.encodeWithSelector(IAutomatedMarketMaker.AMM__ParticipantNotVerified.selector, outsider));
+        amm.transfer(outsider, shares / 4);
+    }
+
+    // ---------- Asymmetric Circuit Breaker (FR-043 / FR-044) ----------
+
+    function test_CircuitBreaker_Pause_OneOfN() public {
+        vm.prank(governanceA);
+        amm.pause("Market stress test");
+        assertTrue(amm.isPaused(), "AMM should be paused after 1-of-N pause");
+
+        vm.prank(liquidityProvider);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__AlreadyPaused.selector);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+    }
+
+    function test_Revert_CircuitBreaker_Pause_Unauthorized() public {
+        vm.prank(swapper);
+        vm.expectRevert(abi.encodeWithSelector(IAutomatedMarketMaker.AMM__NotGovernance.selector, swapper));
+        amm.pause("unauthorized attempt");
+    }
+
+    function test_Revert_CircuitBreaker_DoublePause() public {
+        vm.prank(governanceA);
+        amm.pause("first");
+        vm.prank(governanceB);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__AlreadyPaused.selector);
+        amm.pause("second");
+    }
+
+    function test_CircuitBreaker_Resume_QuorumReached() public {
+        vm.prank(governanceA);
+        amm.pause("incident");
+
+        vm.prank(governanceA);
+        bytes32 proposalId = amm.proposeResume();
+        assertEq(amm.resumeSignatures(proposalId), 1, "proposer counts as first signature");
+        assertTrue(amm.isPaused(), "still paused with only 1 signature");
+
+        vm.prank(governanceB);
+        amm.signResume(proposalId);
+        assertFalse(amm.isPaused(), "resumed after quorum 2-of-N");
+        assertEq(amm.resumeSignatures(proposalId), 2);
+
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+        assertEq(amm.reserveA(), INITIAL_LIQUIDITY);
+    }
+
+    function test_Revert_CircuitBreaker_Resume_DoubleSign() public {
+        vm.prank(governanceA);
+        amm.pause("incident");
+        vm.prank(governanceA);
+        bytes32 proposalId = amm.proposeResume();
+        vm.prank(governanceA);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAutomatedMarketMaker.AMM__AlreadySigned.selector, proposalId, governanceA)
+        );
+        amm.signResume(proposalId);
+    }
+
+    function test_Revert_CircuitBreaker_Resume_ProposalNotFound() public {
+        vm.prank(governanceA);
+        amm.pause("incident");
+        vm.prank(governanceB);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAutomatedMarketMaker.AMM__ProposalNotFound.selector, bytes32(uint256(0xdead)))
+        );
+        amm.signResume(bytes32(uint256(0xdead)));
+    }
+
+    function test_Revert_CircuitBreaker_Resume_CannotProposeWhenNotPaused() public {
+        vm.prank(governanceA);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__NotPaused.selector);
+        amm.proposeResume();
+    }
+
+    // ---------- Institution-keyed quorum (R2-H-4) ----------
+
+    /// @dev Registers a second governance wallet for an institution that is ALREADY registered,
+    ///      reusing its institution code. This is the shape the quorum has to survive: not an
+    ///      attacker, but one central bank that legitimately runs two governance keys.
+    function _registerSibling(address wallet, string memory legalName, bytes32 institutionId) private {
+        vm.startPrank(admin);
+        identityRegistry.registerParticipant(
+            wallet, legalName, IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0), institutionId
+        );
+        identityRegistry.verifyParticipant(wallet);
+        vm.stopPrank();
+    }
+
+    function test_Revert_Resume_SecondKeyOfSameInstitution_CannotFormQuorum() public {
+        address governanceASibling = makeAddr("governanceASibling");
+        _registerSibling(governanceASibling, "Central Bank A (second key)", bytes32("inst-governanceA"));
+
+        vm.prank(governanceA);
+        amm.pause("incident");
+        vm.prank(governanceA);
+        bytes32 proposalId = amm.proposeResume();
+
+        // Both wallets pass onlyGovernance and are distinct addresses, so the address-keyed check
+        // lets this through. The institution check is the only thing standing between one central
+        // bank and a self-served resume.
+        vm.prank(governanceASibling);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAutomatedMarketMaker.AMM__InstitutionAlreadySigned.selector, proposalId, bytes32("inst-governanceA")
+            )
+        );
+        amm.signResume(proposalId);
+
+        assertTrue(amm.isPaused(), "one institution must not resume on its own");
+        assertEq(amm.resumeSignatures(proposalId), 1, "the refused signature must not be counted");
+
+        // A genuinely different institution still completes the quorum.
+        vm.prank(governanceB);
+        amm.signResume(proposalId);
+        assertFalse(amm.isPaused(), "two distinct institutions resume normally");
+    }
+
+    /// @dev The mirror case: the sibling proposes and the original key tries to complete. Order must
+    ///      not matter — otherwise the control is only half present.
+    function test_Revert_Resume_SiblingKeyProposes_OriginalKeyCannotComplete() public {
+        address governanceASibling = makeAddr("governanceASibling");
+        _registerSibling(governanceASibling, "Central Bank A (second key)", bytes32("inst-governanceA"));
+
+        vm.prank(governanceASibling);
+        amm.pause("incident");
+        vm.prank(governanceASibling);
+        bytes32 proposalId = amm.proposeResume();
+
+        vm.prank(governanceA);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAutomatedMarketMaker.AMM__InstitutionAlreadySigned.selector, proposalId, bytes32("inst-governanceA")
+            )
+        );
+        amm.signResume(proposalId);
+        assertTrue(amm.isPaused(), "still paused");
+    }
+
+    /// @dev A governance wallet whose registry entry carries no institution id cannot vote at all.
+    ///      Counting it would admit bytes32(0) as an institution, and every such wallet shares that
+    ///      value — two of them would form a quorum as one "institution".
+    ///
+    ///      Reaching this state needs a registry read that returns zero for a wallet canGovern() still
+    ///      accepts, which is exactly the shape of a chain provisioned BEFORE this change: those
+    ///      participants were stored under the 4-argument registerParticipant and hold no id. The read
+    ///      is mocked rather than staged through the registry because the registry now refuses to
+    ///      create such a participant at all — see the migration note in the deployment runbook.
+    function test_Revert_Resume_SignerWithZeroInstitutionId() public {
+        vm.prank(governanceA);
+        amm.pause("incident");
+        vm.prank(governanceA);
+        bytes32 proposalId = amm.proposeResume();
+
+        vm.mockCall(
+            address(identityRegistry),
+            abi.encodeWithSelector(IIdentityRegistry.getInstitutionId.selector, governanceB),
+            abi.encode(bytes32(0))
+        );
+
+        vm.prank(governanceB);
+        vm.expectRevert(abi.encodeWithSelector(IAutomatedMarketMaker.AMM__InvalidInstitutionId.selector, governanceB));
+        amm.signResume(proposalId);
+
+        vm.clearMockedCalls();
+        assertTrue(amm.isPaused(), "an unattributable signature must not resume the AMM");
+    }
+
+    // ---------- Epoch binding (R2-H-2, never ported to Scenario B until now) ----------
+
+    /// @dev A proposal abandoned during one incident must not be usable to lift a later one. Without
+    ///      the epoch stamp, the signature gathered under pause #1 combines with a single fresh
+    ///      signature under pause #2 and resumes on one live act instead of two.
+    function test_Revert_Resume_ProposalFromAnEarlierPauseEpoch() public {
+        vm.prank(governanceA);
+        amm.pause("incident one");
+        uint256 firstEpoch = amm.pauseEpoch();
+
+        // Abandoned: proposed under pause #1, never signed to quorum.
+        vm.prank(governanceA);
+        bytes32 staleProposal = amm.proposeResume();
+
+        // Pause #1 is lifted by a proper 2-of-N on a different proposal.
+        vm.prank(governanceB);
+        bytes32 liveProposal = amm.proposeResume();
+        vm.prank(governanceC);
+        amm.signResume(liveProposal);
+        assertFalse(amm.isPaused(), "pause one lifted by two institutions");
+
+        // Second incident: the stale proposal must be refused, not counted.
+        vm.prank(governanceA);
+        amm.pause("incident two");
+        assertEq(amm.pauseEpoch(), firstEpoch + 1, "each pause opens a new epoch");
+
+        vm.prank(governanceB);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAutomatedMarketMaker.AMM__ProposalExpired.selector, staleProposal, firstEpoch, firstEpoch + 1
+            )
+        );
+        amm.signResume(staleProposal);
+        assertTrue(amm.isPaused(), "a superseded proposal cannot lift the current pause");
+    }
+
+    function test_Resume_FreshProposalPerPauseEpoch_Works() public {
+        vm.prank(governanceA);
+        amm.pause("incident one");
+        vm.prank(governanceA);
+        bytes32 first = amm.proposeResume();
+        vm.prank(governanceB);
+        amm.signResume(first);
+        assertFalse(amm.isPaused());
+
+        // A new block: proposalId is keccak256(proposer, block.number, block.timestamp), so the same
+        // proposer proposing twice in one block would collide with the first proposal rather than
+        // create a second one.
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
+
+        vm.prank(governanceA);
+        amm.pause("incident two");
+        vm.prank(governanceA);
+        bytes32 second = amm.proposeResume();
+        assertTrue(second != first, "a fresh pause must yield a fresh proposal id");
+        vm.prank(governanceB);
+        amm.signResume(second);
+        assertFalse(amm.isPaused(), "a fresh proposal per pause resumes normally");
+    }
+
+    // ---------- Constructor ----------
+
+    function test_Revert_Constructor_ZeroAddressTokenA() public {
+        vm.expectRevert(IAutomatedMarketMaker.AMM__ZeroAddress.selector);
+        new AutomatedMarketMaker(address(0), address(tokenB), address(identityRegistry));
+    }
+
+    function test_Revert_Constructor_ZeroAddressTokenB() public {
+        vm.expectRevert(IAutomatedMarketMaker.AMM__ZeroAddress.selector);
+        new AutomatedMarketMaker(address(tokenA), address(0), address(identityRegistry));
+    }
+
+    function test_Revert_Constructor_ZeroAddressIdentityRegistry() public {
+        vm.expectRevert(IAutomatedMarketMaker.AMM__ZeroAddress.selector);
+        new AutomatedMarketMaker(address(tokenA), address(tokenB), address(0));
+    }
+
+    function test_Revert_AddLiquidity_UnverifiedCaller() public {
+        address unverified = makeAddr("unverified");
+        vm.startPrank(centralBank);
+        tokenA.mint(unverified, INITIAL_LIQUIDITY);
+        tokenB.mint(unverified, INITIAL_LIQUIDITY);
+        vm.stopPrank();
+
+        vm.startPrank(unverified);
+        tokenA.approve(address(amm), type(uint256).max);
+        tokenB.approve(address(amm), type(uint256).max);
+        vm.expectRevert(abi.encodeWithSelector(IAutomatedMarketMaker.AMM__ParticipantNotVerified.selector, unverified));
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+        vm.stopPrank();
+    }
+
+    function test_Revert_Swap_UnverifiedSender() public {
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        address unverified = makeAddr("unverifiedSwapper");
+        vm.startPrank(centralBank);
+        tokenA.mint(unverified, SWAPPER_BALANCE);
+        vm.stopPrank();
+
+        vm.startPrank(unverified);
+        tokenA.approve(address(amm), type(uint256).max);
+        vm.expectRevert(abi.encodeWithSelector(IAutomatedMarketMaker.AMM__ParticipantNotVerified.selector, unverified));
+        amm.swapTokensForExactTokens(address(tokenA), address(tokenB), 100 * 10 ** 18, type(uint256).max, swapper);
+        vm.stopPrank();
+    }
+
+    function test_Revert_Swap_UnverifiedTo() public {
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        address unverifiedTo = makeAddr("unverifiedTo");
+        vm.prank(swapper);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAutomatedMarketMaker.AMM__ParticipantNotVerified.selector, unverifiedTo)
+        );
+        amm.swapTokensForExactTokens(address(tokenA), address(tokenB), 100 * 10 ** 18, type(uint256).max, unverifiedTo);
+    }
+
+    // ---------- Reserve overflow (R1-12.4 gap 1: AMM reserve overflow) ----------
+
+    /// @dev A first deposit so large that the `sqrt(amountA * amountB)` invariant math overflows
+    ///      must revert via Solidity 0.8 checked arithmetic — never silently wrap the reserves.
+    function test_Revert_AddLiquidity_FirstDeposit_OverflowReverts() public {
+        address whale = _registerWhale();
+        uint256 huge = type(uint256).max / 2;
+
+        vm.startPrank(centralBank);
+        tokenA.mint(whale, huge);
+        tokenB.mint(whale, huge);
+        vm.stopPrank();
+
+        vm.startPrank(whale);
+        tokenA.approve(address(amm), type(uint256).max);
+        tokenB.approve(address(amm), type(uint256).max);
+        vm.expectRevert(stdError.arithmeticError);
+        amm.addLiquidity(huge, huge);
+        vm.stopPrank();
+
+        // No state corruption: the overflow reverts before any reserve/supply mutation.
+        assertEq(amm.reserveA(), 0, "reserveA untouched after overflow revert");
+        assertEq(amm.reserveB(), 0, "reserveB untouched after overflow revert");
+        assertEq(amm.totalSupply(), 0, "no shares minted after overflow revert");
+    }
+
+    /// @dev An oversized *second* deposit into a healthy pool must revert (checked arithmetic in the
+    ///      share/reserve accounting) and leave the existing reserves exactly intact.
+    function test_Revert_AddLiquidity_OversizedSecondDeposit_LeavesReservesIntact() public {
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        address whale = _registerWhale();
+        uint256 huge = type(uint256).max / 2;
+
+        vm.startPrank(centralBank);
+        tokenA.mint(whale, huge);
+        tokenB.mint(whale, huge);
+        vm.stopPrank();
+
+        vm.startPrank(whale);
+        tokenA.approve(address(amm), type(uint256).max);
+        tokenB.approve(address(amm), type(uint256).max);
+        vm.expectRevert(stdError.arithmeticError);
+        amm.addLiquidity(huge, huge);
+        vm.stopPrank();
+
+        assertEq(amm.reserveA(), INITIAL_LIQUIDITY, "reserveA intact after overflow revert");
+        assertEq(amm.reserveB(), INITIAL_LIQUIDITY, "reserveB intact after overflow revert");
+    }
+
+    // ---------- helpers ----------
+
+    /// @dev Registers and returns a verified COMMERCIAL_BANK participant for overflow-scale deposits.
+    function _registerWhale() internal returns (address whale) {
+        whale = makeAddr("whale");
+        vm.startPrank(admin);
+        identityRegistry.registerParticipant(
+            whale,
+            "Whale Bank",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            bytes32("inst-whale")
+        );
+        identityRegistry.verifyParticipant(whale);
+        vm.stopPrank();
+    }
+
+    /// @dev Seeds the §2.2 worked-example pool: 5,000,000 (A/BRL) : 1,000,000 (B/EUR), price 5:1.
+    function _seedWorkedExamplePool() internal {
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(5_000_000 * 10 ** 18, 1_000_000 * 10 ** 18);
+    }
+}
+
+/// @title DeployAMMTest
+/// @notice Unit tests for the DeployAMM deployment script.
+contract DeployAMMTest is Test {
+    DeployAMM public deployScript;
+
+    uint256 private deployerPrivateKey;
+    address private expectedTokenA;
+    address private expectedTokenB;
+    address private expectedIdentityRegistry;
+
+    string private constant ENV_DEPLOYER_PRIVATE_KEY = "DEPLOYER_PRIVATE_KEY";
+    string private constant ENV_TOKEN_A_ADDRESS = "TOKEN_A_ADDRESS";
+    string private constant ENV_TOKEN_B_ADDRESS = "TOKEN_B_ADDRESS";
+    string private constant ENV_IDENTITY_REGISTRY_ADDRESS = "IDENTITY_REGISTRY_ADDRESS";
+
+    function setUp() public {
+        deployScript = new DeployAMM();
+        deployScript.setUp();
+
+        deployerPrivateKey = vm.envOr(ENV_DEPLOYER_PRIVATE_KEY, uint256(0x1));
+        expectedTokenA = address(0x3456789012345678901234567890123456789012);
+        expectedTokenB = address(0x4567890123456789012345678901234567890123);
+        expectedIdentityRegistry = address(0x6789012345678901234567890123456789012345);
+
+        vm.setEnv(ENV_DEPLOYER_PRIVATE_KEY, vm.toString(deployerPrivateKey));
+        vm.setEnv(ENV_TOKEN_A_ADDRESS, vm.toString(expectedTokenA));
+        vm.setEnv(ENV_TOKEN_B_ADDRESS, vm.toString(expectedTokenB));
+        vm.setEnv(ENV_IDENTITY_REGISTRY_ADDRESS, vm.toString(expectedIdentityRegistry));
+    }
+
+    function test_ScriptRun_Success() public {
+        deployScript.run();
+        AutomatedMarketMaker amm = deployScript.amm();
+
+        assertTrue(address(amm) != address(0), "Contract was not deployed");
+        assertGt(address(amm).code.length, 0, "Deployed contract has no runtime bytecode");
+        assertEq(address(amm.TOKEN_A()), expectedTokenA, "TokenA address mismatch");
+        assertEq(address(amm.TOKEN_B()), expectedTokenB, "TokenB address mismatch");
+        assertEq(address(amm.IDENTITY_REGISTRY()), expectedIdentityRegistry, "IdentityRegistry mismatch");
+        assertEq(amm.reserveA(), 0, "Initial reserveA should be zero");
+        assertEq(amm.reserveB(), 0, "Initial reserveB should be zero");
+        assertFalse(amm.isPaused(), "Contract should not be paused initially");
+    }
+}

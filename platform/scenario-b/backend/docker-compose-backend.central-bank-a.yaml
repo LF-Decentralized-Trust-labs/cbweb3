@@ -1,0 +1,133 @@
+services:
+  compliance-central-bank-a:
+    image: cbweb3/compliance:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-compliance-central-bank-a"
+    # Runs as the host user rather than the image default (uid 10001): this service mounts
+    # ./config/pki from the repository, owned by whoever checked it out, so another uid can
+    # read it (0775) but cannot persist an issued certificate. The make targets export these;
+    # a hand-run `docker compose` falls back to the image uid, which is still not root
+    # (finding R2-M-12).
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
+    env_file:
+      - path: ./config/.env.infra.central-bank-a
+        required: true
+    environment:
+      COMPLIANCE_GRPC_PORT: "9093"
+      POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_central_bank_a}?sslmode=disable"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
+    ports:
+      - "39093:9093"
+    networks:
+      - cbweb3_backend_central_bank_a
+      - cbweb3_network
+
+  auth-central-bank-a:
+    image: cbweb3/auth:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-auth-central-bank-a"
+    env_file:
+      - path: ./config/.env.infra.central-bank-a
+        required: true
+    environment:
+      AUTH_GRPC_PORT: "9091"
+      KEYCLOAK_BASE_URL: "${KEYCLOAK_BASE_URL:-http://keycloak:8080}"
+      KEYCLOAK_REALM: "${KC_REALM:-central-bank-a}"
+      KEYCLOAK_CLIENT_ID: "${KC_CLIENT_ID:-central-bank-a-client}"
+      KEYCLOAK_CLIENT_SECRET: "${KC_CLIENT_SECRET:-change-me}"
+      KEYCLOAK_JWKS_CACHE_TTL_SEC: "3000"
+      KEYCLOAK_REQUEST_TIMEOUT_SEC: "10"
+      COMPLIANCE_GRPC_ADDR: compliance-central-bank-a:9093
+      COMPLIANCE_REQUEST_TIMEOUT_SEC: "5"
+      REDIS_ADDR: "${REDIS_CONTAINER_NAME:-cbweb3-redis}:6379"
+      REDIS_DB: "2"
+    ports:
+      - "39091:9091"
+    depends_on:
+      - compliance-central-bank-a
+    networks:
+      - cbweb3_backend_central_bank_a
+      - cbweb3_network
+
+  payment-orchestrator-central-bank-a:
+    image: cbweb3/payment-orchestrator:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-payment-orchestrator-central-bank-a"
+    env_file:
+      - path: ./config/.env.infra.central-bank-a
+        required: true
+      - path: ../deploy/local/paladin/spoke-a/.deployed-addrs.env
+        required: false
+    environment:
+      PAYMENT_GRPC_PORT: "9094"
+      CACTI_API_URL: "http://host.docker.internal:4000"
+      # BesuRelayerExecutor: Hub chain config for W-tCeBM mint/burn on-chain.
+      HUB_BESU_RPC_URL: "http://host.docker.internal:8845"
+      HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
+      # CB-A spoke+hub signer (0xfe3b557e...) — holds CENTRAL_BANK_ROLE on spoke-a tCeBM-BRL
+      # (spoke-a is deployed with CENTRAL_BANK_ADDRESS=0xfe3b557e...) and on the Hub W-tCeBM_A,
+      # so it both auto-mints/locks on the spoke and mints W-tCeBM on the Hub.
+      SIGNER_PRIVATE_KEY: "${SIGNER_PRIVATE_KEY:-8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63}"
+      # HUB_MINT_RECIPIENT must match LOCAL_CB_HUB_SIGNER (CB-A hub identity 0xfe3b...),
+      # the address the api-gateway pre-flight checks for W-tCeBM balance before committing.
+      HUB_MINT_RECIPIENT: "${HUB_MINT_RECIPIENT:-0xfe3b557e8fb62b89f4916b721be55ceb828dbd73}"
+      # Spoke-A config: enables the real SpokeBridge lock (native tCeBM-BRL auto-minted to
+      # the CB-A spoke signer 0xfe3b..., then locked) before the W-tCeBM mint on Hub.
+      # SPOKE_BRIDGE_ADDRESS comes from env_file (.env.infra.central-bank-a).
+      SPOKE_BESU_RPC_URL: "http://host.docker.internal:8645"
+      SPOKE_CHAIN_ID: "${SPOKE_A_CHAIN_ID:-1338}"
+    ports:
+      - "39094:9094"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cbweb3_backend_central_bank_a
+      - cbweb3_network
+
+  api-gateway-central-bank-a:
+    image: cbweb3/api-gateway:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-api-gateway-central-bank-a"
+    # Runs as the host user rather than the image default (uid 10001): this service mounts
+    # ./config/pki from the repository, owned by whoever checked it out, so another uid can
+    # read it (0775) but cannot persist an issued certificate. The make targets export these;
+    # a hand-run `docker compose` falls back to the image uid, which is still not root
+    # (finding R2-M-12).
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
+    env_file:
+      - path: ./config/.env.infra.central-bank-a
+        required: true
+    environment:
+      APP_PORT: "8080"
+      REQUEST_TIMEOUT_SEC: "30"
+      AUTH_GRPC_ADDR: auth-central-bank-a:9091
+      COMPLIANCE_GRPC_ADDR: compliance-central-bank-a:9093
+      PAYMENT_GRPC_ADDR: payment-orchestrator-central-bank-a:9094
+      PKI_DIR: /workspace/backend/config/pki
+      HUB_BESU_RPC_URL: "http://host.docker.internal:8845"
+      HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
+      # CB-A hub identity key (0xfe3b557e...) — registered in IdentityRegistry as the CB of CB-A's
+      # sovereign W-tCeBM tokens. All hub-level operations (registerCommit, proposePair,
+      # registerCurrency) require msg.sender == getCentralBankOf(token), which is this address.
+      # Same 0xfe3b... identity the payment-orchestrator uses as its spoke/hub signer; distinct
+      # from CB-B (0xf17f) and the platform admin/deployer (0x627306).
+      SIGNER_PRIVATE_KEY: "${CENTRAL_BANK_A_PRIVATE_KEY:-8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63}"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
+    ports:
+      - "38080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - auth-central-bank-a
+      - compliance-central-bank-a
+      - payment-orchestrator-central-bank-a
+    networks:
+      - cbweb3_backend_central_bank_a
+      - cbweb3_network
+
+networks:
+  cbweb3_backend_central_bank_a:
+  cbweb3_network:
+    external: true

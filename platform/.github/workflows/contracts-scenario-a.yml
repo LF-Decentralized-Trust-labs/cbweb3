@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Contracts CI — Scenario A
+
+permissions: {}
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ["scenario-a/contracts/**"]
+  pull_request:
+    branches: [main, develop]
+    paths: ["scenario-a/contracts/**"]
+  workflow_dispatch:
+
+env:
+  FOUNDRY_PROFILE: ci
+  # 256 fuzz runs keeps coverage inside the CI time budget (~25s) while staying
+  # meaningful; the validate-coverage.sh script honours this value.
+  FOUNDRY_FUZZ_RUNS: "256"
+
+jobs:
+  contracts:
+    name: Foundry Contracts — Scenario A
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Cache Foundry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.foundry
+            ~/.cargo/bin/forge
+            ~/.cargo/bin/cast
+          key: foundry-${{ runner.os }}-${{ github.sha }}
+          restore-keys: foundry-${{ runner.os }}-
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Show Forge version
+        run: forge --version
+
+      - name: Install Soldeer dependencies
+        working-directory: scenario-a/contracts
+        run: forge soldeer install
+
+      - name: Run Forge fmt check
+        working-directory: scenario-a/contracts
+        run: forge fmt --check
+
+      - name: Run Forge build
+        working-directory: scenario-a/contracts
+        run: forge build --sizes
+
+      # Serial (-j 1) execution: the deploy-script suite uses vm.setEnv, which is
+      # process-global and flakes when test suites run in parallel.
+      - name: Run Forge tests (serial)
+        working-directory: scenario-a/contracts
+        run: forge test -j 1 -vvv
+
+      # 80% D6 gate measured on core src/ via --ir-minimum (AMM + script/
+      # excluded — see tools/validate-coverage.sh).
+      - name: Validate code coverage
+        working-directory: scenario-a/contracts
+        run: bash tools/validate-coverage.sh
+
+  slither:
+    name: Slither Static Analysis — Scenario A
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install Soldeer dependencies
+        working-directory: scenario-a/contracts
+        run: forge soldeer install
+
+      - name: Run Slither
+        uses: crytic/slither-action@v0.4.0
+        with:
+          target: scenario-a/contracts
+          slither-config: scenario-a/contracts/slither.config.json
+          fail-on: high

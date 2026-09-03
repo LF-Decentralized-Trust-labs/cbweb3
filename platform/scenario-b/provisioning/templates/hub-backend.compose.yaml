@@ -1,0 +1,51 @@
+# hub-backend template — the hub's api-gateway only. The hub runs its compliance
+# service separately (entity-compliance.compose.yaml) for spoke self-registration
+# + sovereign currency registration, and needs no auth/login (the swap's auth
+# happens on the CB + commercial-bank gateways). Spoke/bank entities use the
+# 3-service entity-backend.compose.yaml instead.
+services:
+  api-gateway:
+    image: "${BACKEND_IMAGE:-cbweb3b/api-gateway:local}"
+    container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-api-gateway"
+    environment:
+      ENTITY: "${ENTITY:?}"
+      # Institution identity for on-chain participant registration: institutionId =
+      # keccak256(INSTITUTION_CODE). Deliberately not BANK_CODE, which is the entity ROLE and
+      # identical on every central bank — hashing that would collapse them into one institution
+      # and leave the AMM 2-of-N resume quorum unreachable.
+      INSTITUTION_CODE: "${INSTITUTION_CODE:-}"
+      HUB_RPC_URL: "http://host.docker.internal:${HUB_RPC_PORT:?}"
+      ENTITY_BESU_RPC_URL: "http://host.docker.internal:${ENTITY_RPC_PORT:?}"
+      GATEWAY_PORT: "${GATEWAY_PORT:?}"
+      # Compliance gRPC + internal-relay secret drive the spoke self-registration
+      # endpoint (POST /internal/v1/spokes/register).
+      COMPLIANCE_GRPC_ADDR: "${COMPLIANCE_GRPC_ADDR:-localhost:9093}"
+      INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:-}"
+      # Browser CORS: the hub governance portal calls this gateway with credentials,
+      # so its exact origin must be allowed ("*" is invalid with credentials).
+      CORS_ALLOW_ORIGINS: "${CORS_ALLOW_ORIGINS:-}"
+      # R2-H-8 service-mesh mTLS — the hub gateway is a gRPC client (→hub compliance).
+      # Opt-in via GRPC_MTLS_ENABLE (empty by default → plaintext, unchanged).
+      GRPC_MTLS_CERT_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/api-gateway.crt}"
+      GRPC_MTLS_KEY_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/api-gateway.key}"
+      GRPC_MTLS_CA_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/svc-ca.crt}"
+    volumes:
+      - "svc_tls:/svc-tls:ro"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${GATEWAY_PORT:?}:8080"
+    networks:
+      - entity_net
+    restart: always
+
+networks:
+  entity_net:
+    name: "${ENTITY_NET_PREFIX:?}_net"
+    external: true
+
+volumes:
+  # Service-mesh mTLS material shared with hub compliance (same named volume,
+  # seeded by gen-svc-tls-hub). Read-only; consumed only when GRPC_MTLS_ENABLE is set.
+  svc_tls:
+    name: "${SVC_TLS_VOLUME:?}"

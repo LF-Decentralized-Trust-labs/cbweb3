@@ -1,0 +1,97 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Backend CI — Scenario B
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ["scenario-b/backend/**", "scenario-b/tests/integration-lite/**"]
+  pull_request:
+    branches: [main, develop]
+    paths: ["scenario-b/backend/**", "scenario-b/tests/integration-lite/**"]
+  workflow_dispatch:
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  # Per-service D6 coverage gate (80% on core business logic). Matrix runs the
+  # four services in parallel; each `make test-coverage` scopes -coverpkg to its
+  # core packages and excludes documented infra (see each service Makefile).
+  services:
+    name: ${{ matrix.service }} — coverage gate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api-gateway, auth, compliance, payment-orchestrator]
+    defaults:
+      run:
+        working-directory: scenario-b/backend/services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: scenario-b/backend/services/${{ matrix.service }}/go.mod
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run go vet
+        run: make vet
+
+      - name: Run tests with coverage threshold (D6 80% core gate)
+        run: make test-coverage
+
+      - name: Run gosec
+        run: make security
+
+  # shared/identity D6 gate (80%).
+  shared-identity:
+    name: shared/identity — coverage gate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scenario-b/backend/shared/identity
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: scenario-b/backend/shared/identity/go.mod
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run coverage threshold (D6 80%)
+        run: |
+          go test ./... -coverpkg=./... -coverprofile=coverage.out -covermode=atomic
+          go tool cover -func=coverage.out | awk '/total:/ { gsub("%","",$3); if ($3+0 < 80) { printf "coverage %.2f%% is below threshold 80%%\n", $3; exit 1 } else { printf "coverage %.2f%% meets threshold 80%%\n", $3 } }'
+
+  # Hermetic integration tier for the PR gate (build tag integration_lite).
+  # The heavy //go:build integration suite runs on a separate nightly lane.
+  integration-lite:
+    name: ${{ matrix.module }} — integration_lite
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [orchestrator, compliance-gate]
+    defaults:
+      run:
+        working-directory: scenario-b/tests/integration-lite/${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: scenario-b/tests/integration-lite/${{ matrix.module }}/go.mod
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run integration_lite lane
+        run: go test -tags integration_lite ./...

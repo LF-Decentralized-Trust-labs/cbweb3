@@ -1,0 +1,43 @@
+services:
+  cacti-htlc-relay:
+    build:
+      context: ../../..
+      dockerfile: interop/hub-and-spoke/cacti/Dockerfile
+    image: cbweb3/cacti-htlc-relay:local
+    pull_policy: build
+    container_name: "cbweb3-cacti-relay"
+    env_file:
+      - path: .env
+        required: false  # populated by contracts.sync-addresses; uses inline defaults until then
+    environment:
+      # Spokes are NOT statically configured here. The relay is driven entirely by the dynamic
+      # spoke registry (POST /api/v1/spokes): each founding central bank registers its spoke at
+      # deploy time (toolkit register-relay step), and watchers are reconciled from the persisted
+      # registry on startup. To pin static spokes for a standalone test, set CACTI_SPOKES_CONFIG
+      # or the legacy SPOKE_A_*/SPOKE_B_* env vars (see spokes-config.ts).
+      # Cacti REST API port (consumed by CactiRelay Go adapter)
+      CACTI_API_PORT: "${CACTI_API_PORT:-4000}"
+      # Shared secret for X-Relay-Auth when calling internal FX endpoints.
+      INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:-cbweb3-relay-shared-secret}"
+      # Poll interval in milliseconds
+      POLL_INTERVAL_MS: "${POLL_INTERVAL_MS:-3000}"
+      # Persistent store path — backed by a named volume so state survives container restarts
+      RELAY_STORE_PATH: "/data/cacti-relay-store.json"
+      # Dynamic spoke registry (RL-1) — persisted on the same volume
+      CACTI_SPOKES_REGISTRY: "/data/cacti-spoke-registry.json"
+    volumes:
+      - cacti-relay-data:/data
+    ports:
+      - "${CACTI_API_PORT:-4000}:4000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  cacti-relay-data:

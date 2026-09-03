@@ -1,0 +1,336 @@
+# JSON Schema draft-07 for the ParticipantDeployment manifest (cbweb3/v1).
+#
+# Usage: add this header to any manifest YAML file to enable editor autocompletion
+# and inline error highlighting (VS Code + Red Hat YAML extension):
+#
+#   # yaml-language-server: $schema: ../../provisioning/schema/v1/participant-deployment.schema.yaml
+#
+# Adjust the relative path to match the manifest file's location.
+
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "cbweb3/v1/ParticipantDeployment"
+title: "ParticipantDeployment"
+description: >
+  Declarative manifest for provisioning a single cbweb3 Scenario A participant
+  (central bank or commercial bank). One file per participant; describes desired
+  deployment state without containing any private keys or credentials.
+type: object
+required:
+  - apiVersion
+  - kind
+  - metadata
+  - spec
+additionalProperties: false
+properties:
+  apiVersion:
+    type: string
+    enum:
+      - "cbweb3/v1"
+    description: "Schema version. Must be cbweb3/v1."
+
+  kind:
+    type: string
+    enum:
+      - "ParticipantDeployment"
+    description: "Resource type. Must be ParticipantDeployment."
+
+  metadata:
+    $ref: "#/definitions/Metadata"
+
+  spec:
+    $ref: "#/definitions/Spec"
+
+definitions:
+  Metadata:
+    type: object
+    required:
+      - name
+    additionalProperties: false
+    properties:
+      name:
+        type: string
+        minLength: 1
+        description: "Human-readable identifier for this deployment (e.g., central-bank-brazil)."
+
+  Spec:
+    type: object
+    required:
+      - scenario
+      - role
+      - mode
+      - spoke
+      - node
+      - image
+      - keyProvider
+      - certSource
+      - adminUsers
+    additionalProperties: false
+    properties:
+      scenario:
+        type: string
+        enum:
+          - "a"
+        description: "Scenario identifier. Must be 'a' (Scenario A — Enhanced Correspondent Banking). Scenario B is out of scope for this toolkit."
+
+      environment:
+        type: string
+        enum:
+          - "local"
+          - "staging"
+          - "prod"
+        description: "Named bundle of deployment defaults. Optional. 'local' uses container-network addressing, self-signed certificates, and a local KMS emulator. Overridden field-by-field by explicit values."
+
+      role:
+        type: string
+        enum:
+          - "central-bank"
+          - "commercial-bank"
+          - "noc"
+        description: "Role of this participant in the spoke. central-bank founds (mode: found), commercial-bank joins (mode: join), noc deploys the NOC control plane (mode: observe)."
+
+      mode:
+        type: string
+        enum:
+          - "found"
+          - "join"
+          - "observe"
+        description: "'found': creates a spoke + emits a join bundle. 'join': attaches to an existing spoke via joinBundleRef. 'observe': deploys the NOC control plane (portal + backend) consuming a nocBundleRef."
+
+      bankId:
+        type: string
+        minLength: 1
+        description: "Commercial-bank identifier within a spoke (mode:join). Optional — defaults to metadata.name. Feeds the CSR subject CN, the IdentityRegistry name, and the BANK_ID compose variable."
+
+      displayName:
+        type: string
+        minLength: 1
+        description: "Friendly institution label shown in the portal header (VITE_INSTITUTION_NAME), e.g. 'Itaú' instead of the slug 'bank-itau'. Optional and purely cosmetic — when omitted, the label falls back to the entity name (central bank) or the resolved bank code (commercial bank). Does not affect the CSR/IdentityRegistry identity."
+
+      cbEndpoint:
+        type: string
+        minLength: 1
+        description: "Central bank's credential-request URL (mode:found). Embedded into the emitted join bundle so a joining commercial bank knows where to submit its CSR."
+
+      spoke:
+        $ref: "#/definitions/Spoke"
+
+      node:
+        $ref: "#/definitions/Node"
+
+      image:
+        type: string
+        minLength: 1
+        description: "Container image source. 'build' to build from source, or a registry image reference (e.g., registry.lnet.example.com/cbweb3/api-gateway:1.2.0)."
+
+      keyProvider:
+        type: string
+        minLength: 1
+        description: "Key provider URI. 'kms://local-emulator' for local development. 'kms://...' for a real KMS in staging/prod. All cryptographic keys are managed through this provider — never inlined in the manifest."
+
+      certSource:
+        type: string
+        minLength: 1
+        description: "'self-signed' for local development (CB generates its own CA and signs CSRs). 'ca://<endpoint>' for CA-signed certificates in staging/prod."
+
+      relay:
+        $ref: "#/definitions/Relay"
+
+      joinBundleRef:
+        type: string
+        minLength: 1
+        description: "Path to the join bundle YAML file produced by a 'found' deployment (e.g., ./bundles/spoke-brl.bundle.yaml). Contextually required when mode is 'join'; schema-level conditional enforcement is deferred (see TK-3)."
+
+      nocBundleRef:
+        type: string
+        description: "Path to the NOC bundle emitted by a central bank's found. Required when mode is 'observe'; forbidden otherwise."
+
+      noc:
+        type: object
+        description: "NOC observability config (optional). In observe it tunes the deployment; in found/join it configures the entity's noc-agent."
+        properties:
+          backendURL: { type: string }
+          keycloakURL: { type: string }
+          launcherURL: { type: string }
+          pushIntervalSeconds: { type: integer, minimum: 0 }
+          components:
+            type: array
+            items:
+              enum: ["BESU", "PALADIN", "CACTI_RELAY"]
+
+      frontendHost:
+        type: string
+        minLength: 1
+        description: >
+          Optional. Hostname or IP baked into VITE_API_URL and VITE_KEYCLOAK_URL
+          at frontend build time. When omitted the engine uses "localhost", which
+          only works when the browser runs on the same machine as the Docker host.
+          Set this to a routable IP or DNS name when the frontend is accessed from
+          a remote machine (e.g. a cloud VM with a public IP such as 3.84.201.14).
+
+      fxPartyRoster:
+        type: array
+        minItems: 1
+        description: >
+          Optional static override for the FX-party roster (rendered as
+          PALADIN_IDENTITIES). The gateway normally federates the roster across
+          every spoke in the relay's registry (RELAY_URL): each spoke's central
+          bank gateway is queried for its local Pente membership, so cross-spoke
+          identities are discovered automatically and a new spoke appears
+          network-wide with no manifest edit. Set this only to pin/augment the
+          list explicitly (e.g. when no relay is reachable). Omit in normal
+          deployments — the union of this list, live local membership, and the
+          federated peers is served.
+        items:
+          type: string
+          minLength: 1
+
+      adminUsers:
+        type: array
+        minItems: 1
+        description: "Per-role human operator accounts provisioned in the entity's Keycloak realm(s). Portal/operator login uses these (password grant) instead of confidential client credentials, so audit logs carry a real actor. Required: one per role the entity hosts (central-bank: ROLE_GOVERNANCE, ROLE_TREASURY, ROLE_SUPERVISOR, ROLE_NOC_ADMIN; commercial-bank: ROLE_BANK). FUTURE: source the password from a secret store, never commit it for staging/prod."
+        items:
+          $ref: "#/definitions/AdminUser"
+
+      launcher:
+        type: string
+        enum: [enable, disable]
+        description: "Per-entity launcher (distributed A/B entry point on this entity's host). 'enable' runs the generic launcher image and writes this scenario's portal fragment; 'disable' removes it and tears the launcher down when no scenario fragment remains. Optional."
+
+      launcherPort:
+        type: integer
+        minimum: 1
+        maximum: 65535
+        description: "Host port for this entity's launcher (one launcher per host; distinct per entity, same value in A and B so both scenarios share it). Optional: falls back to the LAUNCHER_PORT env, then 5190."
+
+  AdminUser:
+    type: object
+    required:
+      - role
+      - username
+      - password
+    additionalProperties: false
+    properties:
+      role:
+        type: string
+        description: "Keycloak realm role granted to the user; also selects the realm (ROLE_GOVERNANCE/ROLE_TREASURY/ROLE_SUPERVISOR -> central-bank realm; ROLE_NOC_ADMIN -> cbweb3/NOC realm; ROLE_BANK -> bank realm)."
+      username:
+        type: string
+        minLength: 1
+        description: "Login username (email-style; encode the spoke for commercial banks, e.g. admin@itau.brasil.com)."
+      password:
+        type: string
+        minLength: 1
+        description: "Local-profile password. FUTURE: source from a secret store and use a temporary password for staging/prod; never commit a real credential."
+
+  Spoke:
+    type: object
+    required:
+      - id
+      - chainId
+      - currency
+    additionalProperties: false
+    properties:
+      id:
+        type: string
+        minLength: 1
+        description: "Unique identifier for this spoke (e.g., spoke-brl). Used to key settlement legs and relay routing."
+
+      chainId:
+        type: integer
+        minimum: 1
+        description: "EVM chain ID for this spoke's Besu network (e.g., 1337 for local dev)."
+
+      currency:
+        type: string
+        minLength: 1
+        description: "ISO 4217 currency code for this spoke (e.g., BRL, USD, EUR)."
+
+      fiatTokenName:
+        type: string
+        minLength: 1
+        description: >
+          Optional override for the ERC-20 name of this spoke's fCeBM. Absent, it
+          derives from `currency` as "Fiat <ISO>" (e.g. "Fiat BRL"). Presentation
+          only — `currency` remains the semantic key and is what the portals show.
+
+      fiatTokenSymbol:
+        type: string
+        pattern: "^[^\\s]+_[^\\s_]+$"
+        description: >
+          Optional override for the ERC-20 symbol of this spoke's fCeBM. Absent, it
+          derives from `currency` as "fCeBM_<ISO>" (e.g. "fCeBM_BRL"). It must keep
+          the "<prefix>_<ISO>" shape and end in this spoke's own currency; the
+          semantic rule (segment after the last underscore == currency) is enforced
+          by the Go validator.
+
+  Node:
+    type: object
+    required:
+      - advertisedHost
+    additionalProperties: false
+    properties:
+      advertisedHost:
+        type: string
+        minLength: 1
+        description: >
+          Required. The externally reachable address of this Besu node used in the enode URL.
+          Must be set explicitly — NEVER inferred from co-location or container IP.
+          In local deployments, use the container DNS name
+          (e.g., cbweb3-spoke-brl-besu.central-bank-brazil).
+          In production, use the real public hostname or IP.
+
+      rpc:
+        $ref: "#/definitions/Port"
+        description: "JSON-RPC endpoint port. Defaults applied by the 'environment' preset when omitted."
+
+      ws:
+        $ref: "#/definitions/Port"
+        description: "WebSocket endpoint port. Defaults applied by the 'environment' preset when omitted."
+
+      p2p:
+        $ref: "#/definitions/Port"
+        description: "P2P (enode) port for Besu peer discovery. Defaults applied by the 'environment' preset when omitted."
+
+      dataDir:
+        type: string
+        minLength: 1
+        description: >
+          Host path where the provisioning engine stores all spoke runtime data:
+          genesis files, TLS certs, Paladin configs, provisioning state, and deployed
+          contract addresses. May be absolute, or relative — relative paths are
+          resolved against the current working directory of the cbweb3 process.
+          Required for mode:found and mode:join.
+
+  Port:
+    type: object
+    required:
+      - port
+    additionalProperties: false
+    properties:
+      port:
+        type: integer
+        minimum: 1
+        maximum: 65535
+        description: "TCP port number (1–65535)."
+
+  Relay:
+    type: object
+    required:
+      - endpoint
+    additionalProperties: false
+    properties:
+      endpoint:
+        type: string
+        minLength: 1
+        description: "HTTP(S) URL of the LNET-operated Cacti relay (e.g., http://cbweb3-cacti:4000). The relay is centrally operated by LNET; individual banks never run their own relay."
+
+      advertisedHost:
+        type: string
+        minLength: 1
+        description: >
+          Optional. Host the relay uses to reach this spoke's host-published
+          endpoints (Besu RPC/WS, payment-orchestrator gRPC, CB api-gateway)
+          during register-relay. When omitted, defaults to host.docker.internal,
+          which only works when the relay is co-located on the same Docker host.
+          Set to a routable IP or hostname when the relay runs on a different
+          host. Only the host is overridden — the published ports are unchanged.

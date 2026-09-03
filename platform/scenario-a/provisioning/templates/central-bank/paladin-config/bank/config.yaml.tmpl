@@ -1,0 +1,134 @@
+nodeName: {{.SpokeID}}-{{.NodeName}}
+
+log:
+  level: debug
+
+db:
+  sqlite:
+    dsn: "/data/paladin.db"
+    autoMigrate: true
+    migrationsDir: "./db/migrations/sqlite"
+    debugQueries: false
+
+rpcServer:
+  enabled: true
+  http:
+    port: 8548
+    address: 0.0.0.0
+    # Paladin ships a web UI (React SPA baked into the image at /app/ui). It is
+    # only reachable when the RPC HTTP listener is given this static-file server —
+    # otherwise the listener answers JSON-RPC only and /ui returns 404. Same
+    # defaults the Paladin operator injects when it renders a node config.
+    staticServers:
+      - enabled: true
+        staticPath: /app/ui
+        urlPath: /ui
+        baseRedirect: ui/activity
+  ws:
+    port: 8549
+    address: 0.0.0.0
+
+# Besu {{.NodeName}} node (host port {{.BesuRPCPort}}/{{.BesuWSPort}})
+blockchain:
+  http:
+    url: "http://host.docker.internal:{{.BesuRPCPort}}"
+  ws:
+    url: "ws://host.docker.internal:{{.BesuWSPort}}"
+
+transports:
+  grpc:
+    plugin:
+      type: "c-shared"
+      library: "/app/transports/libgrpc.so"
+    config:
+      port: 9000
+      address: 0.0.0.0
+      externalHostname: paladin-{{.SpokeID}}-{{.NodeName}}
+      tls:
+        certFile: /etc/paladin/tls.crt
+        keyFile: /etc/paladin/tls.key
+
+domains:
+  zeto:
+    registryAddress: "{{.ZetoFactoryAddress}}"
+    allowSigning: true
+    fixedSigningIdentity: "funded_operator"
+    plugin:
+      type: "c-shared"
+      library: "/app/domains/libzeto.so"
+    config:
+      domainContracts:
+        implementations:
+          - name: "Zeto_Anon"
+            circuits:
+              deposit:
+                name: "deposit"
+              withdraw:
+                name: "withdraw"
+              transfer:
+                name: "anon"
+              transferLocked:
+                name: "anon"
+      snarkProver:
+        circuitsDir: "/app/domains/zeto/zkp"
+        provingKeysDir: "/app/domains/zeto/zkp"
+  pente:
+    registryAddress: "{{.PenteFactoryAddress}}"
+    allowSigning: true
+    fixedSigningIdentity: "funded_operator"
+    plugin:
+      type: "jar"
+      library: "/app/domains/pente.jar"
+      class: "io.kaleido.paladin.pente.domain.PenteDomainFactory"
+    config:
+      enabled: true
+      privateMTX: true
+
+registries:
+  evm-registry:
+    plugin:
+      type: "c-shared"
+      library: "/app/registries/libevm.so"
+    config:
+      contractAddress: "{{.RegistryContractAddress}}"
+
+wallets:
+  - name: "funded_wallet"
+    keySelector: "^funded_operator$"
+    signer:
+      keyStore:
+        type: static
+        static:
+          keys:
+            funded_operator:
+              encoding: hex
+              # Per-bank unique base-ledger submitter key (rendered by fundedOperatorKey): a shared
+              # key collides on nonce with co-located banks on the spoke's Besu and wedges deploys.
+              inline: "{{.FundedOperatorKey}}"
+      keyDerivation:
+        type: direct
+  - name: "hd_wallet"
+    keySelector: ".*"
+    signer:
+      keyStore:
+        type: filesystem
+        filesystem:
+          path: /data/keystore
+      keyDerivation:
+        type: bip32
+
+publicTxManager:
+  gasLimit:
+    gasEstimateFactor: 2.0
+  gasPrice:
+    # Zero gas price so the per-bank funded_operator (a unique, unfunded key — see
+    # fundedOperatorKey) can submit base-ledger txs. The spoke genesis sets zeroBaseFee and Besu
+    # runs with --min-gas-price=0, so a 0-price tx is valid; with a non-zero maxFeePerGas Paladin's
+    # publicTxManager computes a cost and rejects the unfunded account with "insufficient funds".
+    fixedGasPrice:
+      maxFeePerGas: "0"
+      maxPriorityFeePerGas: "0"
+
+persistence:
+  leveldb:
+    path: "/data/leveldb"

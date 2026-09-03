@@ -1,0 +1,200 @@
+# Template Compose — central-bank (TK-4)
+# Provisioning toolkit for Scenario A — Enhanced Correspondent Banking.
+#
+# USAGE: Invoked by the orchestration engine (TK-5). Do NOT run directly
+# without setting all required variables.
+#
+# REQUIRED variables (no default — docker compose fails explicitly if absent):
+#   SPOKE_ID              Spoke identifier (e.g. spoke-brl)
+#   BESU_RPC_PORT         Host port mapped to Besu RPC HTTP (internal: 8545)
+#   BESU_WS_PORT          Host port mapped to Besu RPC WS  (internal: 8546)
+#   BESU_P2P_PORT         Host port mapped to Besu P2P     (internal: 30303)
+#   BESU_IMAGE            Besu Docker image (e.g. hyperledger/besu:25.8.0)
+#   HOST_UID              Host user ID for genesis-init (prevents root-owned files)
+#   HOST_GID              Host group ID for genesis-init
+#
+# STORAGE: no SPOKE_DATA_DIR bind mount — all spoke state (config, genesis, chain
+# data) lives on named Docker volumes, seeded directly from the orchestration
+# engine's memory via engine/dockervolume (no host filesystem involved). This is a
+# deviation from the original TK-4 design; see the addendum in
+# specs/026-tk4-compose-central-bank/plan.md.
+#
+# OPTIONAL variables (with sensible defaults):
+#   BOOTNODE_ENODE        Enode of the network bootnode. Empty = this node IS the bootnode (mode: found).
+#                         If set to a DNS-name enode, entry.sh resolves it to IP before passing to Besu.
+#   SPOKE_NETWORK_NAME    Docker network name (default: cbweb3-${SPOKE_ID}-besu)
+#   BESU_CONTAINER_NAME   Container name for the Besu node
+#   BESU_NAT_PROFILE      NAT addressing profile: DOCKER (default, local cross-compose)
+#                         or NONE (intra-compose / prod with explicit BESU_ADVERTISED_HOST).
+#                         Per ADR-001 three-profile matrix.
+#   BESU_ADVERTISED_HOST  Host declared for this node's enode. Required for all profiles:
+#                         DOCKER profile does not pass --p2p-host to Besu (ADR-001 D1), but
+#                         TK-5 always needs this value to construct the join bundle enode.
+#                         NONE profile also passes it as --p2p-host.
+#   BESU_LOGGING          Besu log level (default: INFO)
+#   BESU_HOST_ALLOWLIST   Comma-separated host allowlist for RPC (default: '*' — restrict in prod)
+#   BESU_CORS_ORIGINS     CORS origins for RPC HTTP (default: 'all' — restrict in prod)
+
+services:
+
+  # ─── Volume permissions init ────────────────────────────────────────────────
+  # besu_data, cb_genesis and cb_scratch are fresh named volumes owned by root by
+  # default. genesis-init runs as HOST_UID:HOST_GID (see below) and must write
+  # into all three (chain data, genesis, and the generate-blockchain-config
+  # scratch output), so they all need to be world-writable first. Same pattern as
+  # paladin-data-init (commercial-bank/paladin-compose.yaml,
+  # central-bank/paladin-compose.yaml).
+  besu-volumes-init:
+    image: alpine:3.23
+    user: "0:0"
+    volumes:
+      - besu_data:/data/besu
+      - cb_genesis:/data/genesis
+      - cb_scratch:/data/scratch
+    command: ["sh", "-c", "chmod -R 777 /data/besu /data/genesis /data/scratch"]
+    restart: "no"
+
+  # ─── Genesis init container ────────────────────────────────────────────────
+  # Runs once. Generates genesis + validator keys only if genesis.json does not
+  # already exist. On subsequent runs, exits 0 immediately (idempotency guard).
+  # The 'besu' service starts only after this completes successfully.
+  #
+  # config/qbftConfigFile.json is seeded into cb_config by the engine
+  # (step_start_besu_found.go) BEFORE `docker compose up` runs — no bind mount, no
+  # separate seed service needed here.
+  genesis-init:
+    image: ${BESU_IMAGE?BESU_IMAGE is required (e.g. hyperledger/besu:25.8.0)}
+    container_name: ${BESU_CONTAINER_NAME:-cbweb3-${SPOKE_ID}-besu}-genesis-init
+    restart: "no"
+    depends_on:
+      besu-volumes-init:
+        condition: service_completed_successfully
+    # Run as the host user to avoid genesis files owned by root (T028 / ADR-001)
+    user: "${HOST_UID?HOST_UID is required (use: id -u)}:${HOST_GID?HOST_GID is required (use: id -g)}"
+    volumes:
+      - cb_config:/config:ro
+      - cb_genesis:/genesis
+      # Scratch space for `besu operator generate-blockchain-config` output
+      # (networkFiles/). Purely intermediate — nothing outside this container's
+      # single run ever reads it, so it needs no host visibility either.
+      - cb_scratch:/nodes
+      # Shadows /nodes/central-bank/data with the named volume the besu service
+      # reads its data dir from, so the validator key copied below lands where
+      # besu actually looks for it.
+      - besu_data:/nodes/central-bank/data
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        if [ -f /genesis/genesis.json ]; then
+          if ! [ -s /genesis/genesis.json ]; then
+            echo "[genesis-init][spoke=${SPOKE_ID}] ERROR: genesis.json exists but is empty — remove it and re-run."
+            exit 1
+          fi
+          FIRST_CHAR=$$(head -c 1 /genesis/genesis.json)
+          if [ "$$FIRST_CHAR" != "{" ]; then
+            echo "[genesis-init][spoke=${SPOKE_ID}] ERROR: genesis.json is malformed (first char is not '{') — remove it and re-run."
+            exit 1
+          fi
+          echo "[genesis-init][spoke=${SPOKE_ID}] genesis.json already exists and is valid, skipping generation."
+          exit 0
+        fi
+        echo "[genesis-init][spoke=${SPOKE_ID}] Generating genesis from /config/qbftConfigFile.json..."
+        /opt/besu/bin/besu operator generate-blockchain-config \
+          --config-file=/config/qbftConfigFile.json \
+          --to=/nodes/networkFiles \
+          --private-key-file-name=key
+        cp /nodes/networkFiles/genesis.json /genesis/genesis.json
+        if [ -d /nodes/networkFiles/keys ]; then
+          # Copy the first key set to central-bank/data (single-node template)
+          KEY_DIR=$$(ls -d /nodes/networkFiles/keys/*/ 2>/dev/null | head -1)
+          if [ -n "$$KEY_DIR" ]; then
+            if [ ! -d /nodes/central-bank/data ]; then
+              echo "[genesis-init][spoke=${SPOKE_ID}] ERROR: /nodes/central-bank/data does not exist — check the besu_data volume mount."
+              exit 1
+            fi
+            cp "$$KEY_DIR/key" /nodes/central-bank/data/key
+            cp "$$KEY_DIR/key.pub" /nodes/central-bank/data/key.pub
+          fi
+        fi
+        echo "[genesis-init][spoke=${SPOKE_ID}] Done."
+    networks:
+      - spoke_besu
+
+  # ─── Besu node (central-bank / bootnode) ───────────────────────────────────
+  besu:
+    image: ${BESU_IMAGE}
+    container_name: ${BESU_CONTAINER_NAME:-cbweb3-${SPOKE_ID}-besu.central-bank}
+    restart: always
+    depends_on:
+      genesis-init:
+        condition: service_completed_successfully
+    volumes:
+      - besu_data:/opt/besu/data
+      - cb_genesis:/opt/besu/genesis:ro
+      - ./scripts/entry.sh:/entry.sh:ro
+    ports:
+      - "${BESU_RPC_PORT?BESU_RPC_PORT is required}:8545"
+      - "${BESU_WS_PORT?BESU_WS_PORT is required}:8546"
+      - "${BESU_P2P_PORT?BESU_P2P_PORT is required}:30303"
+      - "${BESU_P2P_PORT}:30303/udp"
+    environment:
+      # All consumed by entry.sh — keeps the entrypoint stateless
+      SPOKE_ID: ${SPOKE_ID?SPOKE_ID is required}
+      BESU_NAT_PROFILE: ${BESU_NAT_PROFILE:-DOCKER}
+      BESU_ADVERTISED_HOST: ${BESU_ADVERTISED_HOST:?BESU_ADVERTISED_HOST is required}
+      BESU_P2P_PORT: "30303"
+      BESU_RPC_PORT_INTERNAL: "8545"
+      BESU_WS_PORT_INTERNAL: "8546"
+      BESU_LOGGING: ${BESU_LOGGING:-INFO}
+      BESU_HOST_ALLOWLIST: ${BESU_HOST_ALLOWLIST:-*}
+      BESU_CORS_ORIGINS: ${BESU_CORS_ORIGINS:-all}
+      BOOTNODE_ENODE: ${BOOTNODE_ENODE:-}
+    entrypoint: ["/bin/sh", "/entry.sh"]
+    healthcheck:
+      # The pinned hyperledger/besu image ships no curl/wget/nc, so an HTTP client
+      # cannot be shelled out to (the old curl-based probe always failed with
+      # "curl: not found", flapping the node to unhealthy despite a working RPC).
+      # The image does ship bash, so probe the JSON-RPC endpoint with a /dev/tcp
+      # POST and assert eth_blockNumber returns a "result".
+      test:
+        - CMD
+        - bash
+        - -c
+        - |
+          body='{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+          exec 3<>/dev/tcp/localhost/8545 || exit 1
+          printf 'POST / HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s' "$${#body}" "$$body" >&3
+          grep -q '"result"' <&3
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 15s
+    networks:
+      spoke_besu:
+        # Register the advertised host as a network alias so a joining bank's node
+        # (on the same shared spoke network) can resolve the bootnode enode, which
+        # is built from BESU_ADVERTISED_HOST and need not match container_name.
+        aliases:
+          - ${BESU_ADVERTISED_HOST}
+
+networks:
+  spoke_besu:
+    name: ${SPOKE_NETWORK_NAME:-cbweb3-${SPOKE_ID}-besu}
+    driver: bridge
+
+volumes:
+  # Named (not a SPOKE_DATA_DIR bind mount) — deviation from the original TK-4
+  # design (specs/026-tk4-compose-central-bank/plan.md, data-model.md), which chose
+  # bind mounts for host-visible/portable spoke state. None of config/genesis/chain
+  # data need host-side inspection, so all four follow the same named-volume
+  # pattern already used for Paladin (cb_data/bank_data) and Postgres (pg_data).
+  besu_data:
+    name: ${SPOKE_ID}_cb_besu_data
+  cb_config:
+    name: ${SPOKE_ID}_cb_config
+  cb_genesis:
+    name: ${SPOKE_ID}_cb_genesis
+  cb_scratch:
+    name: ${SPOKE_ID}_cb_scratch

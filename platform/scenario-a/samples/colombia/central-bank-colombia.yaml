@@ -1,0 +1,72 @@
+# yaml-language-server: $schema=../../provisioning/schema/v1/participant-deployment.schema.yaml
+#
+# Banco central da Colômbia — funda o spoke colombiano (spoke-cop).
+# mode: found  → nó bootnode próprio, contratos próprios, join bundle próprio
+#                (samples/bundles/spoke-cop.bundle.yaml). Spoke independente do BRL.
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-colombia
+spec:
+  scenario: a
+  environment: local
+  role: central-bank
+  mode: found
+  displayName: Banco de la República
+  spoke:
+    id: spoke-cop
+    chainId: 1338
+    currency: COP
+    # ERC-20 metadata of this spoke's own fCeBM (the public Besu-layer fiat token).
+    # Optional — absent, both derive from `currency` (exactly the values below).
+    # Declared explicitly so each spoke's token identity is auditable in config.
+    # The symbol must keep the "<prefix>_<ISO>" shape and end in this spoke's own
+    # currency; `currency` stays the semantic key the portals display.
+    fiatTokenName: Fiat COP
+    fiatTokenSymbol: fCeBM_COP
+  node:
+    advertisedHost: cbweb3-spoke-cop-besu.central-bank-colombia
+    rpc:
+      port: 8745
+    ws:
+      port: 8755
+    p2p:
+      port: 31403
+    dataDir: cbweb3-data/central-bank-colombia
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  # Relay Cacti local (RL-1) — precisa estar no ar antes do apply (register-relay e hard).
+  relay:
+    endpoint: http://localhost:4000
+    # advertisedHost (opcional): host que o relay usa para alcancar os endpoints
+    # publicados deste spoke (Besu RPC/WS, gRPC do payment-orchestrator, api-gateway
+    # do CB) no register-relay. Omitido → host.docker.internal (relay no mesmo host
+    # Docker). Defina um IP/hostname roteavel quando o relay rodar em outro host.
+    # advertisedHost: 10.0.0.7
+  cbEndpoint: http://cbweb3-api-gateway.central-bank-colombia:8080/api/v1/onboarding/credential-request
+  # Operadores humanos (login por papel via ROPC). Obrigatório: um por papel.
+  # FUTURO: senha deve vir de um secret store (não do manifesto) em staging/prod.
+  # frontendHost (opcional): hostname/IP embutido em VITE_API_URL e VITE_KEYCLOAK_URL
+  # no build do frontend. Omitido → "localhost" (só funciona quando o browser roda na
+  # mesma máquina do host Docker). Defina um IP/DNS roteável quando o frontend for
+  # acessado de uma máquina remota (ex.: uma VM na nuvem com IP público 3.84.201.14).
+  # frontendHost: 3.84.201.14
+  launcher: enable
+  launcherPort: 5197
+  adminUsers:
+    - role: ROLE_GOVERNANCE
+      username: admin@colombia.governance.gov
+      password: colombia-governance-local
+    - role: ROLE_TREASURY
+      username: admin@colombia.treasury.gov
+      password: colombia-treasury-local
+    - role: ROLE_SUPERVISOR
+      username: admin@colombia.supervisor.gov
+      password: colombia-supervisor-local
+    - role: ROLE_NOC_ADMIN
+      username: admin@colombia.noc.gov
+      password: colombia-noc-local
+  # Reverse proxy off — these many-entity single-host samples are port-based via the
+  # per-entity launcher. Test the proxy separately with proxy-smoke.sh (one entity per host).
+  proxy: disable

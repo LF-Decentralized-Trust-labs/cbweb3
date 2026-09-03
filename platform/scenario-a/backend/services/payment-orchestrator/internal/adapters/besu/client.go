@@ -1,0 +1,243 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Package besu provides the on-chain HTLC contract adapter for Besu.
+// It calls HashTimeLockedContract.sol's lock/settle/refund via go-ethereum.
+package besu
+
+import (
+	"bytes"
+	"context"
+	"crypto/ecdsa"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"log/slog"
+	"math/big"
+	"strings"
+	"time"
+
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
+	gethrpc "github.com/ethereum/go-ethereum/rpc"
+
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
+)
+
+var _ ports.HTLCContractPort = (*Client)(nil)
+
+// htlcABIJSON mirrors HashTimeLockedContract.sol's external surface. The custom
+// error entries (type:"error") let go-ethereum decode a revert selector returned
+// by eth_estimateGas back to a named error — e.g. HTLC__NotSender (R2-H-1) —
+// instead of surfacing an opaque "execution reverted" to operators
+// (Constitution Principle VI — observability). Keep these in sync with
+// IHashTimeLockedContract.sol.
+const htlcABIJSON = `[{"inputs":[{"name":"contractId","type":"bytes32"},{"name":"receiver","type":"address"},{"name":"hashLock","type":"bytes32"},{"name":"timeLock","type":"uint256"},{"name":"zetoLockRef","type":"bytes32"},{"name":"agreementId","type":"bytes32"}],"name":"lock","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"contractId","type":"bytes32"},{"name":"secret","type":"bytes32"}],"name":"settle","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"contractId","type":"bytes32"}],"name":"refund","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"commitment","type":"bytes32"}],"name":"registerAgreementCommitment","outputs":[],"stateMutability":"nonpayable","type":"function"},{"type":"error","name":"HTLC__ContractAlreadyExists","inputs":[]},{"type":"error","name":"HTLC__ContractNotLocked","inputs":[]},{"type":"error","name":"HTLC__InvalidSecret","inputs":[]},{"type":"error","name":"HTLC__TimeLockNotExpired","inputs":[]},{"type":"error","name":"HTLC__TimeLockExpired","inputs":[]},{"type":"error","name":"HTLC__NotSender","inputs":[{"name":"caller","type":"address"}]},{"type":"error","name":"HTLC__ParticipantNotVerified","inputs":[{"name":"account","type":"address"}]},{"type":"error","name":"HTLC__AgreementNotAccepted","inputs":[]},{"type":"error","name":"HTLC__AgreementExpired","inputs":[]},{"type":"error","name":"HTLC__CommitmentNotAccepted","inputs":[]}]`
+
+// ClientConfig holds the configuration for the Besu HTLC client.
+type ClientConfig struct {
+	RPCURL        string // Besu JSON-RPC URL
+	ChainID       int64  // Besu chain ID
+	HTLCAddress   string // Deployed HashTimeLockedContract address
+	PrivateKeyHex string // Operator private key for signing transactions
+}
+
+// Client implements ports.HTLCContractPort using go-ethereum.
+type Client struct {
+	ethClient   *ethclient.Client
+	htlcAddress common.Address
+	htlcABI     abi.ABI
+	privateKey  *ecdsa.PrivateKey
+	fromAddress common.Address
+	chainID     *big.Int
+	logger      *slog.Logger
+}
+
+// NewClient creates a new Besu HTLC client.
+func NewClient(cfg ClientConfig, logger *slog.Logger) (*Client, error) {
+	ethClient, err := ethclient.Dial(cfg.RPCURL)
+	if err != nil {
+		return nil, fmt.Errorf("dial besu %s: %w", cfg.RPCURL, err)
+	}
+
+	parsed, err := abi.JSON(strings.NewReader(htlcABIJSON))
+	if err != nil {
+		return nil, fmt.Errorf("parse HTLC ABI: %w", err)
+	}
+
+	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(cfg.PrivateKeyHex, "0x"))
+	if err != nil {
+		return nil, fmt.Errorf("parse private key: %w", err)
+	}
+
+	fromAddress := crypto.PubkeyToAddress(privateKey.PublicKey)
+
+	return &Client{
+		ethClient:   ethClient,
+		htlcAddress: common.HexToAddress(cfg.HTLCAddress),
+		htlcABI:     parsed,
+		privateKey:  privateKey,
+		fromAddress: fromAddress,
+		chainID:     big.NewInt(cfg.ChainID),
+		logger:      logger,
+	}, nil
+}
+
+func (c *Client) Lock(ctx context.Context, params ports.HTLCLockParams) (string, error) {
+	// The receiver in the gRPC request is usually a Paladin identity (e.g.
+	// "funded_operator@spoke-a-bank-c"), not an Ethereum address. In that case fall back to the
+	// operator's own (registry-verified) address for the on-chain coordination record — the actual
+	// token recipient is tracked privately by Zeto/Paladin, and the HTLC receiver field is only a
+	// public coordination marker.
+	//
+	// The predicate MUST be common.IsHexAddress(params.Receiver), NOT a zero-address check on the
+	// parsed value: common.HexToAddress is lenient and coerces a non-address string into a NON-zero
+	// garbage address (e.g. "funded_operator@…" -> 0x000…000F). A zero-address check therefore never
+	// fires for identity strings, and the garbage address — which is not a registered participant —
+	// makes the HTLC's onlyVerified(receiver) gate revert with HTLC__ParticipantNotVerified.
+	receiver := common.HexToAddress(params.Receiver)
+	if !common.IsHexAddress(params.Receiver) {
+		receiver = c.fromAddress
+	}
+	data, err := c.htlcABI.Pack("lock",
+		params.ContractID,
+		receiver,
+		params.HashLock,
+		new(big.Int).SetUint64(params.TimeLock),
+		params.ZetoLockRef,
+		params.AgreementID,
+	)
+	if err != nil {
+		return "", fmt.Errorf("pack lock: %w", err)
+	}
+	return c.sendTx(ctx, data, "lock")
+}
+
+func (c *Client) Settle(ctx context.Context, contractID [32]byte, secret [32]byte) (string, error) {
+	data, err := c.htlcABI.Pack("settle", contractID, secret)
+	if err != nil {
+		return "", fmt.Errorf("pack settle: %w", err)
+	}
+	return c.sendTx(ctx, data, "settle")
+}
+
+func (c *Client) Refund(ctx context.Context, contractID [32]byte) (string, error) {
+	data, err := c.htlcABI.Pack("refund", contractID)
+	if err != nil {
+		return "", fmt.Errorf("pack refund: %w", err)
+	}
+	return c.sendTx(ctx, data, "refund")
+}
+
+func (c *Client) RegisterAgreementCommitment(ctx context.Context, commitment [32]byte) (string, error) {
+	data, err := c.htlcABI.Pack("registerAgreementCommitment", commitment)
+	if err != nil {
+		return "", fmt.Errorf("pack registerAgreementCommitment: %w", err)
+	}
+	return c.sendTx(ctx, data, "registerAgreementCommitment")
+}
+
+func (c *Client) sendTx(ctx context.Context, data []byte, method string) (string, error) {
+	nonce, err := c.ethClient.PendingNonceAt(ctx, c.fromAddress)
+	if err != nil {
+		return "", fmt.Errorf("get nonce: %w", err)
+	}
+
+	// Every spoke genesis sets zeroBaseFee and Besu runs with --min-gas-price=0
+	// (see step_start_besu_found.go), so gas is always free by design — operator
+	// accounts (including a freshly joined bank's, which no step ever funds
+	// natively) are expected to transact with zero balance. Do NOT use
+	// SuggestGasPrice/eth_gasPrice here: Besu's gas price oracle can return a
+	// non-zero default (e.g. 1 gwei) until enough zero-fee blocks accumulate
+	// after a spoke is founded, which fails eth_estimateGas's upfront-cost check
+	// (gasLimit * gasPrice > 0 balance) for any zero-balance account — a
+	// timing-dependent false rejection unrelated to actual funds availability.
+	gasPrice := big.NewInt(0)
+
+	auth, err := bind.NewKeyedTransactorWithChainID(c.privateKey, c.chainID)
+	if err != nil {
+		return "", fmt.Errorf("create transactor: %w", err)
+	}
+	auth.Nonce = new(big.Int).SetUint64(nonce)
+	auth.GasPrice = gasPrice
+	auth.GasLimit = 500_000
+	auth.Context = ctx
+
+	// Estimate gas first to detect contract reverts before submitting the tx.
+	msg := ethereum.CallMsg{
+		From:     c.fromAddress,
+		To:       &c.htlcAddress,
+		GasPrice: gasPrice,
+		Data:     data,
+	}
+	if estimatedGas, estErr := c.ethClient.EstimateGas(ctx, msg); estErr != nil {
+		if reason := c.decodeRevertReason(estErr); reason != "" {
+			return "", fmt.Errorf("%s call would revert (%s): %w", method, reason, estErr)
+		}
+		return "", fmt.Errorf("%s call would revert: %w", method, estErr)
+	} else {
+		auth.GasLimit = estimatedGas * 120 / 100 // 20% headroom
+	}
+
+	boundContract := bind.NewBoundContract(c.htlcAddress, c.htlcABI, c.ethClient, c.ethClient, c.ethClient)
+
+	signedTx, err := boundContract.RawTransact(auth, data)
+	if err != nil {
+		return "", fmt.Errorf("send %s tx: %w", method, err)
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	receipt, err := bind.WaitMined(waitCtx, c.ethClient, signedTx)
+	if err != nil {
+		return "", fmt.Errorf("wait %s receipt: %w", method, err)
+	}
+
+	if receipt.Status == 0 {
+		return "", fmt.Errorf("%s transaction reverted: %s", method, signedTx.Hash().Hex())
+	}
+
+	c.logger.Info("HTLC on-chain tx confirmed",
+		"method", method,
+		"tx_hash", signedTx.Hash().Hex(),
+		"block", receipt.BlockNumber.Uint64(),
+	)
+
+	return signedTx.Hash().Hex(), nil
+}
+
+// decodeRevertReason maps an EVM revert returned by eth_estimateGas to a named
+// HTLC custom error (e.g. "HTLC__NotSender(0x…)") using the error entries in the
+// ABI, so a rejected refund/settle surfaces its cause to operators instead of an
+// opaque "execution reverted" (Constitution Principle VI — observability).
+// Returns "" when the error carries no decodable revert data or the selector does
+// not match a known HTLC error. Best-effort only: never fails the call itself.
+func (c *Client) decodeRevertReason(err error) string {
+	var dataErr gethrpc.DataError
+	if !errors.As(err, &dataErr) {
+		return ""
+	}
+	raw, ok := dataErr.ErrorData().(string)
+	if !ok {
+		return ""
+	}
+	data, decErr := hex.DecodeString(strings.TrimPrefix(raw, "0x"))
+	if decErr != nil || len(data) < 4 {
+		return ""
+	}
+	for name, abiErr := range c.htlcABI.Errors {
+		if !bytes.Equal(abiErr.ID.Bytes()[:4], data[:4]) {
+			continue
+		}
+		// Include decoded args (e.g. the offending caller) when present.
+		if args, unpackErr := abiErr.Inputs.Unpack(data[4:]); unpackErr == nil && len(args) > 0 {
+			return fmt.Sprintf("%s%v", name, args)
+		}
+		return name
+	}
+	return ""
+}

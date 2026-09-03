@@ -1,0 +1,6 @@
+# Central drop-zone for all LNET join/hub bundles (under deploy-lnet/bundles/).
+# hub/                        → hub.bundle.yaml + hub dataDir state (VM .20)
+# scenario-a/<spoke>/         → CB dataDir + <spoke>.bundle.yaml (join input)
+# scenario-a/<bankId>/        → commercial-bank dataDir + .provisioning-state.yaml
+# scenario-b/<spoke>/         → CB dataDir + <spoke>.bundle.yaml (join input)
+# scenario-b/<bankId>/        → commercial-bank dataDir + .provisioning-state.yaml

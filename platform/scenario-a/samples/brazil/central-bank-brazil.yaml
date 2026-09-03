@@ -1,0 +1,83 @@
+# yaml-language-server: $schema=../../provisioning/schema/v1/participant-deployment.schema.yaml
+#
+# Banco central do Brasil — funda o spoke brasileiro (spoke-brl).
+# mode: found  → este nó é o bootnode, faz deploy dos contratos do spoke e
+#                emite o join bundle (samples/bundles/spoke-brl.bundle.yaml).
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-brazil
+spec:
+  scenario: a
+  environment: local
+  role: central-bank
+  mode: found
+  displayName: Banco Central do Brasil
+  spoke:
+    id: spoke-brl
+    chainId: 1337
+    currency: BRL
+    # ERC-20 metadata of this spoke's own fCeBM (the public Besu-layer fiat token).
+    # Optional — absent, both derive from `currency` (exactly the values below).
+    # Declared explicitly so each spoke's token identity is auditable in config.
+    # The symbol must keep the "<prefix>_<ISO>" shape and end in this spoke's own
+    # currency; `currency` stays the semantic key the portals display.
+    fiatTokenName: Fiat BRL
+    fiatTokenSymbol: fCeBM_BRL
+  node:
+    advertisedHost: cbweb3-spoke-brl-besu.central-bank-brazil
+    rpc:
+      port: 8645
+    ws:
+      port: 8655
+    p2p:
+      port: 31303
+    dataDir: cbweb3-data/central-bank-brazil
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  # Relay Cacti local (RL-1). O passo register-relay e obrigatorio (hard): o relay
+  # precisa estar no ar ANTES do apply. Suba-o com provisioning/scripts/start-cacti.sh.
+  # O toolkit roda no host, entao usa a porta publicada (localhost:4000).
+  relay:
+    endpoint: http://localhost:4000
+    # advertisedHost (opcional): host que o relay usa para alcancar os endpoints
+    # publicados deste spoke (Besu RPC/WS, gRPC do payment-orchestrator, api-gateway
+    # do CB) no register-relay. Omitido → host.docker.internal (relay no mesmo host
+    # Docker). Defina um IP/hostname roteavel quando o relay rodar em outro host.
+    # advertisedHost: 10.0.0.7
+  # Endpoint de credential-request do CB, embutido no join bundle para que os
+  # bancos comerciais saibam onde submeter o CSR (mode: join).
+  cbEndpoint: http://cbweb3-api-gateway.central-bank-brazil:8080/api/v1/onboarding/credential-request
+  # Operadores humanos (login por papel via ROPC). Substituem o login por
+  # client_credentials nos portais — o token passa a carregar identidade real
+  # (auditoria). Obrigatório: um por papel hospedado pela entidade.
+  # FUTURO: senha deve vir de um secret store (não do manifesto) em staging/prod.
+  # frontendHost (opcional): hostname/IP embutido em VITE_API_URL e VITE_KEYCLOAK_URL
+  # no build do frontend. Omitido → "localhost" (só funciona quando o browser roda na
+  # mesma máquina do host Docker). Defina um IP/DNS roteável quando o frontend for
+  # acessado de uma máquina remota (ex.: uma VM na nuvem com IP público 3.84.201.14).
+  # frontendHost: 3.84.201.14
+  adminUsers:
+    - role: ROLE_GOVERNANCE
+      username: admin@brasil.governance.gov
+      password: brasil-governance-local
+    - role: ROLE_TREASURY
+      username: admin@brasil.treasury.gov
+      password: brasil-treasury-local
+    - role: ROLE_SUPERVISOR
+      username: admin@brasil.supervisor.gov
+      password: brasil-supervisor-local
+    - role: ROLE_NOC_ADMIN
+      username: admin@brasil.noc.gov
+      password: brasil-noc-local
+  # Per-entity launcher (distributed A/B entry point on this entity's host). "enable"
+  # runs the generic launcher image (pre-build once with launcher/build.sh) and writes
+  # this scenario's portal fragment; "disable" removes it. launcherPort is this entity's
+  # launcher host port — one launcher per host, so it is distinct per entity and the
+  # SAME value in Scenario A and B (so both scenarios share this entity's launcher).
+  launcher: enable
+  launcherPort: 5191
+  # Reverse proxy off — these many-entity single-host samples are port-based via the
+  # per-entity launcher. Test the proxy separately with proxy-smoke.sh (one entity per host).
+  proxy: disable
