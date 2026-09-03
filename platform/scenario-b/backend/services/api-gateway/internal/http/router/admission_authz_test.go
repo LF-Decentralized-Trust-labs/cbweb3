@@ -22,6 +22,7 @@ import (
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/middleware"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -85,10 +86,21 @@ func admissionTestApp(roles ...string) *fiber.App {
 }
 
 // probe issues an authenticated request and returns the status code.
+//
+// It carries a valid CSRF token as well as the session. These tests are about
+// AUTHORIZATION, and the app-wide CSRF guard now answers before any role check —
+// without the token every assertion here would read 403 and prove nothing about the
+// role rules it exists to pin.
 func probe(t *testing.T, app *fiber.App, method, path, body string) int {
 	t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.AddCookie(&http.Cookie{Name: "access_token", Value: "fake-token"})
+	csrf, err := middleware.NewCSRFToken(nil, "fake-token")
+	if err != nil {
+		t.Fatalf("mint csrf token: %v", err)
+	}
+	req.AddCookie(&http.Cookie{Name: middleware.CSRFCookieName, Value: csrf})
+	req.Header.Set(middleware.CSRFHeaderName, csrf)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
 	if err != nil {

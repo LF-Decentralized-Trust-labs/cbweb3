@@ -15,12 +15,18 @@ import (
 
 // Config holds runtime settings loaded from environment variables.
 type Config struct {
-	AppPort                 string
-	RequestTimeout          time.Duration
-	AuthGRPCAddr            string
-	ComplianceGRPCAddr      string // compliance-orchestrator address (optional; enables governance endpoints)
-	PaymentGRPCAddr         string // payment-orchestrator address (optional; enables HTLC + token endpoints)
-	CookieSecure            bool   // true for HTTPS (Secure flag); false for plain HTTP
+	AppPort            string
+	RequestTimeout     time.Duration
+	AuthGRPCAddr       string
+	ComplianceGRPCAddr string // compliance-orchestrator address (optional; enables governance endpoints)
+	PaymentGRPCAddr    string // payment-orchestrator address (optional; enables HTLC + token endpoints)
+	CookieSecure       bool   // true for HTTPS (Secure flag); false for plain HTTP
+	// CSRFSecret keys the HMAC binding a CSRF token to its session. It MUST be the
+	// same across replicas and across restarts: a per-process value would silently
+	// reject every mutating request whose token was minted by another instance, and
+	// the symptom (403 on some requests, not others) is miserable to diagnose. When
+	// unset the gateway generates one and logs that it did.
+	CSRFSecret              string
 	CentralBankAPIURL       string // when set, this gateway acts as a commercial bank and proxies onboarding calls to the CB
 	BankCode                string // commercial bank identifier (e.g. "bank-a"); required when CentralBankAPIURL is set
 	PKIDir                  string // path to PKI files (CSR, keys); used by the smart proxy to load CSR
@@ -67,6 +73,7 @@ func Load() Config {
 		ComplianceGRPCAddr:      getEnv("COMPLIANCE_GRPC_ADDR", "localhost:9093"),
 		PaymentGRPCAddr:         getEnv("PAYMENT_GRPC_ADDR", ""),
 		CookieSecure:            getEnvBool("COOKIE_SECURE", false),
+		CSRFSecret:              getEnv("CSRF_SECRET", ""),
 		CentralBankAPIURL:       getEnv("CENTRAL_BANK_API_URL", ""),
 		BankCode:                bankCode,
 		PKIDir:                  getEnv("PKI_DIR", ""),
