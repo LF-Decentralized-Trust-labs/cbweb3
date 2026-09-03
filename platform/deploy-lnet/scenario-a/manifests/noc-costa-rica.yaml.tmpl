@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=../../../scenario-a/provisioning/schema/v1/participant-deployment.schema.yaml
+# LNET deploy — Scenario A (Enhanced Correspondent Banking).
+# NOC (Network Operations Center) DATA PLANE for spoke-costa-rica, CO-LOCATED on the
+# Central Bank Costa Rica VM (${IP_CB_COSTA_RICA}) — no dedicated VM.
+#
+# Unlike Scenario B, the NOC PORTAL is deployed by central-bank-costa-rica's `found`
+# (it already builds the noc frontend + provisions the cbweb3 Keycloak realm and
+# points VITE_NOC_BACKEND_URL at this host's :28645). This observe run only stands
+# up the control-plane DATA PLANE — Postgres + noc-backend on :28645 in its own
+# docker network — plus the founding CB's noc-agent. It runs NO on-chain node.
+#
+# The agents live WITH each entity: central-bank-costa-rica (this observe run, same
+# VM → host.docker.internal:28645) and each joining bank (cb1/cb2, other VMs →
+# spec.noc.backendURL: http://${IP_CB_COSTA_RICA}:28645) push their own node health.
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: noc-costa-rica
+spec:
+  scenario: a
+  environment: local
+  role: noc
+  mode: observe
+  displayName: NOC — spoke-costa-rica
+  # NOC bundle emitted by central-bank-costa-rica (found) and relocated by deploy.sh
+  # into the scenario-a spoke folder (scenario-scoped, so a Scenario B
+  # spoke-costa-rica NOC bundle never overwrites it). Local on this VM (co-located).
+  nocBundleRef: ../../bundles/scenario-a/spoke-costa-rica/spoke-costa-rica.noc.bundle.yaml
+  # Optional tuning; the agent defaults to a 15s push cadence and all bundle
+  # components. Scenario A's NOC bundle carries the CB Besu node only.
+  noc:
+    pushIntervalSeconds: 15
+    components: [BESU]

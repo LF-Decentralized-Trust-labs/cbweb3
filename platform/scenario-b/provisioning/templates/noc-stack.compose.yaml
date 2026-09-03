@@ -1,0 +1,67 @@
+# noc-stack template (TK-B11) — NOC control plane for an observe-mode
+# deployment: db + backend + portal. It owns its OWN network (not external): the
+# NOC is a dedicated participant, not co-located inside an entity's network.
+# Agents run WITH each entity (found-*/join) and push here over the published
+# backend port. DB state in a named volume; no secrets embedded.
+services:
+  noc-db:
+    image: "postgres:${NOC_DB_IMAGE_TAG:-15-alpine}"
+    container_name: "${CONTAINER_PREFIX:?}-noc-db"
+    environment:
+      POSTGRES_USER: "${NOC_DB_USER:?}"
+      POSTGRES_PASSWORD: "${NOC_DB_PASSWORD:?}"
+      POSTGRES_DB: "${NOC_DB_NAME:-noc}"
+    volumes:
+      - noc_db_data:/var/lib/postgresql/data
+    networks:
+      - noc_net
+    restart: always
+
+  noc-backend:
+    image: "${NOC_BACKEND_IMAGE:-cbweb3b/noc-backend:local}"
+    container_name: "${CONTAINER_PREFIX:?}-noc-backend"
+    depends_on:
+      - noc-db
+    environment:
+      # Listen on 8080 to match the container-side of the port mapping below.
+      NOC_BACKEND_PORT: "8080"
+      DATABASE_URL: "postgres://${NOC_DB_USER}:${NOC_DB_PASSWORD}@${CONTAINER_PREFIX}-noc-db:5432/${NOC_DB_NAME:-noc}?sslmode=disable"
+      # Local dev: no Keycloak NOC realm is provisioned by the toolkit, so bypass
+      # JWT validation (NEVER in production). The admin API is then reachable with
+      # any bearer, which is how the toolkit registers spokes + provisions keys.
+      NOC_SKIP_AUTH: "true"
+      NOC_FRONTEND_ORIGIN: "${NOC_FRONTEND_ORIGIN:-*}"
+      # Pool Stability data source (spec.noc.ammGatewayURL). Must be reachable from
+      # THIS container: the NOC owns its own network, so another stack's service name
+      # does not resolve — use the host and the gateway's published port. Unset leaves
+      # the backend default and the page reports that the gateway was unreachable.
+      AMM_GATEWAY_URL: "${AMM_GATEWAY_URL:-}"
+      # Optional pin; empty means discover the active pairs from the gateway.
+      AMM_PAIRS: "${AMM_PAIRS:-}"
+    ports:
+      - "${NOC_BACKEND_PORT:?}:8080"
+    networks:
+      - noc_net
+    # The NOC runs on its own network, so the AMM gateway of a co-located entity is
+    # reached over the host's published port — which needs host.docker.internal to
+    # resolve inside this container (same idiom as entity-backend.compose.yaml).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: always
+
+  noc-portal:
+    image: "${NOC_PORTAL_IMAGE:-cbweb3b/noc-portal:local}"
+    container_name: "${CONTAINER_PREFIX:?}-noc-portal"
+    ports:
+      - "${NOC_PORTAL_PORT:?}:80"
+    networks:
+      - noc_net
+    restart: always
+
+networks:
+  noc_net:
+    name: "${NOC_NET_PREFIX:?}_net"
+
+volumes:
+  noc_db_data:
+    name: "${NOC_VOLUME_PREFIX:?}_noc_db_data"

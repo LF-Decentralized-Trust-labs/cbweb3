@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Contracts CI — Scenario B
+
+permissions: {}
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ["scenario-b/contracts/**"]
+  pull_request:
+    branches: [main, develop]
+    paths: ["scenario-b/contracts/**"]
+  workflow_dispatch:
+
+env:
+  FOUNDRY_PROFILE: ci
+
+jobs:
+  contracts:
+    name: Foundry Contracts — Scenario B
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Cache Foundry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.foundry
+            ~/.cargo/bin/forge
+            ~/.cargo/bin/cast
+          key: foundry-${{ runner.os }}-${{ github.sha }}
+          restore-keys: foundry-${{ runner.os }}-
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Show Forge version
+        run: forge --version
+
+      - name: Install Soldeer dependencies
+        working-directory: scenario-b/contracts
+        run: forge soldeer install
+
+      - name: Run Forge fmt check
+        working-directory: scenario-b/contracts
+        run: forge fmt --check
+
+      - name: Run Forge build
+        working-directory: scenario-b/contracts
+        run: forge build --sizes
+
+      # -j 1: deploy-script suites mutate process-global env via vm.setEnv and
+      # race under parallel execution; serial runs are deterministic.
+      - name: Run Forge tests
+        working-directory: scenario-b/contracts
+        run: forge test -vvv -j 1
+
+      # D6 80% gate on core src/ via --ir-minimum coverage (FOUNDRY_FUZZ_RUNS=256,
+      # -j 1). HTLC + script/ + test/ excluded from the denominator. See
+      # tools/validate-coverage.sh for the documented exclusions.
+      - name: Validate code coverage (D6 80% gate)
+        working-directory: scenario-b/contracts
+        run: bash tools/validate-coverage.sh
+
+  slither:
+    name: Slither static analysis — Scenario B
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install Soldeer dependencies
+        working-directory: scenario-b/contracts
+        run: forge soldeer install
+
+      - name: Run Slither
+        uses: crytic/slither-action@v0.4.0
+        with:
+          target: scenario-b/contracts
+          slither-config: scenario-b/contracts/slither.config.json
+          # D6 requires zero HIGH findings in contract bytecode (met). Low/medium
+          # informational hints (e.g. cache-array-length optimizations) do not block.
+          fail-on: high

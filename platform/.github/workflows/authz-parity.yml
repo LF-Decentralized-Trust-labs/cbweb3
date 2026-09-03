@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+name: authz parity — scenario-a ↔ scenario-b
+
+# R2-H-8: the gRPC authz control is intentionally duplicated per scenario (no
+# cross-scenario imports, per the constitution). This guard fails the build if the
+# two copies drift, so a security fix can never land in one scenario only.
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "scenario-a/backend/shared/proto/authz/**"
+      - "scenario-b/backend/shared/proto/authz/**"
+      - "scripts/check-authz-parity.sh"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "scenario-a/backend/shared/proto/authz/**"
+      - "scenario-b/backend/shared/proto/authz/**"
+      - "scripts/check-authz-parity.sh"
+  workflow_dispatch:
+
+jobs:
+  parity:
+    name: authz copies must be byte-identical
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Diff the two authz packages
+        run: ./scripts/check-authz-parity.sh

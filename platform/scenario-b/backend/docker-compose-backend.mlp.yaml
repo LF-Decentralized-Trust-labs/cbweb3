@@ -1,0 +1,122 @@
+services:
+  compliance-mlp:
+    build:
+      context: .
+      dockerfile: services/compliance/Dockerfile
+    image: cbweb3/compliance:local
+    pull_policy: build
+    container_name: "backend-compliance-mlp"
+    # Runs as the host user rather than the image default (uid 10001): this service mounts
+    # ./config/pki from the repository, owned by whoever checked it out, so another uid can
+    # read it (0775) but cannot persist an issued certificate. The make targets export these;
+    # a hand-run `docker compose` falls back to the image uid, which is still not root
+    # (finding R2-M-12).
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
+    env_file:
+      - path: ./config/.env.infra.mlp
+        required: true
+    environment:
+      COMPLIANCE_GRPC_PORT: "9093"
+      POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_mlp}?sslmode=disable"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
+    ports:
+      - "68093:9093"
+    networks:
+      - cbweb3_backend_mlp
+      - cbweb3_network
+
+  auth-mlp:
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    image: cbweb3/auth:local
+    pull_policy: build
+    container_name: "backend-auth-mlp"
+    env_file:
+      - path: ./config/.env.infra.mlp
+        required: true
+    environment:
+      AUTH_GRPC_PORT: "9091"
+      KEYCLOAK_BASE_URL: "${KEYCLOAK_BASE_URL:-http://keycloak:8080}"
+      KEYCLOAK_REALM: "${KC_REALM:-mlp}"
+      KEYCLOAK_CLIENT_ID: "${KC_CLIENT_ID:-mlp-client}"
+      KEYCLOAK_CLIENT_SECRET: "${KC_CLIENT_SECRET:-change-me}"
+      KEYCLOAK_JWKS_CACHE_TTL_SEC: "3000"
+      KEYCLOAK_REQUEST_TIMEOUT_SEC: "10"
+      COMPLIANCE_GRPC_ADDR: compliance-mlp:9093
+      COMPLIANCE_REQUEST_TIMEOUT_SEC: "5"
+      REDIS_ADDR: "${REDIS_CONTAINER_NAME:-cbweb3-redis}:6379"
+      REDIS_DB: "6"
+    ports:
+      - "68091:9091"
+    depends_on:
+      - compliance-mlp
+    networks:
+      - cbweb3_backend_mlp
+      - cbweb3_network
+
+  payment-orchestrator-mlp:
+    build:
+      context: .
+      dockerfile: services/payment-orchestrator/Dockerfile
+    image: cbweb3/payment-orchestrator:local
+    pull_policy: build
+    container_name: "backend-payment-orchestrator-mlp"
+    env_file:
+      - path: ./config/.env.infra.mlp
+        required: true
+    environment:
+      PAYMENT_GRPC_PORT: "9094"
+      CACTI_API_URL: "http://host.docker.internal:4000"
+    ports:
+      - "68094:9094"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cbweb3_backend_mlp
+      - cbweb3_network
+
+  api-gateway-mlp:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    image: cbweb3/api-gateway:local
+    pull_policy: build
+    container_name: "backend-api-gateway-mlp"
+    # Runs as the host user rather than the image default (uid 10001): this service mounts
+    # ./config/pki from the repository, owned by whoever checked it out, so another uid can
+    # read it (0775) but cannot persist an issued certificate. The make targets export these;
+    # a hand-run `docker compose` falls back to the image uid, which is still not root
+    # (finding R2-M-12).
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
+    env_file:
+      - path: ./config/.env.infra.mlp
+        required: true
+    environment:
+      APP_PORT: "8080"
+      REQUEST_TIMEOUT_SEC: "30"
+      AUTH_GRPC_ADDR: auth-mlp:9091
+      COMPLIANCE_GRPC_ADDR: compliance-mlp:9093
+      PAYMENT_GRPC_ADDR: payment-orchestrator-mlp:9094
+      PKI_DIR: /workspace/backend/config/pki
+      HUB_BESU_RPC_URL: "http://host.docker.internal:8645"
+      SIGNER_PRIVATE_KEY: "${SIGNER_PRIVATE_KEY:-f8f8a2f43c8376ccb0871305060d7b27b0554d2cc72bccf41b2705608452f315}"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
+    ports:
+      - "68080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - auth-mlp
+      - compliance-mlp
+      - payment-orchestrator-mlp
+    networks:
+      - cbweb3_backend_mlp
+      - cbweb3_network
+
+networks:
+  cbweb3_backend_mlp:
+  cbweb3_network:
+    external: true

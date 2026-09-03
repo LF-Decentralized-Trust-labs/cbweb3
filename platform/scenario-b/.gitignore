@@ -1,0 +1,105 @@
+# Node / Frontend
+node_modules/
+dist/
+.next/
+coverage/
+*.log
+
+# Python / Go caches
+__pycache__/
+*.pyc
+
+# Environment
+.env
+.env.*
+!.env.*example*
+
+# Terraform
+.terraform/
+terraform.tfstate*
+*.tfvars
+
+# Generated SDKs / Artifacts
+apis/sdk/*/dist/
+build/
+artifacts/
+
+# OS
+.DS_Store
+AGENTS.md
+# GitHub Copilot / agent files — versionar apenas Spec Kit (demais agentes ignorados)
+.github/agents/*
+!.github/agents/speckit*.agent.md
+.github/copilot-instructions.md.agent/
+.agent/
+
+# Custom agent assets
+.github/assets/*
+!.github/assets/README.md
+
+# Docs-reference
+docs-reference/
+
+# Go Coverage
+backend/**/*.out
+
+# Foundry
+contracts/cache/
+contracts/out/
+!contracts/broadcast
+contracts/broadcast/*/1337/
+contracts/broadcast/*/1338/
+contracts/broadcast/*/1339/
+contracts/broadcast/*/31337/
+contracts/broadcast/**/dry-run/
+contracts/*.flattened.*
+contracts/dependencies
+
+# IDEs
+# Cursor: ignorar .cursor/ exceto skills do Spec Kit (partilha com a equipa)
+.cursor/*
+!.cursor/skills/
+.cursor/skills/*
+!.cursor/skills/speckit-*/
+.vscode/
+.idea/
+
+# Git worktrees
+.worktrees/
+
+
+# Besu
+*/**/tmpFiles
+deploy/local/spoke-besu-b/tmpFiles/
+deploy/local/hub-besu/tmpFiles/
+
+# Local feature-toggle overrides (copy from .env.example — never commit secrets)
+deploy/local/.env
+
+# PKI — local CA credentials (never commit private keys or certificates)
+*.key
+*.crt
+*.pem
+*.srl
+*.csr
+
+# Go Workspace files
+*/**/go.work
+*/**/go.work.sum
+.agent/
+
+openspec/
+# Prompts do Copilot — versionar apenas Spec Kit
+.github/prompts/*
+!.github/prompts/speckit*.prompt.md
+.github/skills/
+.github/doc-reference
+
+# Generated provisioning state. The Paladin deployment scripts write the deployed
+# contract addresses next to themselves, and since they moved from deploy/local (which
+# was ignored wholesale) into provisioning/ (which is tracked), the state needs an
+# explicit rule. Caught by the gitleaks gate when a run's addresses were committed.
+**/.deployed-addrs.env
+provisioning/paladin/*/
+!provisioning/paladin/scripts/
+!provisioning/paladin/contracts/

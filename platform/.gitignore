@@ -1,0 +1,49 @@
+# ---------------------------------------------------------------------------
+# Root .gitignore — repo-wide noise only.
+# Per-scenario / per-service build output is handled by nested .gitignore files
+# (scenario-a/, scenario-b/, frontend apps, Foundry projects, Go vendor trees).
+# Keep this file focused on things that leak in at the repo root.
+# ---------------------------------------------------------------------------
+
+# --- OS / desktop cruft ---
+.DS_Store
+**/.DS_Store
+Thumbs.db
+
+# --- Editor / tooling local state ---
+.idea/
+.vscode/
+.claude/worktrees/
+.mcp.json
+.playwright-mcp/
+# Per-developer agent state: tool-permission allowlists and MCP server
+# enablement. Committing it would publish one machine's local approvals and
+# force them on everyone else. Until now this file was only kept out by whatever
+# personal global ignore each developer happened to have — which protects
+# nothing on a new clone or in CI, so the rule belongs here.
+.claude/settings.local.json
+**/.claude/settings.local.json
+
+# --- Provisioning / samples runtime data (regenerated locally) ---
+# Toolkit-driven spoke/bank provisioning writes runtime state and data volumes
+# next to the sample manifests; never commit these.
+**/cbweb3-data/
+**/.provisioning-state.yaml
+**/.provisioning.lock
+*.cbweb3
+*.cbweb3b
+scenario-a/samples/bundles
+scenario-a/samples/cbweb3
+scenario-b/samples/.cbweb3b
+scenario-b/toolkit/samples/.cbweb3b
+
+# --- Generated test-evidence bundles ---
+# Build output, not source. Regenerate locally with the per-scenario
+# `make evidence.e2e-{a,b}` targets / `tools/gen_evidence_bundles.py`.
+# Includes the transient harness captures under _harness/ consumed by that generator.
+/evidence-bundles/
+
+# --- Build artifacts / transient output ---
+tmp/
+*.log
+scenario-a/toolkit/cbweb3

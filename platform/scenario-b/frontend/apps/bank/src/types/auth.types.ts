@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: Apache-2.0
+
+export type LoginRequest = {
+  clientId: string;
+  clientSecret: string;
+};
+
+export type TokenResponse = {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  expiresIn: number;
+};
+
+export type PkiChallengeResponse = {
+  nonce: string;
+};
+
+export type LoginResponse = TokenResponse | PkiChallengeResponse;
+
+export type UserProfile = {
+  subject: string;
+  issuer: string;
+  roles: string[];
+  wallet?: string;
+  bankId?: string;
+  country?: string;
+};

@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { Permission, SupervisorRole } from "../../types";
+import type { LoginResponse, SupervisorUser } from "../../types";
+import { apiFetch } from "./apiClient";
+
+type LoginTokenResponse = {
+  accessToken: string;
+  expiresIn: number;
+  tokenType: string;
+  refreshToken?: string;
+};
+
+type MeResponse = {
+  subject: string;
+  issuer?: string;
+  roles: string[];
+  wallet?: string;
+  bankId?: string;
+  country?: string;
+};
+
+// Display label only. The final branch is a fallback, not an authorization decision: a
+// ROLE_TREASURY token used to land here and come back as CENTRAL_BANK_ADMIN — a valid-looking
+// supervisor role — while `permissions` below is a fixed list rather than anything derived
+// from the token. The portal therefore manufactured an authorised-looking profile for a
+// session the gateway refuses. Authorization now reads `roles`; see auth/authorization.ts.
+function roleFromClaims(roles: string[]): SupervisorRole {
+  if (roles.includes("ROLE_SUPERVISOR")) return SupervisorRole.SUPERVISOR_ROLE;
+  if (roles.includes("ROLE_NOC")) return SupervisorRole.COMPLIANCE_OFFICER;
+  return SupervisorRole.CENTRAL_BANK_ADMIN;
+}
+
+function mapMeToUser(me: MeResponse): SupervisorUser {
+  return {
+    id: me.subject,
+    username: me.subject,
+    roles: me.roles ?? [],
+    role: roleFromClaims(me.roles),
+    institutionId: me.bankId ?? "",
+    institutionName: me.bankId ?? "Central Bank",
+    walletAddress: me.wallet ?? "",
+    permissions: [
+      Permission.VIEW_NETWORK,
+      Permission.VIEW_REGISTRY,
+      Permission.VIEW_AUDIT_LOGS,
+      Permission.DECRYPT_TRANSACTIONS,
+      Permission.VIEW_STABILITY,
+    ],
+    createdAt: new Date().toISOString(),
+  };
+}
+
+export const authApi = {
+  login: async (username: string, password: string): Promise<LoginResponse> => {
+    const token = await apiFetch<LoginTokenResponse>("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ clientId: username, clientSecret: password }),
+    });
+    const me = await apiFetch<MeResponse>("/api/v1/auth/me");
+    return {
+      user: mapMeToUser(me),
+      sessionTimeoutSeconds: token.expiresIn,
+    };
+  },
+
+  me: async (): Promise<SupervisorUser> => {
+    const me = await apiFetch<MeResponse>("/api/v1/auth/me");
+    return mapMeToUser(me);
+  },
+
+  refresh: async (): Promise<{ expiresIn: number }> => {
+    const token = await apiFetch<LoginTokenResponse>("/api/v1/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    return { expiresIn: token.expiresIn };
+  },
+
+  logout: async (): Promise<void> => {
+    await apiFetch<unknown>("/api/v1/auth/logout", { method: "POST" });
+  },
+};

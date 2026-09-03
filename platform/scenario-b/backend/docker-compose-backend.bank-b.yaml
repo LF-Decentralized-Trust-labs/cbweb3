@@ -1,0 +1,145 @@
+services:
+  compliance-bank-b:
+    image: cbweb3/compliance:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-compliance-bank-b"
+    # Runs as the host user rather than the image default (uid 10001): this service mounts
+    # ./config/pki from the repository, owned by whoever checked it out, so another uid can
+    # read it (0775) but cannot persist an issued certificate. The make targets export these;
+    # a hand-run `docker compose` falls back to the image uid, which is still not root
+    # (finding R2-M-12).
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
+    env_file:
+      - path: ./config/.env.infra.bank-b
+        required: true
+    environment:
+      COMPLIANCE_GRPC_PORT: "9093"
+      BANK_CODE: "bank-b"
+      PKI_DIR: /workspace/backend/config/pki
+      POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_bank_b}?sslmode=disable"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
+    ports:
+      - "29093:9093"
+    networks:
+      - cbweb3_backend_bank_b
+      - cbweb3_network
+
+  auth-bank-b:
+    image: cbweb3/auth:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-auth-bank-b"
+    env_file:
+      - path: ./config/.env.infra.bank-b
+        required: true
+    environment:
+      AUTH_GRPC_PORT: "9091"
+      KEYCLOAK_BASE_URL: "${KEYCLOAK_BASE_URL:-http://keycloak:8080}"
+      KEYCLOAK_REALM: "${KC_REALM:-bank-b}"
+      KEYCLOAK_CLIENT_ID: "${KC_CLIENT_ID:-bank-b-client}"
+      KEYCLOAK_CLIENT_SECRET: "${KC_CLIENT_SECRET:-change-me}"
+      KEYCLOAK_JWKS_CACHE_TTL_SEC: "3000"
+      KEYCLOAK_REQUEST_TIMEOUT_SEC: "10"
+      COMPLIANCE_GRPC_ADDR: compliance-bank-b:9093
+      COMPLIANCE_REQUEST_TIMEOUT_SEC: "5"
+      REDIS_ADDR: "${REDIS_CONTAINER_NAME:-cbweb3-redis}:6379"
+      REDIS_DB: "1"
+      # Seed the KMS with the operator key so onboarding registers the canonical address.
+      # This ensures bridge-out mints and GetBalance both use the same BESU_OPERATOR_KEY address.
+      KMS_SEED_KEY_ID: "bank-b"
+      KMS_SEED_PRIVATE_KEY: "0dbbe8e4ae425a6d2687f1a7e3ba17bc98c673636790f1b8ad91193c05875ef1"
+    ports:
+      - "29091:9091"
+    depends_on:
+      - compliance-bank-b
+    networks:
+      - cbweb3_backend_bank_b
+      - cbweb3_network
+
+  payment-orchestrator-bank-b:
+    image: cbweb3/payment-orchestrator:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-payment-orchestrator-bank-b"
+    env_file:
+      - path: ./config/.env.infra.bank-b
+        required: true
+      - path: ../deploy/local/paladin/spoke-b/.deployed-addrs.env
+        required: false
+    environment:
+      PAYMENT_GRPC_PORT: "9094"
+      BESU_OPERATOR_KEY: "0dbbe8e4ae425a6d2687f1a7e3ba17bc98c673636790f1b8ad91193c05875ef1"
+      CACTI_API_URL: "http://host.docker.internal:4000"
+      FX_POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_bank_b}?sslmode=disable"
+      # Commercial banks do NOT run a Hub mint/burn relayer. Minting W-<source> (bridge-in) and
+      # burning W-<target> (bridge-out) are central-bank-only operations (CENTRAL_BANK_ROLE):
+      #   - bridge-in  → delegated to this bank's spoke CB via CENTRAL_BANK_API_URL
+      #                  (POST /internal/amm/cross-currency-bridge-in)
+      #   - bridge-out → delegated to the beneficiary CB via Cacti
+      # Leaving HUB_BESU_RPC_URL / SIGNER_PRIVATE_KEY unset disables the Hub relayer worker,
+      # which has no work to do here. (Previously this used CB_HUB_SIGNER_PRIVATE_KEY to give the
+      # commercial relayer a hub-minting key — a sovereignty violation; removed.)
+      ENTITY_BESU_ADDRESS: "0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef"
+      SPOKE_BESU_RPC_URL: "http://cbweb3-spoke-b-besu.bank-b:8545"
+      SPOKE_CHAIN_ID: "${BESU_CHAIN_ID:-1339}"
+      SPOKE_SIGNER_KEY: "${SIGNER_PRIVATE_KEY:-0dbbe8e4ae425a6d2687f1a7e3ba17bc98c673636790f1b8ad91193c05875ef1}"
+      # Local dev: bypass spoke lock/release — Hub-only burn.
+      BRIDGE_SKIP_SPOKE_LOCK: "${BRIDGE_SKIP_SPOKE_LOCK:-true}"
+      # Profile for the flag above: it permits a Hub mint with no spoke-side reserve, so the
+      # orchestrator refuses it unless the environment is explicitly local.
+      ENVIRONMENT: "${ENVIRONMENT:-local}"
+    ports:
+      - "29094:9094"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cbweb3_backend_bank_b
+      - cbweb3_network
+
+  api-gateway-bank-b:
+    image: cbweb3/api-gateway:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-api-gateway-bank-b"
+    # Runs as the host user rather than the image default (uid 10001): this service mounts
+    # ./config/pki from the repository, owned by whoever checked it out, so another uid can
+    # read it (0775) but cannot persist an issued certificate. The make targets export these;
+    # a hand-run `docker compose` falls back to the image uid, which is still not root
+    # (finding R2-M-12).
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
+    env_file:
+      - path: ./config/.env.infra.bank-b
+        required: true
+    environment:
+      APP_PORT: "8080"
+      REQUEST_TIMEOUT_SEC: "30"
+      AUTH_GRPC_ADDR: auth-bank-b:9091
+      COMPLIANCE_GRPC_ADDR: compliance-bank-b:9093
+      PAYMENT_GRPC_ADDR: payment-orchestrator-bank-b:9094
+      PKI_DIR: /workspace/backend/config/pki
+      BANK_CODE: "bank-b"
+      CENTRAL_BANK_API_URL: "http://api-gateway-central-bank-b:8080"
+      ENTITY_BESU_ADDRESS: "0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef"
+      CB_TOKEN_RECIPIENT_ADDRESS: "${CB_TOKEN_RECIPIENT_ADDRESS:-0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef}"
+      # Hub AMM (Scenario B v2) — Bank B uses its ENTITY_BESU_ADDRESS as Hub wallet.
+      # W-tCeBM is minted to ENTITY_BESU_ADDRESS (0xC5fdf4…) by the payment-orchestrator relayer.
+      # SIGNER_PRIVATE_KEY must match ENTITY_BESU_ADDRESS so approve-amm signs for the correct owner.
+      HUB_BESU_RPC_URL: "http://host.docker.internal:8845"
+      HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
+      SIGNER_PRIVATE_KEY: "${SIGNER_PRIVATE_KEY:-0dbbe8e4ae425a6d2687f1a7e3ba17bc98c673636790f1b8ad91193c05875ef1}"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
+    ports:
+      - "28080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - auth-bank-b
+      - compliance-bank-b
+      - payment-orchestrator-bank-b
+    networks:
+      - cbweb3_backend_bank_b
+      - cbweb3_network
+
+networks:
+  cbweb3_backend_bank_b:
+  cbweb3_network:
+    external: true

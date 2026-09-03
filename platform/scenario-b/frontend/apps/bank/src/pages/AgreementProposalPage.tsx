@@ -1,0 +1,323 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import {
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  toast,
+} from "@cbweb3/ui";
+import { useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useFxAgreementStore } from "../stores/fx-agreement.store";
+
+const CURRENCIES = ["BRL", "EUR", "ARS", "CLP", "MXN", "USD"];
+
+const defaultExpiry = () => {
+  const d = new Date();
+  d.setHours(d.getHours() + 24);
+  return d.toISOString().slice(0, 16);
+};
+
+export function AgreementProposalPage() {
+  const navigate = useNavigate();
+  const propose = useFxAgreementStore((s) => s.propose);
+  const status = useFxAgreementStore((s) => s.status);
+
+  const [counterpartyB, setCounterpartyB] = useState("");
+  const [settlementAgent, setSettlementAgent] = useState("");
+  const [custodian, setCustodian] = useState("");
+  const [beneficiary, setBeneficiary] = useState("");
+  const [spokeAReceiver, setSpokeAReceiver] = useState("");
+  const [spokeBReceiver, setSpokeBReceiver] = useState("");
+  const [originAmount, setOriginAmount] = useState("");
+  const [originCurrency, setOriginCurrency] = useState("USD");
+  const [counterAmount, setCounterAmount] = useState("");
+  const [counterCurrency, setCounterCurrency] = useState("BRL");
+  const [expiryDateTime, setExpiryDateTime] = useState(defaultExpiry);
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  const rate = useMemo(() => {
+    const o = parseFloat(originAmount);
+    const c = parseFloat(counterAmount);
+    if (o > 0 && c > 0) return (c / o).toFixed(6);
+    return "";
+  }, [originAmount, counterAmount]);
+
+  const validate = () => {
+    if (!counterpartyB.trim()) {
+      toast.error("Counterparty address is required.");
+      return false;
+    }
+    if (!settlementAgent.trim()) {
+      toast.error("Settlement agent address is required.");
+      return false;
+    }
+    if (!custodian.trim()) {
+      toast.error("Custodian address is required.");
+      return false;
+    }
+    if (!beneficiary.trim()) {
+      toast.error("Beneficiary address is required.");
+      return false;
+    }
+    if (!originAmount || parseFloat(originAmount) <= 0) {
+      toast.error("Send amount must be a positive number.");
+      return false;
+    }
+    if (!counterAmount || parseFloat(counterAmount) <= 0) {
+      toast.error("Receive amount must be a positive number.");
+      return false;
+    }
+    if (!expiryDateTime) {
+      toast.error("Expiry date is required.");
+      return false;
+    }
+    const expiryUnix = Math.floor(new Date(expiryDateTime).getTime() / 1000);
+    if (expiryUnix <= Math.floor(Date.now() / 1000) + 300) {
+      toast.error("Expiry must be at least 5 minutes in the future.");
+      return false;
+    }
+    return true;
+  };
+
+  const onPrepare = () => {
+    if (!validate()) return;
+    setShowConfirm(true);
+  };
+
+  const onConfirm = async () => {
+    try {
+      const result = await propose({
+        counterparty_b: counterpartyB.trim(),
+        settlement_agent: settlementAgent.trim(),
+        custodian: custodian.trim(),
+        beneficiary: beneficiary.trim(),
+        origin_amount: originAmount,
+        counter_amount: counterAmount,
+        origin_currency: originCurrency,
+        counter_currency: counterCurrency,
+        rate: rate,
+        expiry_date: Math.floor(new Date(expiryDateTime).getTime() / 1000),
+        spoke_a_receiver: spokeAReceiver.trim() || undefined,
+        spoke_b_receiver: spokeBReceiver.trim() || undefined,
+      });
+      toast.success("Trade agreement proposed successfully.");
+      navigate(`/agreements/${result.trade_id}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to propose trade agreement.");
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold">New Trade Agreement</h1>
+          <p className="text-sm text-muted-foreground">Propose a new FX trade agreement with a counterparty.</p>
+        </div>
+        <Button asChild variant="outline">
+          <Link to="/agreements">Back to agreements</Link>
+        </Button>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Parties</CardTitle>
+          <CardDescription>Specify the counterparty and intermediary addresses.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="counterparty-b">Counterparty B Identity</Label>
+            <Input
+              id="counterparty-b"
+              placeholder="funded_operator@spoke-b-bank-d"
+              value={counterpartyB}
+              onChange={(e) => setCounterpartyB(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="settlement-agent">Settlement Agent Identity</Label>
+            <Input
+              id="settlement-agent"
+              placeholder="funded_operator@spoke-a-cb"
+              value={settlementAgent}
+              onChange={(e) => setSettlementAgent(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="custodian">Custodian Identity</Label>
+            <Input
+              id="custodian"
+              placeholder="funded_operator@spoke-b-bank-d"
+              value={custodian}
+              onChange={(e) => setCustodian(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="beneficiary">Beneficiary Identity</Label>
+            <Input
+              id="beneficiary"
+              placeholder="funded_operator@spoke-b-bank-b"
+              value={beneficiary}
+              onChange={(e) => setBeneficiary(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="spoke-a-receiver">Spoke-A HTLC Receiver</Label>
+            <Input
+              id="spoke-a-receiver"
+              placeholder="funded_operator@spoke-a-bank-c"
+              value={spokeAReceiver}
+              onChange={(e) => setSpokeAReceiver(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="spoke-b-receiver">Spoke-B HTLC Receiver</Label>
+            <Input
+              id="spoke-b-receiver"
+              placeholder="funded_operator@spoke-b-bank-b"
+              value={spokeBReceiver}
+              onChange={(e) => setSpokeBReceiver(e.target.value)}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Trade Terms</CardTitle>
+          <CardDescription>Define the amounts, currencies, and exchange rate.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="origin-amount">Send Amount</Label>
+              <Input
+                id="origin-amount"
+                type="number"
+                min="0"
+                step="any"
+                placeholder="1000"
+                value={originAmount}
+                onChange={(e) => setOriginAmount(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="origin-currency">Send Currency</Label>
+              <Select value={originCurrency} onValueChange={setOriginCurrency}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Currency" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CURRENCIES.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="counter-amount">Receive Amount</Label>
+              <Input
+                id="counter-amount"
+                type="number"
+                min="0"
+                step="any"
+                placeholder="5000"
+                value={counterAmount}
+                onChange={(e) => setCounterAmount(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="counter-currency">Receive Currency</Label>
+              <Select value={counterCurrency} onValueChange={setCounterCurrency}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Currency" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CURRENCIES.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Exchange Rate</Label>
+            <p className="text-sm text-muted-foreground">
+              {rate ? (
+                <>
+                  1 {originCurrency} = {rate} {counterCurrency}
+                </>
+              ) : (
+                "Enter both amounts to calculate the exchange rate."
+              )}
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="expiry-date">Expiry Date</Label>
+            <Input
+              id="expiry-date"
+              type="datetime-local"
+              value={expiryDateTime}
+              onChange={(e) => setExpiryDateTime(e.target.value)}
+            />
+          </div>
+
+          <Button onClick={onPrepare} disabled={status === "loading"}>
+            {status === "loading" ? "Submitting..." : "Review Agreement"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {showConfirm ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Confirm Trade Agreement</CardTitle>
+            <CardDescription>Review the agreement details before submitting.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm">Counterparty: {counterpartyB}</p>
+            <p className="text-sm">Settlement Agent: {settlementAgent}</p>
+            <p className="text-sm">Custodian: {custodian}</p>
+            <p className="text-sm">Beneficiary: {beneficiary}</p>
+            <p className="text-sm">
+              Send: {originAmount} {originCurrency}
+            </p>
+            <p className="text-sm">
+              Receive: {counterAmount} {counterCurrency}
+            </p>
+            <p className="text-sm">Exchange Rate: {rate}</p>
+            <p className="text-sm">Expiry: {new Date(expiryDateTime).toLocaleString()}</p>
+            <div className="flex gap-2">
+              <Button onClick={() => void onConfirm()} disabled={status === "loading"}>
+                {status === "loading" ? "Proposing..." : "Confirm Proposal"}
+              </Button>
+              <Button variant="outline" onClick={() => setShowConfirm(false)}>
+                Cancel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+    </div>
+  );
+}

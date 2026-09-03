@@ -1,0 +1,6 @@
+{
+  "entity": "Banco Itaú",
+  "portals": [
+    { "scenario": "B", "role": "bank", "label": "Bank Portal", "url": "http://localhost:17646" }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "@cbweb3/config",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "exports": {
+    "./tsconfig.base": "./tsconfig.base.json",
+    "./tailwind-preset": "./tailwind-preset.cjs",
+    "./eslint/react": "./eslint/react.cjs"
+  }
+}

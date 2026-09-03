@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=../../../scenario-a/provisioning/schema/v1/participant-deployment.schema.yaml
+# LNET deploy — Scenario A. VM ${IP_CB2} — commercial bank cb2, JOINS spoke-costa-rica.
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: bank-cb2-costa-rica
+spec:
+  scenario: a
+  environment: local
+  role: commercial-bank
+  mode: join
+  bankId: cb2
+  displayName: Commercial Bank cb2 (Costa Rica)
+  spoke:
+    id: spoke-costa-rica
+    chainId: 2021
+    currency: CRC
+  joinBundleRef: ../../bundles/scenario-a/spoke-costa-rica/spoke-costa-rica.bundle.yaml
+  node:
+    advertisedHost: ${IP_CB2}
+    rpc: { port: 8645 }
+    ws:  { port: 8655 }
+    p2p: { port: 30303 }
+    dataDir: ../deploy-lnet/bundles/scenario-a/cb2
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  relay:
+    endpoint: http://${IP_HUB}:4000
+  frontendHost: cb2-costa-rica.cbweb3.l-net.io
+  launcher: enable
+  launcherPort: 5190
+  noc:
+    backendURL: http://${IP_CB_COSTA_RICA}:28645
+    pushIntervalSeconds: 15
+  proxy: enable
+  adminUsers:
+    - { role: ROLE_BANK, username: admin@cb2.l-net.io, password: change-me-local }

@@ -1,0 +1,8 @@
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: broken
+spec:
+  invalid: yaml: {{{{
+  - this: is
+  - not: [valid

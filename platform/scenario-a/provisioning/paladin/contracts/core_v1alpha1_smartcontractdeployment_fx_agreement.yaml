@@ -1,0 +1,319 @@
+apiVersion: core.paladin.io/v1alpha1
+kind: SmartContractDeployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: operator-go
+    app.kubernetes.io/component: fx-agreement
+    app.kubernetes.io/version: "1.0"
+  name: fx-agreement
+spec:
+  abiJSON: |-
+    [
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "_identityRegistry",
+            "type": "address"
+          }
+        ],
+        "name": "constructor",
+        "outputs": null,
+        "stateMutability": "nonpayable",
+        "type": "constructor"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes32",
+            "name": "tradeId",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "address",
+            "name": "counterpartyB",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "settlementAgent",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "custodian",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "beneficiary",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "originAmount",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "counterAmount",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "originCurrency",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "counterCurrency",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "uint256",
+            "name": "rate",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "expiryDate",
+            "type": "uint256"
+          }
+        ],
+        "name": "propose",
+        "outputs": null,
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes32",
+            "name": "tradeId",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "address",
+            "name": "counterpartyB",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "settlementAgent",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "custodian",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "beneficiary",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "originAmount",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "counterAmount",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "originCurrency",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "counterCurrency",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "uint256",
+            "name": "rate",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "expiryDate",
+            "type": "uint256"
+          }
+        ],
+        "name": "proposeOnBehalf",
+        "outputs": null,
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes32",
+            "name": "tradeId",
+            "type": "bytes32"
+          }
+        ],
+        "name": "accept",
+        "outputs": null,
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes32",
+            "name": "tradeId",
+            "type": "bytes32"
+          }
+        ],
+        "name": "acceptOnBehalf",
+        "outputs": null,
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes32",
+            "name": "tradeId",
+            "type": "bytes32"
+          }
+        ],
+        "name": "reject",
+        "outputs": null,
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes32",
+            "name": "tradeId",
+            "type": "bytes32"
+          }
+        ],
+        "name": "cancel",
+        "outputs": null,
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes32",
+            "name": "tradeId",
+            "type": "bytes32"
+          }
+        ],
+        "name": "settle",
+        "outputs": null,
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes32",
+            "name": "tradeId",
+            "type": "bytes32"
+          }
+        ],
+        "name": "getAgreement",
+        "outputs": [
+          {
+            "components": [
+              {"internalType": "bytes32", "name": "tradeId", "type": "bytes32"},
+              {"internalType": "address", "name": "originator", "type": "address"},
+              {"internalType": "address", "name": "counterpartyB", "type": "address"},
+              {"internalType": "address", "name": "settlementAgent", "type": "address"},
+              {"internalType": "address", "name": "custodian", "type": "address"},
+              {"internalType": "address", "name": "beneficiary", "type": "address"},
+              {"internalType": "uint256", "name": "originAmount", "type": "uint256"},
+              {"internalType": "uint256", "name": "counterAmount", "type": "uint256"},
+              {"internalType": "bytes32", "name": "originCurrency", "type": "bytes32"},
+              {"internalType": "bytes32", "name": "counterCurrency", "type": "bytes32"},
+              {"internalType": "uint256", "name": "rate", "type": "uint256"},
+              {"internalType": "uint256", "name": "expiryDate", "type": "uint256"},
+              {"internalType": "uint8", "name": "state", "type": "uint8"}
+            ],
+            "internalType": "struct FXAgreementLibrary.FxAgreement",
+            "name": "",
+            "type": "tuple"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes32",
+            "name": "tradeId",
+            "type": "bytes32"
+          }
+        ],
+        "name": "AgreementProposed",
+        "outputs": null,
+        "type": "event"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes32",
+            "name": "tradeId",
+            "type": "bytes32"
+          }
+        ],
+        "name": "AgreementAccepted",
+        "outputs": null,
+        "type": "event"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes32",
+            "name": "tradeId",
+            "type": "bytes32"
+          }
+        ],
+        "name": "AgreementRejected",
+        "outputs": null,
+        "type": "event"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes32",
+            "name": "tradeId",
+            "type": "bytes32"
+          }
+        ],
+        "name": "AgreementCancelled",
+        "outputs": null,
+        "type": "event"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes32",
+            "name": "tradeId",
+            "type": "bytes32"
+          }
+        ],
+        "name": "AgreementSettled",
+        "outputs": null,
+        "type": "event"
+      }
+    ]
+  bytecodeJSON: |-
+    {
+      "object": "0x"
+    }
+  description: "FXAgreement contract for bilateral private contexts (Pente) — manages FX deal lifecycle (propose/accept/reject/cancel/settle) with IdentityRegistry clearance gates"
+  source: "contracts/src/FXAgreement.sol"
+  targetNetwork: "pente-bilateral"

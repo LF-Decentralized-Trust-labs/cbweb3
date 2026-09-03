@@ -1,0 +1,212 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Package router registers API Gateway routes and attaches required dependencies.
+// Scenario B v2 routes are registered by the v2 sub-package (T045/T070/T091).
+package router
+
+import (
+	"os"
+
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/middleware"
+	v2router "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/router/v2"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
+	"github.com/gofiber/fiber/v2"
+)
+
+// Dependencies groups handlers and validators required by route registration.
+type Dependencies struct {
+	AuthHandler            *handlers.AuthHandler
+	ComplianceHandler      *handlers.ComplianceHandler
+	GovernanceHandler      *handlers.GovernanceHandler
+	SupervisorHandler      *handlers.SupervisorHandler
+	OnboardingHandler      *handlers.OnboardingHandler
+	OnboardingProxyHandler *handlers.OnboardingProxyHandler
+	// SpokesHandler serves the internal spoke self-registration endpoint (hub only).
+	SpokesHandler *handlers.SpokesHandler
+	AuthProvider  interfaces.IAuthProvider
+	// PaymentProxyHandler proxies /api/v1/payments/* to the Central Bank gateway.
+	// Only wired when CENTRAL_BANK_API_URL is set (commercial bank gateways).
+	PaymentProxyHandler *handlers.PaymentProxyHandler
+	// PaymentHandler serves /api/v1/token/* endpoints via gRPC to the payment-orchestrator.
+	// Only wired when PAYMENT_GRPC_ADDR is set.
+	PaymentHandler *handlers.PaymentHandler
+	V2Deps         v2router.Dependencies
+}
+
+// Setup registers all gateway HTTP routes and middleware.
+func Setup(app *fiber.App, deps Dependencies) {
+	// X-Correlation-Id: generated/propagated on ALL requests (Complemento D / NFR-OPS-001).
+	app.Use(middleware.CorrelationID())
+
+	app.Get("/openapi.yaml", handlers.OpenAPIYAML)
+	app.Get("/docs", handlers.SwaggerUI)
+	// Vendored, embedded Swagger UI assets — served locally so /docs works offline (no CDN).
+	app.Get("/docs/swagger-ui/:asset", handlers.SwaggerUIAsset)
+	app.Get("/healthz", handlers.Health)
+
+	// --- Auth ---
+	authGroup := app.Group("/api/v1/auth")
+	authGroup.Post("/login", deps.AuthHandler.Login)
+	authGroup.Post("/refresh", deps.AuthHandler.Refresh)
+	authGroup.Post("/logout", middleware.RequireCookieAuth(deps.AuthProvider), deps.AuthHandler.Logout)
+	authGroup.Post("/wallet/bind", deps.AuthHandler.WalletBind)
+	authGroup.Post("/client-secret/change", middleware.RequireCookieAuth(deps.AuthProvider), deps.AuthHandler.ChangeClientSecret)
+	authGroup.Get("/me", middleware.RequireCookieAuth(deps.AuthProvider), deps.AuthHandler.Me)
+
+	// --- Onboarding (3-phase PKI + Blockchain) ---
+	if deps.OnboardingProxyHandler != nil {
+		g := app.Group("/api/v1/onboarding", middleware.RequireCookieAuth(deps.AuthProvider))
+		g.Post("/initiate", deps.OnboardingProxyHandler.InitiateCredentialRequest)
+		g.Get("/status/:requestId", deps.OnboardingProxyHandler.GetOnboardingStatus)
+		g.Get("/my-status", deps.OnboardingProxyHandler.GetMyOnboardingStatus)
+		g.Post("/complete", deps.OnboardingProxyHandler.CompleteOnboarding)
+
+		authGroup.Post("/pki-login", middleware.RequireCookieAuth(deps.AuthProvider), deps.OnboardingProxyHandler.PKILogin)
+	} else if deps.OnboardingHandler != nil {
+		g := app.Group("/api/v1/onboarding")
+		g.Post("/credential-request", deps.OnboardingHandler.SubmitCredentialRequest)
+		g.Get("/status/:requestId", deps.OnboardingHandler.GetOnboardingStatus)
+		g.Get("/my-status", deps.OnboardingHandler.GetMyOnboardingStatus)
+		g.Post("/complete", deps.OnboardingHandler.CompleteOnboarding)
+	}
+
+	// --- Compliance (KYC status, AML gate — infrastructure reused from Scenario A) ---
+	complianceGroup := app.Group("/api/v1/compliance", middleware.RequireCookieAuth(deps.AuthProvider))
+	complianceGroup.Get("/kyc/status/:subject", deps.ComplianceHandler.GetKYCStatus)
+	complianceGroup.Post("/aml/screen", deps.ComplianceHandler.AMLScreen)
+	complianceGroup.Get("/participants", middleware.RequireRole("ROLE_GOVERNANCE"), deps.ComplianceHandler.ListParticipants)
+	complianceGroup.Post("/approve-kyc", middleware.RequireRole("ROLE_GOVERNANCE"), deps.GovernanceHandler.ApproveKYC)
+	if deps.SupervisorHandler != nil {
+		complianceGroup.Get("/audit/logs", middleware.RequireSupervisorRole(), deps.SupervisorHandler.GetAuditLogs)
+		complianceGroup.Get("/zk-pointer/verify", middleware.RequireSupervisorRole(), deps.SupervisorHandler.VerifyZKPointer)
+
+		// Read-only participants list for supervisor (same handler, no write access).
+		complianceGroup.Get("/participants/summary", middleware.RequireSupervisorRole(), deps.ComplianceHandler.ListParticipants)
+	}
+
+	// --- Governance Portal ---
+	govGroup := app.Group("/api/v1/governance",
+		middleware.RequireCookieAuth(deps.AuthProvider),
+		middleware.RequireRole("ROLE_GOVERNANCE"),
+	)
+	govGroup.Post("/participants", deps.GovernanceHandler.RegisterParticipant)
+	govGroup.Get("/registry", deps.GovernanceHandler.GetRegistry)
+	govGroup.Post("/registry/csr", deps.GovernanceHandler.SubmitCSR)
+	govGroup.Get("/accounts", deps.GovernanceHandler.GetAccounts)
+	govGroup.Post("/accounts/freeze", deps.GovernanceHandler.FreezeAccount)
+	govGroup.Post("/accounts/unfreeze", deps.GovernanceHandler.UnfreezeAccount)
+	govGroup.Get("/circuit-breaker/status", deps.GovernanceHandler.GetCircuitBreakerStatus)
+	govGroup.Post("/circuit-breaker/toggle", deps.GovernanceHandler.ToggleCircuitBreaker)
+	govGroup.Get("/parameters", deps.GovernanceHandler.GetParameters)
+	govGroup.Put("/parameters", deps.GovernanceHandler.UpdateParameters)
+	govGroup.Get("/audit/logs", deps.GovernanceHandler.GetAuditLogs)
+	govGroup.Get("/users", deps.GovernanceHandler.ListUsers)
+
+	// Audit log READ is shared across the CB portals (treasury/supervisor also consume it).
+	// It is served on a dedicated path OUTSIDE the /governance group so the group's
+	// ROLE_GOVERNANCE guard does not apply — Fiber group middleware is PREFIX-scoped and
+	// would otherwise 403 non-governance callers on any /governance/* path. Read-only:
+	// does not weaken any compliance/write control (those stay ROLE_GOVERNANCE-only).
+	app.Get("/api/v1/audit/logs",
+		middleware.RequireCookieAuth(deps.AuthProvider),
+		middleware.RequireRole("ROLE_GOVERNANCE", "ROLE_TREASURY", "ROLE_SUPERVISOR"),
+		deps.GovernanceHandler.GetAuditLogs,
+	)
+	govGroup.Get("/users/:userId", deps.GovernanceHandler.GetUser)
+
+	// --- Payment Proxy (commercial bank → Central Bank) ---
+	// Routes: POST/GET /api/v1/payments/{deposits,redeems}
+	// Only active when CENTRAL_BANK_API_URL is configured (commercial bank gateways).
+	// The proxy injects requester_besu_address automatically from gateway config —
+	// the frontend only needs to send {amount} for most calls.
+	if deps.PaymentProxyHandler != nil {
+		payments := app.Group("/api/v1/payments", middleware.RequireCookieAuth(deps.AuthProvider))
+		payments.Post("/deposits/exchange", deps.PaymentProxyHandler.RequestFiatExchange)
+		payments.Post("/deposits", deps.PaymentProxyHandler.RegisterDeposit)
+		payments.Get("/deposits", deps.PaymentProxyHandler.ListDeposits)
+		payments.Post("/escrows", deps.PaymentProxyHandler.RequestEscrow)
+		payments.Get("/escrows", deps.PaymentProxyHandler.ListEscrows)
+		payments.Post("/redeems", deps.PaymentProxyHandler.RequestRedeem)
+		payments.Get("/redeems", deps.PaymentProxyHandler.ListRedeems)
+	}
+
+	// --- Payment Handler — Central Bank gateway routes (direct gRPC, no proxy) ---
+	// Deposits and redeems with approve/reject — only on CB gateways
+	// (PAYMENT_GRPC_ADDR set, CENTRAL_BANK_API_URL not set → PaymentProxyHandler == nil).
+	if deps.PaymentHandler != nil && deps.PaymentProxyHandler == nil {
+		payments := app.Group("/api/v1/payments", middleware.RequireCookieAuth(deps.AuthProvider))
+		payments.Post("/deposits/approve", deps.PaymentHandler.ApproveDeposit)
+		payments.Post("/deposits/reject", deps.PaymentHandler.RejectDeposit)
+		payments.Post("/deposits/exchange", deps.PaymentHandler.RequestFiatExchange)
+		payments.Get("/deposits", deps.PaymentHandler.ListDeposits)
+		payments.Get("/escrows", deps.PaymentHandler.ListEscrows)
+		payments.Post("/escrows/approve", deps.PaymentHandler.ApproveEscrow)
+		payments.Post("/escrows/reject", deps.PaymentHandler.RejectEscrow)
+		payments.Post("/redeems/approve", deps.PaymentHandler.ApproveRedeem)
+		payments.Post("/redeems/reject", deps.PaymentHandler.RejectRedeem)
+		payments.Get("/redeems", deps.PaymentHandler.ListRedeems)
+	}
+
+	// --- Token balance (tCeBM via payment-orchestrator gRPC) ---
+	if deps.PaymentHandler != nil {
+		token := app.Group("/api/v1/token", middleware.RequireCookieAuth(deps.AuthProvider))
+		token.Get("/balance", deps.PaymentHandler.GetBalance)
+		token.Get("/fiat-balance", deps.PaymentHandler.GetFiatBalance)
+	}
+
+	// --- Internal Relay Endpoints (for commercial bank proxy) ---
+	// Protected by X-Relay-Auth header, used by PaymentProxyHandler from commercial banks.
+	// Only wired on Central Bank gateways (PaymentHandler exists, PaymentProxyHandler doesn't).
+	if deps.PaymentHandler != nil && deps.PaymentProxyHandler == nil {
+		// Signature-preferred, secret-fallback — the same policy as the /internal/amm routes. These
+		// carry a commercial bank's deposits, escrows and redeems to its CB, so authenticating them by
+		// a secret identical in every entity meant any entity could drive another bank's tokenisation
+		// and redemption. The bank's proxy signs them; the secret remains for the migration window.
+		internal := app.Group("/internal/v1", middleware.RequireRelayAuthMigrating(deps.V2Deps.RelayAuth))
+
+		internalPayments := internal.Group("/payments")
+
+		// The creation routes are the write half of the same tenant boundary as the listings below,
+		// and they were open in the same way: requester_besu_address decides whose record is created
+		// and it arrived in the body, which the signature covers but does not attribute. The bank
+		// proxy injecting its own address protects honest proxy traffic only — an onboarded bank
+		// signs its own calls, so it could POST here naming another bank and have the record created
+		// against it. The field is therefore derived from the verified identity, exactly as
+		// requester_id is on the reads.
+		//
+		// The fiat exchange names no address to overwrite: it names a deposit, so it is bound by
+		// whose deposit that is.
+		scopeBodyToCaller := middleware.ScopeRequesterBodyToCaller(deps.V2Deps.RequesterScopeResolver)
+		internalPayments.Post("/deposits/exchange",
+			middleware.BindDepositToCaller(deps.V2Deps.RequesterScopeResolver, deps.PaymentHandler),
+			deps.PaymentHandler.RequestFiatExchange)
+		internalPayments.Post("/deposits", scopeBodyToCaller, deps.PaymentHandler.RegisterDeposit)
+		internalPayments.Post("/escrows", scopeBodyToCaller, deps.PaymentHandler.RequestEscrow)
+		internalPayments.Post("/redeems", scopeBodyToCaller, deps.PaymentHandler.RequestRedeem)
+		// The listing handlers are shared with the CB's own /api/v1/payments routes, where returning the
+		// whole book is the point. Here the caller is a single commercial bank, so requester_id is the
+		// tenant boundary — and it is therefore taken from the identity whose signature was verified,
+		// not from the query string, which no signature covers. A bank that signs a listing request and
+		// attaches another bank's address gets its own records back, and a caller with no verified
+		// identity gets none.
+		scopeToCaller := middleware.ScopeRequesterToCaller(deps.V2Deps.RequesterScopeResolver)
+		internalPayments.Get("/deposits", scopeToCaller, deps.PaymentHandler.ListDeposits)
+		internalPayments.Get("/escrows", scopeToCaller, deps.PaymentHandler.ListEscrows)
+		internalPayments.Get("/redeems", scopeToCaller, deps.PaymentHandler.ListRedeems)
+	}
+
+	// --- Internal spoke self-registration (hub only) ---
+	// A founding central bank registers its spoke on the hub IdentityRegistry via
+	// the hub compliance service. Machine-to-machine, guarded by X-Relay-Auth.
+	if deps.SpokesHandler != nil {
+		relaySecret := os.Getenv("INTERNAL_RELAY_AUTH_SECRET")
+		spokes := app.Group("/internal/v1", middleware.RequireRelayAuth(relaySecret))
+		spokes.Post("/spokes/register", deps.SpokesHandler.RegisterSpoke)
+		spokes.Post("/spokes/register-currency", deps.SpokesHandler.RegisterSpokeCurrency)
+		spokes.Post("/spokes/register-pair", deps.SpokesHandler.RegisterSpokePair)
+	}
+
+	// --- Scenario B API v2 ---
+	v2router.Register(app, deps.V2Deps)
+}

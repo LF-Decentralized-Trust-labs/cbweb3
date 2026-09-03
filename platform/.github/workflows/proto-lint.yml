@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+name: proto lint — scenario-a + scenario-b
+
+# `make proto-lint` existed in both scenarios and failed in both — 26 violations in
+# scenario-a, 21 in scenario-b — but no workflow ran it, so nothing surfaced them.
+# A target that fails and is never executed is not a gate; this makes it one.
+#
+# The legacy names behind those violations are grandfathered per file and per rule in
+# each apis/proto/buf.yaml, with the reasoning recorded there. The rules stay live for
+# every other file, so a NEW proto that violates them fails here.
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "scenario-a/apis/proto/**"
+      - "scenario-b/apis/proto/**"
+      - ".github/workflows/proto-lint.yml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "scenario-a/apis/proto/**"
+      - "scenario-b/apis/proto/**"
+      - ".github/workflows/proto-lint.yml"
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: buf lint (${{ matrix.scenario }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [scenario-a, scenario-b]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ github.token }}
+      - name: buf lint
+        working-directory: ${{ matrix.scenario }}/apis/proto
+        run: buf lint

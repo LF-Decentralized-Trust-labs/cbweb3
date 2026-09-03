@@ -1,0 +1,49 @@
+# yaml-language-server: $schema=../../../scenario-a/provisioning/schema/v1/participant-deployment.schema.yaml
+# LNET deploy — Scenario A. VM ${IP_CB_PERU} — Central Bank Peru, FOUNDS spoke-peru (PEN).
+# Independent spoke; the Cacti relay on ${IP_HUB} bridges the spokes (correspondent banking).
+# dataDir + emitted join bundle under deploy-lnet/bundles/scenario-a/spoke-peru/
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-peru
+spec:
+  scenario: a
+  environment: local
+  role: central-bank
+  mode: found
+  displayName: Banco Central de Reserva del Perú
+  spoke:
+    id: spoke-peru
+    chainId: 2027
+    currency: PEN
+    # ERC-20 metadata of this spoke's own fCeBM (the public Besu-layer fiat token).
+    # Optional — absent, both derive from `currency` (exactly the values below).
+    # Declared explicitly so each spoke's token identity is auditable in config.
+    # The symbol must keep the "<prefix>_<ISO>" shape and end in this spoke's own
+    # currency; `currency` stays the semantic key the portals display (FIAT_SYMBOL).
+    # Scenario A deploys no tCeBM: the tokenised side is a Zeto privacy token, which
+    # has no ERC-20 symbol — so fCeBM is the only configurable token identity here.
+    fiatTokenName: Fiat PEN
+    fiatTokenSymbol: fCeBM_PEN
+  node:
+    advertisedHost: ${IP_CB_PERU}
+    rpc: { port: 8645 }
+    ws:  { port: 8655 }
+    p2p: { port: 30303 }
+    dataDir: ../deploy-lnet/bundles/scenario-a/spoke-peru
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed://local
+  relay:
+    endpoint: http://${IP_HUB}:4000
+    advertisedHost: ${IP_CB_PERU}
+  cbEndpoint: http://${IP_CB_PERU}:18645/api/v1/credential-request
+  frontendHost: cb-peru.cbweb3.l-net.io
+  launcher: enable
+  launcherPort: 5190
+  proxy: enable
+  adminUsers:
+    - { role: ROLE_GOVERNANCE, username: governance@cb-peru.l-net.io, password: change-me-local }
+    - { role: ROLE_TREASURY,   username: treasury@cb-peru.l-net.io,   password: change-me-local }
+    - { role: ROLE_SUPERVISOR, username: supervisor@cb-peru.l-net.io, password: change-me-local }
+    - { role: ROLE_NOC_ADMIN,  username: noc@cb-peru.l-net.io,        password: change-me-local }

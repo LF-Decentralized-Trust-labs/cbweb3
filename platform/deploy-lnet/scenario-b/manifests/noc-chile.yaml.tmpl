@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=../../../scenario-b/provisioning/schema/v1/participant-deployment.schema.yaml
+# LNET deploy — Scenario B. NOC (Network Operations Center) for spoke-chile,
+# CO-LOCATED on the Central Bank Chile VM (${IP_CB_CHILE}) — one NOC portal
+# per spoke (client requirement). Consumes the NOC bundle emitted by
+# central-bank-chile's found-spoke (local on this VM) and stands up the NOC
+# control plane (Postgres + noc-backend :8090 + noc-portal :3030) in its own
+# docker network. It runs NO on-chain node.
+#
+# The agents live WITH each entity: central-bank-chile (found-spoke, same VM →
+# default host.docker.internal:8090) and each joining bank (cb3/cb4, other VMs →
+# spec.noc.backendURL: http://${IP_CB_CHILE}:8090) push their own node health here.
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: noc-chile
+spec:
+  scenario: "b"
+  environment: local
+  mode: observe
+  topology:
+    role: noc
+  displayName: NOC — spoke-chile
+  # NOC bundle emitted by central-bank-chile (found-spoke) and relocated by
+  # deploy.sh into the scenario-b spoke folder (scenario-scoped).
+  nocBundleRef: ../../bundles/scenario-b/spoke-chile/spoke-chile.noc.bundle.yaml
+  noc:
+    pushIntervalSeconds: 15
+    components: [BESU, CACTI_RELAY]
+    # Portal auth: CB Chile's Keycloak realm (co-located, 15845) + launcher (5190).
+    keycloakURL: http://${IP_CB_CHILE}:15845
+    launcherURL: http://${IP_CB_CHILE}:5190
+  frontendHost: ${IP_CB_CHILE}
+  adminUsers:
+    - { role: ROLE_NOC_ADMIN,    username: noc-admin@noc-chile.l-net.io,    password: change-me-local }
+    - { role: ROLE_NOC_OPERATOR, username: noc-operator@noc-chile.l-net.io, password: change-me-local }
+    - { role: ROLE_NOC_VIEWER,   username: noc-viewer@noc-chile.l-net.io,   password: change-me-local }

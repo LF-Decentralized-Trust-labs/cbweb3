@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+name: API Artifacts
+
+permissions:
+  contents: read
+
+# The served OpenAPI spec is the source of truth for the published Postman
+# collections. Nothing regenerates them automatically, so without this gate a spec
+# change ships a collection that describes the previous API surface — which is how
+# the committed collections came to omit 14 live endpoints and advertise one that
+# had been removed.
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "scenario-a/backend/services/api-gateway/docs/openapi.yaml"
+      - "scenario-a/apis/postman/**"
+      - "scenario-b/backend/services/api-gateway/docs/openapi.yaml"
+      - "scenario-b/apis/postman/**"
+      - ".github/workflows/api-artifacts.yml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "scenario-a/backend/services/api-gateway/docs/openapi.yaml"
+      - "scenario-a/apis/postman/**"
+      - "scenario-b/backend/services/api-gateway/docs/openapi.yaml"
+      - "scenario-b/apis/postman/**"
+      - ".github/workflows/api-artifacts.yml"
+  workflow_dispatch:
+
+jobs:
+  postman-drift:
+    name: OpenAPI lint + Postman drift (${{ matrix.scenario }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [scenario-a, scenario-b]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Lints the served spec and fails if the committed collection no longer
+      # matches it. Regenerate locally with `bash apis/postman/generate.sh`.
+      - name: Lint the served spec and check the collection for drift
+        working-directory: ${{ matrix.scenario }}
+        run: bash apis/postman/generate.sh --check

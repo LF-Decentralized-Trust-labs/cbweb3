@@ -1,0 +1,278 @@
+syntax = "proto3";
+
+package compliance.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+option go_package = "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/compliance/v1;compliancv1";
+
+// ─── Participant ──────────────────────────────────────────────────────────
+
+message Participant {
+  string user_id = 1;
+  string institution_name = 2;
+  string legal_entity_id = 3;
+  string bank_code = 4;
+  string country_code = 5;
+  string role = 6;
+  string wallet_address = 7;
+  string status = 8; // PENDING | CREDENTIAL_REQUESTED | KYC_APPROVED | ACTIVE | FROZEN | REVOKED
+  string certificate_data = 9;
+  optional google.protobuf.Timestamp certificate_expiry = 10;
+  string blockchain_pub_key_hex = 11;
+  string csr_pem = 12;
+  string pop_nonce = 13;
+  optional google.protobuf.Timestamp pop_nonce_expires_at = 14;
+}
+
+message UpsertParticipantRequest {
+  Participant participant = 1;
+}
+
+message UpsertParticipantResponse {
+  bool success = 1;
+}
+
+message GetParticipantByUserRequest {
+  string user_id = 1;
+}
+
+message GetParticipantByUserResponse {
+  bool found = 1;
+  Participant participant = 2;
+}
+
+message ListParticipantsRequest {
+  string status = 1; // empty = all statuses
+  string search = 2; // optional free-text filter
+}
+
+message ListParticipantsResponse {
+  repeated Participant participants = 1;
+}
+
+// ─── Audit log ────────────────────────────────────────────────────────────
+
+message AuditLogEntry {
+  string actor_subject = 1;
+  string actor_address = 2;
+  string action_type = 3;
+  string target_subject = 4;
+  string correlation_id = 5;
+  string ip_address = 6;
+  string result = 7;
+  string category = 8;
+  string severity = 9;
+  string details = 10;
+}
+
+message CreateAuditLogRequest {
+  AuditLogEntry entry = 1;
+}
+
+message CreateAuditLogResponse {
+  bool success = 1;
+}
+
+message GetAuditLogsRequest {
+  string category = 1;
+  string severity = 2;
+  string from_date = 3; // ISO-8601 UTC
+  string to_date = 4; // ISO-8601 UTC
+  int32 page = 5;
+  int32 limit = 6;
+}
+
+message AuditLogRecord {
+  string log_id = 1;
+  string timestamp = 2;
+  string actor_subject = 3;
+  string actor_address = 4;
+  string action_type = 5;
+  string target_subject = 6;
+  string correlation_id = 7;
+  string category = 8;
+  string severity = 9;
+  string result = 10;
+  string details = 11;
+}
+
+message GetAuditLogsResponse {
+  repeated AuditLogRecord logs = 1;
+}
+
+// ─── PKI certificate issuance ─────────────────────────────────────────────
+
+message IssueParticipantCertificateRequest {
+  string user_id = 1;
+  string role = 2;
+  string institution_name = 3;
+  string legal_entity_id = 4;
+}
+
+message IssueParticipantCertificateResponse {
+  string cert_pem = 1;
+  string priv_key_pem = 2; // caller must persist securely
+  string expires_at = 3; // ISO-8601 UTC
+}
+
+// ─── PKI CSR signing ──────────────────────────────────────────────────────
+
+message SignParticipantCSRRequest {
+  string csr_pem = 1;
+  string user_id = 2;
+  string role = 3;
+  string institution_name = 4;
+  string legal_entity_id = 5;
+}
+
+message SignParticipantCSRResponse {
+  string cert_pem = 1;
+  string expires_at = 2; // ISO-8601 UTC
+}
+
+message RegisterParticipantOnChainRequest {
+  string wallet_address = 1; // 0x… address to register
+  string institution_name = 2;
+  string role = 3; // e.g. "ROLE_CENTRAL_BANK"
+  string bank_code = 4; // optional, for the DB mirror / audit
+}
+
+message RegisterParticipantOnChainResponse {
+  string tx_hash = 1; // empty when already registered
+  bool already_registered = 2;
+}
+
+// RegisterCurrencyOnChain asks the hub to deploy a founding central bank's
+// bridge token (W-token) and register the sovereign currency on-chain. The
+// signer (hub admin == the CB in local) deploys the token, maps token→CB on
+// the IdentityRegistry, and registers it on the CurrencyRegistry. Idempotent.
+message RegisterCurrencyOnChainRequest {
+  string currency = 1; // e.g. "BRL"
+  string cb_address = 2; // 0x… central bank wallet address
+  string spoke_id = 3; // optional proposer identifier
+}
+
+message RegisterCurrencyOnChainResponse {
+  string symbol = 1; // W-token symbol (e.g. "W-tCeBM_BRL")
+  string token_address = 2; // deployed W-token address (empty when already registered)
+  bool already_registered = 3;
+  string tx_hash = 4; // last on-chain tx hash
+}
+
+// RegisterPairOnChain deploys the sovereign-pair AMM over the two already-
+// registered W-tokens and registers the pair (proposePair + confirmPair) via the
+// hub compliance signer. The CBs never touch the hub chain. Idempotent by pair id.
+message RegisterPairOnChainRequest {
+  string currency_a = 1; // e.g. "BRL" (resolves symbol "W-tCeBM_BRL")
+  string currency_b = 2; // e.g. "ARS"
+  string pair_id = 3; // e.g. "W-BRL-ARS"
+}
+
+message RegisterPairOnChainResponse {
+  string amm_address = 1; // deployed sovereign-pair AMM (empty when already registered)
+  bool already_registered = 2;
+  string tx_hash = 3; // last on-chain tx hash
+}
+
+// ─── Governance ───────────────────────────────────────────────────────────
+
+message ApproveKYCRequest {
+  string subject = 1; // Keycloak user ID
+  string actor_subject = 2; // Who is approving
+  string reason = 3;
+}
+
+message ApproveKYCResponse {
+  string subject = 1;
+  string status = 2; // KYC_APPROVED (no longer ACTIVE; activation happens at CompleteOnboarding)
+  string tx_hash = 3; // on-chain transaction hash (empty in new flow; kept for backward compat)
+  // pop_nonce is the hex-encoded 32-byte nonce the commercial bank must sign
+  // with its secp256k1 key to prove wallet ownership (Proof of Possession).
+  string pop_nonce = 4;
+}
+
+message ManageParticipantStatusRequest {
+  string subject = 1;
+  string status = 2; // ACTIVE | FROZEN | REVOKED
+  string reason = 3;
+}
+
+message ManageParticipantStatusResponse {
+  string subject = 1;
+  string status = 2;
+}
+
+message GetCircuitBreakerStatusResponse {
+  bool is_paused = 1;
+  string last_update = 2; // ISO-8601 UTC
+  string updated_by = 3;
+}
+
+message ToggleCircuitBreakerRequest {
+  bool pause = 1;
+  string reason = 2;
+}
+
+message ToggleCircuitBreakerResponse {
+  bool is_paused = 1;
+  string tx_hash = 2;
+}
+
+message GetSystemParametersResponse {
+  string transaction_minimum = 1;
+  string transaction_maximum = 2;
+  double slippage_tolerance = 3;
+  int64 settlement_window = 4;
+}
+
+message UpdateSystemParametersRequest {
+  string transaction_minimum = 1;
+  string transaction_maximum = 2;
+  double slippage_tolerance = 3;
+  int64 settlement_window = 4;
+  string reason = 5;
+  string actor_subject = 6;
+}
+
+message UpdateSystemParametersResponse {
+  bool success = 1;
+}
+
+// ─── Service ──────────────────────────────────────────────────────────────
+
+service ComplianceService {
+  rpc UpsertParticipant(UpsertParticipantRequest) returns (UpsertParticipantResponse);
+  rpc GetParticipantByUser(GetParticipantByUserRequest) returns (GetParticipantByUserResponse);
+  rpc ListParticipants(ListParticipantsRequest) returns (ListParticipantsResponse);
+
+  rpc CreateAuditLog(CreateAuditLogRequest) returns (CreateAuditLogResponse);
+  rpc GetAuditLogs(GetAuditLogsRequest) returns (GetAuditLogsResponse);
+
+  rpc IssueParticipantCertificate(IssueParticipantCertificateRequest) returns (IssueParticipantCertificateResponse);
+  rpc SignParticipantCSR(SignParticipantCSRRequest) returns (SignParticipantCSRResponse);
+
+  // RegisterParticipantOnChain registers a wallet as a participant directly on
+  // the IdentityRegistry (the signer must hold GOVERNANCE_ROLE). Used for
+  // machine-to-machine self-registration (e.g. a founding central bank
+  // registering its spoke) — no CSR / prior DB record required. Idempotent.
+  rpc RegisterParticipantOnChain(RegisterParticipantOnChainRequest) returns (RegisterParticipantOnChainResponse);
+
+  // RegisterCurrencyOnChain deploys a founding central bank's bridge token
+  // (W-token) and registers its sovereign currency on-chain via the hub
+  // compliance signer (hub admin). Idempotent by currency symbol.
+  rpc RegisterCurrencyOnChain(RegisterCurrencyOnChainRequest) returns (RegisterCurrencyOnChainResponse);
+
+  // RegisterPairOnChain deploys the sovereign-pair AMM over two registered
+  // W-tokens and registers the pair (proposePair + confirmPair) via the hub
+  // compliance signer. Idempotent by pair id.
+  rpc RegisterPairOnChain(RegisterPairOnChainRequest) returns (RegisterPairOnChainResponse);
+
+  rpc ApproveKYC(ApproveKYCRequest) returns (ApproveKYCResponse);
+  rpc ManageParticipantStatus(ManageParticipantStatusRequest) returns (ManageParticipantStatusResponse);
+  rpc GetCircuitBreakerStatus(google.protobuf.Empty) returns (GetCircuitBreakerStatusResponse);
+  rpc ToggleCircuitBreaker(ToggleCircuitBreakerRequest) returns (ToggleCircuitBreakerResponse);
+  rpc GetSystemParameters(google.protobuf.Empty) returns (GetSystemParametersResponse);
+  rpc UpdateSystemParameters(UpdateSystemParametersRequest) returns (UpdateSystemParametersResponse);
+}

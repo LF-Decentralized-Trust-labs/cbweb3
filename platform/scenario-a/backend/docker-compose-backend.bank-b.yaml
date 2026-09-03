@@ -1,0 +1,136 @@
+services:
+  compliance-bank-b:
+    build:
+      context: .
+      dockerfile: services/compliance/Dockerfile
+    image: cbweb3/compliance:local
+    pull_policy: build
+    container_name: "backend-compliance-bank-b"
+    # Runs as the host user rather than the image default (uid 10001): this service mounts
+    # ./config/pki from the repository, owned by whoever checked it out, so another uid can
+    # read it (0775) but cannot persist an issued certificate. The make targets export these;
+    # a hand-run `docker compose` falls back to the image uid, which is still not root
+    # (finding R2-M-12).
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
+    env_file:
+      - path: ./config/.env.infra.bank-b
+        required: true
+    environment:
+      COMPLIANCE_GRPC_PORT: "9093"
+      BANK_CODE: "bank-b"
+      PKI_DIR: /workspace/backend/config/pki
+      POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_bank_b}?sslmode=disable"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
+    ports:
+      - "29093:9093"
+    networks:
+      - cbweb3_backend_bank_b
+      - cbweb3_network
+
+  auth-bank-b:
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    image: cbweb3/auth:local
+    pull_policy: build
+    container_name: "backend-auth-bank-b"
+    env_file:
+      - path: ./config/.env.infra.bank-b
+        required: true
+    environment:
+      AUTH_GRPC_PORT: "9091"
+      KEYCLOAK_BASE_URL: "${KEYCLOAK_BASE_URL:-http://keycloak:8080}"
+      KEYCLOAK_REALM: "${KC_REALM:-bank-b}"
+      KEYCLOAK_CLIENT_ID: "${KC_CLIENT_ID:-bank-b-client}"
+      KEYCLOAK_CLIENT_SECRET: "${KC_CLIENT_SECRET:-change-me}"
+      KEYCLOAK_JWKS_CACHE_TTL_SEC: "3000"
+      KEYCLOAK_REQUEST_TIMEOUT_SEC: "10"
+      # Local-dev: seed KMS so onboarding's wallet == this bank's BESU_OPERATOR_KEY
+      # address (the orchestrator's HTLC signer), satisfying contracts' onlyVerified.
+      KMS_SEED_KEY_ID: "bank-b"
+      KMS_SEED_PRIVATE_KEY: "0dbbe8e4ae425a6d2687f1a7e3ba17bc98c673636790f1b8ad91193c05875ef1"
+      COMPLIANCE_GRPC_ADDR: compliance-bank-b:9093
+      COMPLIANCE_REQUEST_TIMEOUT_SEC: "5"
+      REDIS_ADDR: "${REDIS_CONTAINER_NAME:-cbweb3-redis}:6379"
+      REDIS_DB: "1"
+    ports:
+      - "29091:9091"
+    depends_on:
+      - compliance-bank-b
+    networks:
+      - cbweb3_backend_bank_b
+      - cbweb3_network
+
+  payment-orchestrator-bank-b:
+    build:
+      context: .
+      dockerfile: services/payment-orchestrator/Dockerfile
+    image: cbweb3/payment-orchestrator:local
+    pull_policy: build
+    container_name: "backend-payment-orchestrator-bank-b"
+    env_file:
+      - path: ./config/.env.infra.bank-b
+        required: true
+      - path: ../deploy/local/paladin/spoke-b/.deployed-addrs.env
+        required: false
+    environment:
+      PAYMENT_GRPC_PORT: "9094"
+      PALADIN_URL: "http://host.docker.internal:31758"
+      PALADIN_IDENTITY: "funded_operator@spoke-b-bank-b"
+      BESU_OPERATOR_KEY: "0dbbe8e4ae425a6d2687f1a7e3ba17bc98c673636790f1b8ad91193c05875ef1"
+      CACTI_API_URL: "http://host.docker.internal:4000"
+    ports:
+      - "29094:9094"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cbweb3_backend_bank_b
+      - cbweb3_network
+
+  api-gateway-bank-b:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    image: cbweb3/api-gateway:local
+    pull_policy: build
+    container_name: "backend-api-gateway-bank-b"
+    # Runs as the host user rather than the image default (uid 10001): this service mounts
+    # ./config/pki from the repository, owned by whoever checked it out, so another uid can
+    # read it (0775) but cannot persist an issued certificate. The make targets export these;
+    # a hand-run `docker compose` falls back to the image uid, which is still not root
+    # (finding R2-M-12).
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
+    env_file:
+      - path: ./config/.env.infra.bank-b
+        required: true
+    environment:
+      APP_PORT: "8080"
+      REQUEST_TIMEOUT_SEC: "30"
+      AUTH_GRPC_ADDR: auth-bank-b:9091
+      COMPLIANCE_GRPC_ADDR: compliance-bank-b:9093
+      PAYMENT_GRPC_ADDR: payment-orchestrator-bank-b:9094
+      PKI_DIR: /workspace/backend/config/pki
+      BANK_CODE: "bank-b"
+      CENTRAL_BANK_API_URL: "http://api-gateway-central-bank-b:8080"
+      FIAT_SYMBOL: "BRL"
+      TRANSFER_LIMIT_COMPLIANCE_ADDR: "compliance-central-bank-b:9093"
+      ENTITY_BESU_ADDRESS: "0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef"
+      PALADIN_IDENTITY: "funded_operator@spoke-b-bank-b"
+      CB_PALADIN_IDENTITY: "funded_operator@spoke-b-cb"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
+    ports:
+      - "28080:8080"
+    depends_on:
+      - auth-bank-b
+      - compliance-bank-b
+      - payment-orchestrator-bank-b
+    networks:
+      - cbweb3_backend_bank_b
+      - cbweb3_network
+
+networks:
+  cbweb3_backend_bank_b:
+  cbweb3_network:
+    external: true

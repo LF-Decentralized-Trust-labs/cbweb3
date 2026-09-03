@@ -1,0 +1,37 @@
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: hub-cbweb3
+spec:
+  scenario: "b"
+  environment: local
+  mode: found-hub
+  topology:
+    role: hub
+  displayName: "CBWeb3 Interoperability Hub"
+  hub:
+    chainId: 1337
+    # Declarative: the currencies this hub is expected to host. found-hub deploys
+    # NO token — each central bank registers its own currency at found-spoke, and
+    # the hub then creates that currency's mirrored token (W-tCeBM_<ISO>).
+    currency: [BRL, ARS, COP]
+  node:
+    advertisedHost: host.docker.internal
+    rpc:  { port: 33845 }
+    ws:   { port: 33855 }
+    p2p:  { port: 56503 }
+    dataDir: cbweb3-data/hub
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  relay:
+    endpoint: http://localhost:7000
+  frontendHost: localhost
+  # No launcher on the hub: the per-entity launcher (distributed A/B entry point) is for
+  # commercial banks and central banks, not the network operator's hub.
+  adminUsers:
+    - { role: GOVERNANCE, username: admin@hub.governance.gov, password: hub-governance-local }
+    - { role: NOC_ADMIN,  username: admin@hub.noc.gov,        password: hub-noc-local }
+  # Reverse proxy off — these many-entity single-host samples are port-based via the
+  # per-entity launcher. Test the proxy separately with proxy-smoke.sh (one entity per host).
+  proxy: disable

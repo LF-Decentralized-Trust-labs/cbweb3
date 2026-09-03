@@ -1,0 +1,78 @@
+services:
+  besu-joiner:
+    image: hyperledger/besu:25.8.0
+    container_name: spk02-besu-joiner
+    networks:
+      - spk02_join_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${HOST_P2P_JOIN:-32306}:30303/tcp"
+      - "${HOST_P2P_JOIN:-32306}:30303/udp"
+      - "${HOST_RPC_JOIN:-9646}:8545"
+      - "${HOST_WS_JOIN:-9656}:8546"
+    volumes:
+      - ../data/genesis.json:/opt/besu/genesis/genesis.json:ro
+      - ../data/key3:/opt/besu/data/key:ro
+      - besu_joiner_data:/opt/besu/data
+    command:
+      - --nat-method=DOCKER
+      - --bootnodes=${BOOTNODE_ENODE}
+      - --p2p-port=30303
+      - --rpc-http-enabled=true
+      - --rpc-http-port=8545
+      - --rpc-http-api=ETH,NET,QBFT,ADMIN
+      - --rpc-ws-enabled=true
+      - --rpc-ws-port=8546
+      - --rpc-http-host=0.0.0.0
+      - --rpc-ws-host=0.0.0.0
+      - --host-allowlist=*
+      - --rpc-http-cors-origins=all
+      - --genesis-file=/opt/besu/genesis/genesis.json
+      - --data-path=/opt/besu/data
+      - --node-private-key-file=/opt/besu/data/key
+      - --min-gas-price=0
+
+  paladin-bx-data-init:
+    image: alpine:3.23
+    user: "0:0"
+    volumes:
+      - paladin_bx_data:/data/bx
+    command: ["sh", "-c", "chmod -R 777 /data/bx"]
+    restart: "no"
+
+  paladin-bank-x:
+    image: docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1
+    container_name: spk02-paladin-bank-x
+    networks:
+      - spk02_join_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${HOST_PALADIN_BX_RPC:-9650}:8548"
+      - "${HOST_PALADIN_BX_GRPC:-9702}:9000"
+    environment:
+      - PALADIN_LOG_LEVEL=debug
+    volumes:
+      - ../data/paladin/bank-x/config.yaml:/etc/paladin/config.yaml:ro
+      - ../data/paladin/bank-x/tls.crt:/etc/paladin/tls.crt:ro
+      - ../data/paladin/bank-x/tls.key:/etc/paladin/tls.key:ro
+      - paladin_bx_data:/data
+    tmpfs:
+      - /app/jna:exec,mode=1777
+      - /data/keystore:mode=0777
+    command: ["/etc/paladin/config.yaml", "engine"]
+    depends_on:
+      paladin-bx-data-init:
+        condition: service_completed_successfully
+      besu-joiner:
+        condition: service_started
+
+networks:
+  spk02_join_net:
+    name: spk02_join_net
+    driver: bridge
+
+volumes:
+  besu_joiner_data:
+  paladin_bx_data:

@@ -1,0 +1,79 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package orchestrator
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"time"
+
+	"github.com/ethereum/go-ethereum/common"
+
+	kp "github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/keyprovider"
+)
+
+// registerNodesStep registers the central bank's Paladin node identity on-chain
+// (mode:found). It uses native Go logic parametrized by the spoke id — it does
+// NOT invoke the reference go-test scripts, which hardcode the spoke-a/spoke-b
+// topology and would register the wrong nodes for an arbitrary spoke.
+//
+// found is CB-only: exactly one node (<spoke-id>-cb) is registered here.
+// Commercial-bank Paladin nodes are registered dynamically at join time (TK-9 /
+// feature 033 US2).
+type registerNodesStep struct {
+	spokeID        string
+	dataDir        string
+	besuRPCURL     string
+	advertisedHost string // CB routable host; when routable, published as the transport endpoint
+	keyProvider    kp.KeyProvider
+	timeout        time.Duration
+}
+
+func newRegisterNodesStep(spokeID, dataDir, besuRPCURL, advertisedHost string, keyProvider kp.KeyProvider, timeout time.Duration) Step {
+	return &registerNodesStep{spokeID: spokeID, dataDir: dataDir, besuRPCURL: besuRPCURL, advertisedHost: advertisedHost, keyProvider: keyProvider, timeout: timeout}
+}
+
+func (s *registerNodesStep) Name() string { return StepRegisterNodes }
+
+// Check uses the provisioning state file (no idempotent on-chain query is exposed
+// for the Paladin node registry).
+func (s *registerNodesStep) Check(_ context.Context) (bool, error) {
+	state, err := LoadState(s.dataDir)
+	if err != nil {
+		return false, err
+	}
+	return statusFor(state, StepRegisterNodes) == "done", nil
+}
+
+func (s *registerNodesStep) Run(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+
+	// Registry address produced by deploy-contracts.
+	addrs, err := parseDeployedAddrs(filepath.Join(s.dataDir, ".deployed-addrs.env"))
+	if err != nil {
+		return fmt.Errorf("read deployed-addrs: %w", err)
+	}
+	if addrs.RegistryContractAddress == "" {
+		return fmt.Errorf("REGISTRY_CONTRACT_ADDRESS missing in .deployed-addrs.env")
+	}
+
+	// CB Paladin node TLS cert written by gen-tls into the named volume — no host
+	// filesystem involved (deviation from the original SPOKE_DATA_DIR bind-mount
+	// design; see specs/026-tk4-compose-central-bank/plan.md addendum).
+	paladinConfigVolume := s.spokeID + "_cb_paladin_config"
+	certPEM, err := readVolumeFile(ctx, paladinConfigVolume, "tls.crt")
+	if err != nil {
+		return fmt.Errorf("read CB Paladin cert from volume %s: %w", paladinConfigVolume, err)
+	}
+
+	return registerPaladinNode(ctx, s.besuRPCURL, paladinNodeRegistration{
+		registry:     common.HexToAddress(addrs.RegistryContractAddress),
+		nodeName:     cbNodeName(s.spokeID),
+		grpcHostname: paladinDialHost(s.advertisedHost, cbGrpcHostname(s.spokeID)),
+		certPEM:      certPEM,
+		provider:     s.keyProvider,
+		signerKeyID:  kp.LocalOperatorKeyID,
+	})
+}

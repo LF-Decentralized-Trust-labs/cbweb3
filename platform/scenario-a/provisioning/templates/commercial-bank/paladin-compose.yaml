@@ -1,0 +1,69 @@
+# Paladin node compose template for a commercial bank (mode: join).
+# Brought up by the mode:join engine (feature 033 US2) after the bank's Besu node
+# is synced and the bank is registered on-chain. A single Paladin node attaches to
+# the spoke's existing external Besu network.
+#
+# Variables injected by the engine at runtime:
+#   SPOKE_ID                — spoke identifier (e.g. "spoke-brl")
+#   BANK_ID                 — commercial bank id within the spoke (e.g. "bank-itau")
+#   PALADIN_IMAGE           — Paladin Docker image
+#   PALADIN_BANK_RPC_PORT   — host port for the bank Paladin HTTP RPC
+#   PALADIN_BANK_WS_PORT    — host port for the bank Paladin WebSocket RPC
+#   PALADIN_BANK_GRPC_PORT  — host port for the bank Paladin gRPC transport
+#   SPOKE_NETWORK_NAME      — external Docker network shared with the spoke Besu stack
+#
+# STORAGE: config.yaml + tls.{crt,key} live on the named volume
+# bank_paladin_config (seeded by step_render_config_join.go / step_gen_tls_join.go
+# via engine/dockervolume) — no SPOKE_DATA_DIR bind mount. Mirrors the central-bank
+# found-mode template; see the addendum in specs/032-commercial-bank-join/research.md.
+
+services:
+  paladin-bank-data-init:
+    image: alpine:3.23
+    user: "0:0"
+    volumes:
+      - bank_data:/data/bank
+    command: ["sh", "-c", "mkdir -p /data/bank && chmod -R 777 /data/bank"]
+    restart: "no"
+
+  # Service key is fixed (Compose forbids ${...} in service names); the spoke and
+  # bank ids are carried in container_name.
+  paladin-bank:
+    image: ${PALADIN_IMAGE}
+    container_name: paladin-${SPOKE_ID}-${BANK_ID}
+    user: "${PALADIN_UID:-1000}:${PALADIN_GID:-1000}"
+    ports:
+      - "${PALADIN_BANK_RPC_PORT}:8548"
+      - "${PALADIN_BANK_WS_PORT}:8549"
+      - "${PALADIN_BANK_GRPC_PORT}:9000"
+    environment:
+      - PALADIN_LOG_LEVEL=debug
+    volumes:
+      # Read-only in practice (Paladin only reads config.yaml/tls.{crt,key} at
+      # startup); seeded root-owned 0644/0755 by writeVolumeFile, so no init
+      # container is needed for uid 1000 to read it (unlike bank_data below).
+      - bank_paladin_config:/etc/paladin
+      - bank_data:/data
+    tmpfs:
+      - /app/jna:exec,mode=1777
+      - /data/keystore:mode=0777
+    networks:
+      - spoke_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    depends_on:
+      paladin-bank-data-init:
+        condition: service_completed_successfully
+    command: ["/etc/paladin/config.yaml", "engine"]
+
+networks:
+  spoke_network:
+    name: ${SPOKE_NETWORK_NAME}
+    external: true
+
+volumes:
+  bank_data:
+    name: ${SPOKE_ID}_${BANK_ID}_paladin_data
+  bank_paladin_config:
+    name: ${SPOKE_ID}_${BANK_ID}_paladin_config

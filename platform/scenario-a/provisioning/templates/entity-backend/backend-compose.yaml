@@ -1,0 +1,186 @@
+# Per-entity backend stack (feature 034): compliance, auth, payment-orchestrator,
+# api-gateway. Parametrized; reuses the existing service Dockerfiles as building
+# blocks (build context = the backend dir). Does NOT modify the legacy
+# backend/docker-compose-backend.<entity>.yaml files.
+#
+# Each entity runs on its OWN network (ENTITY_NET_NAME, created by the infra step),
+# so service names are fixed and isolated; container_name is per-entity. The backend
+# reaches its dedicated Postgres/Redis by container name on that network, and Besu/
+# Paladin/Cacti via host.docker.internal.
+#
+# REQUIRED env (set by the engine):
+#   BACKEND_CONTEXT   path to the backend/ build context
+#   ENTITY_PREFIX     container-name prefix, e.g. cbweb3-central-bank-brazil
+#   ENTITY_NET_NAME   per-entity network (external; from the infra step)
+#   ENTITY_ENV_FILE   path to the rendered .env (entityenv.go)
+#   API_GATEWAY_PORT / AUTH_PORT / COMPLIANCE_PORT / PAYMENT_PORT   host ports
+#   BANK_CODE         entity code
+#   PALADIN_URL / PALADIN_IDENTITY   the entity's Paladin RPC + identity
+#   PALADIN_IDENTITIES (optional) comma-separated network identity roster for the
+#                     FX agreement party dropdowns; empty => built-in reference list
+#   CACTI_API_URL     relay URL (host.docker.internal:4000)
+#   BACKEND_IMAGE_TAG image tag suffix (build => local)
+#
+# ENTITY_PKI_DIR (optional, drives the PKI mount below) is either:
+#   - a host path (commercial banks — <dataDir>/pki; gen-csr's async KYC flow
+#     still needs host access, so this stays a bind mount for now), or
+#   - the literal string "cb_tls" (the central bank — resolves to the named
+#     volume cb_tls below, declared with name: ${SPOKE_ID}_cb_tls; requires
+#     SPOKE_ID to also be set). Deviation from the original bind-mount-only
+#     design; see specs/026-tk4-compose-central-bank/plan.md addendum.
+#   Falls back to ${BACKEND_CONTEXT}/config/pki (repo default) if unset.
+
+services:
+  compliance:
+    build:
+      context: ${BACKEND_CONTEXT:?BACKEND_CONTEXT is required}
+      dockerfile: services/compliance/Dockerfile
+    image: cbweb3/compliance:${BACKEND_IMAGE_TAG:-local}
+    container_name: ${ENTITY_PREFIX:?ENTITY_PREFIX is required}-compliance
+    # Runs as the host user, not the image default (uid 10001), because this service reads
+    # and writes the PKI material on a host-owned bind mount — the toolkit creates the
+    # pki directory owned by the invoking user, so any other uid can neither read the CA
+    # nor persist an issued certificate. Same reasoning and same pattern as the Besu
+    # containers (ADR-001 / T028). Falls back to the image uid when the variables are
+    # absent, so a hand-run compose still gets a non-root process.
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
+    env_file:
+      - path: ${ENTITY_ENV_FILE:?ENTITY_ENV_FILE is required}
+        required: true
+    environment:
+      COMPLIANCE_GRPC_PORT: "9093"
+    volumes:
+      - ${ENTITY_PKI_DIR:-${BACKEND_CONTEXT}/config/pki}:/workspace/backend/config/pki
+    ports:
+      - "${COMPLIANCE_PORT:?COMPLIANCE_PORT is required}:9093"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - entity_net
+
+  auth:
+    build:
+      context: ${BACKEND_CONTEXT}
+      dockerfile: services/auth/Dockerfile
+    image: cbweb3/auth:${BACKEND_IMAGE_TAG:-local}
+    container_name: ${ENTITY_PREFIX}-auth
+    env_file:
+      - path: ${ENTITY_ENV_FILE}
+        required: true
+    environment:
+      AUTH_GRPC_PORT: "9091"
+      COMPLIANCE_GRPC_ADDR: ${ENTITY_PREFIX}-compliance:9093
+    ports:
+      - "${AUTH_PORT:?AUTH_PORT is required}:9091"
+    depends_on:
+      - compliance
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - entity_net
+
+  payment-orchestrator:
+    build:
+      context: ${BACKEND_CONTEXT}
+      dockerfile: services/payment-orchestrator/Dockerfile
+    image: cbweb3/payment-orchestrator:${BACKEND_IMAGE_TAG:-local}
+    container_name: ${ENTITY_PREFIX}-payment-orchestrator
+    # Runs as the host user, not the image default (uid 10001), because this service reads
+    # and writes the PKI material on a host-owned bind mount — the toolkit creates the
+    # pki directory owned by the invoking user, so any other uid can neither read the CA
+    # nor persist an issued certificate. Same reasoning and same pattern as the Besu
+    # containers (ADR-001 / T028). Falls back to the image uid when the variables are
+    # absent, so a hand-run compose still gets a non-root process.
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
+    env_file:
+      - path: ${ENTITY_ENV_FILE}
+        required: true
+    environment:
+      PAYMENT_GRPC_PORT: "9094"
+      PALADIN_URL: ${PALADIN_URL:?PALADIN_URL is required}
+      PALADIN_IDENTITY: ${PALADIN_IDENTITY:?PALADIN_IDENTITY is required}
+      CACTI_API_URL: ${CACTI_API_URL:-http://host.docker.internal:4000}
+      # Besu signing path (HTLC) is per-relationship and only wired once a bilateral
+      # contract exists. At found (CB-only) it is OFF, so no operator key is needed.
+      # The engine sets PAYMENT_ORCH_BESU_RPC_URL only when the besu path applies.
+      BESU_RPC_URL: ${PAYMENT_ORCH_BESU_RPC_URL-}
+      # fx-contexts.json (feature 035 A6, bilateral Pente group/contract resolved
+      # at propose time) lives on its own named volume, not the shared PKI mount
+      # below — written by step_deploy_fxa_join.go via engine/dockervolume for
+      # commercial banks; nothing writes it for the central bank (see the
+      # addendum in specs/032-commercial-bank-join/research.md), so this stays
+      # an empty, harmless mount there.
+      FX_CONTEXTS_FILE: /workspace/backend/config/fx-contexts/fx-contexts.json
+    ports:
+      - "${PAYMENT_PORT:?PAYMENT_PORT is required}:9094"
+    # Mount the entity PKI dir (same as api-gateway/compliance) for CA/participant
+    # certs, plus the dedicated fx-contexts volume (see FX_CONTEXTS_FILE above).
+    volumes:
+      - ${ENTITY_PKI_DIR:-${BACKEND_CONTEXT}/config/pki}:/workspace/backend/config/pki
+      - fx_contexts:/workspace/backend/config/fx-contexts
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - entity_net
+
+  api-gateway:
+    build:
+      context: ${BACKEND_CONTEXT}
+      dockerfile: services/api-gateway/Dockerfile
+    image: cbweb3/api-gateway:${BACKEND_IMAGE_TAG:-local}
+    container_name: ${ENTITY_PREFIX}-api-gateway
+    # Runs as the host user, not the image default (uid 10001), because this service reads
+    # and writes the PKI material on a host-owned bind mount — the toolkit creates the
+    # pki directory owned by the invoking user, so any other uid can neither read the CA
+    # nor persist an issued certificate. Same reasoning and same pattern as the Besu
+    # containers (ADR-001 / T028). Falls back to the image uid when the variables are
+    # absent, so a hand-run compose still gets a non-root process.
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
+    env_file:
+      - path: ${ENTITY_ENV_FILE}
+        required: true
+    environment:
+      APP_PORT: "8080"
+      REQUEST_TIMEOUT_SEC: "30"
+      AUTH_GRPC_ADDR: ${ENTITY_PREFIX}-auth:9091
+      COMPLIANCE_GRPC_ADDR: ${ENTITY_PREFIX}-compliance:9093
+      PAYMENT_GRPC_ADDR: ${ENTITY_PREFIX}-payment-orchestrator:9094
+      PKI_DIR: /workspace/backend/config/pki
+      BANK_CODE: ${BANK_CODE:?BANK_CODE is required}
+      PALADIN_URL: ${PALADIN_URL}
+      # RELAY_URL and PALADIN_IDENTITIES come from the entity env_file (.env.infra),
+      # not here (per-network data). RELAY_URL lets the gateway federate the FX
+      # party roster across every spoke in the relay's registry; PALADIN_IDENTITIES
+      # is an optional static override. With neither, the gateway serves only its
+      # local Pente membership.
+    volumes:
+      - ${ENTITY_PKI_DIR:-${BACKEND_CONTEXT}/config/pki}:/workspace/backend/config/pki
+    ports:
+      - "${API_GATEWAY_PORT:?API_GATEWAY_PORT is required}:8080"
+    depends_on:
+      - auth
+      - compliance
+      - payment-orchestrator
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - entity_net
+
+networks:
+  entity_net:
+    name: ${ENTITY_NET_NAME:?ENTITY_NET_NAME is required}
+    external: true
+
+volumes:
+  # Fixed local key — Compose does not interpolate ${VAR} inside map keys, so
+  # per-spoke uniqueness comes from name: below, not this key. Only referenced
+  # (and thus only ever created) when ENTITY_PKI_DIR=cb_tls (the CB); a bank's
+  # host-path ENTITY_PKI_DIR resolves to a bind mount instead and this entry is
+  # never instantiated. See entityPKIVolumeKey in step_start_backend_stack.go.
+  cb_tls:
+    name: ${SPOKE_ID}_cb_tls
+  # fx-contexts.json for payment-orchestrator (see FX_CONTEXTS_FILE above).
+  # Named per SPOKE_ID+BANK_CODE, matching step_deploy_fxa_join.go's
+  # fxContextsVolume() (${spokeID}_${bankID}_fx_contexts) for commercial banks.
+  fx_contexts:
+    name: ${SPOKE_ID}_${BANK_CODE}_fx_contexts
