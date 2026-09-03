@@ -30,8 +30,8 @@ type startFrontendStackStep struct {
 	context        string
 	composePath    string
 	services       []frontendService
-	apiURL         string // with /api/v1/ suffix (bank/governance/treasury)
-	apiBase        string // no suffix (supervisor, noc)
+	apiURL         string            // with /api/v1/ suffix (bank/governance/treasury)
+	apiBase        string            // no suffix (supervisor, noc)
 	basePaths      map[string]string // per-service Vite base path behind the proxy (service → /<scn>/<role>/); empty ⇒ served at /
 	portalOwner    string
 	fiatSymbol     string
