@@ -103,7 +103,7 @@ func TestAdminUsersAlreadyProvisioned_UnreachableKeycloakConverges(t *testing.T)
 	// A provisioned entity with its containers down cannot answer. Reporting "satisfied" there
 	// would skip the reconciliation exactly when it is needed; the Run brings Keycloak up itself.
 	fake := &exec.FakeRunner{Errs: map[string]error{"docker": context.DeadlineExceeded}}
-	ok, err := adminUsersAlreadyProvisioned(context.Background(), fake, "kc", "kcadm", "realm", "pw",
+	ok, err := adminUsersAlreadyProvisioned(context.Background(), fake, "kc", "kcadm", "realm",
 		[]AdminUser{{Role: "ADMISSION", Username: "adm@cb.test", Password: "x"}})
 	if err != nil {
 		t.Fatalf("an unreachable Keycloak is an answer, not an error: %v", err)
@@ -115,7 +115,7 @@ func TestAdminUsersAlreadyProvisioned_UnreachableKeycloakConverges(t *testing.T)
 
 func TestAdminUsersAlreadyProvisioned_NoDeclaredUsersIsSatisfied(t *testing.T) {
 	fake := &exec.FakeRunner{}
-	ok, err := adminUsersAlreadyProvisioned(context.Background(), fake, "kc", "kcadm", "realm", "pw", nil)
+	ok, err := adminUsersAlreadyProvisioned(context.Background(), fake, "kc", "kcadm", "realm", nil)
 	if err != nil || !ok {
 		t.Fatalf("nothing declared means nothing to converge: ok=%v err=%v", ok, err)
 	}
@@ -129,7 +129,7 @@ func TestReconcileAdminUsers_CreatesRoleUserAndGrant(t *testing.T) {
 	fake := &exec.FakeRunner{}
 	users := []AdminUser{{Role: "ADMISSION", Username: "adm@cb.test", Password: "s3cret"}}
 
-	if err := reconcileAdminUsers(context.Background(), fake, "kc-container", "kcadm", "cbweb3b", "pw", users); err != nil {
+	if err := reconcileAdminUsers(context.Background(), fake, "kc-container", "kcadm", "cbweb3b", users); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	if len(fake.Calls) != 1 {

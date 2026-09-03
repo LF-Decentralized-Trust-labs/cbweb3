@@ -35,7 +35,7 @@ func (r *reconcileRunner) Run(_ context.Context, name string, args ...string) ([
 
 func TestNOCOriginsAlreadyRegistered_TrueWhenAllPresent(t *testing.T) {
 	r := &reconcileRunner{readOut: "http://localhost:45645,http://localhost:3030\n"}
-	ok, err := nocOriginsAlreadyRegistered(context.Background(), r, "kc", keycloakAdminCLI, "cbweb3", "pw",
+	ok, err := nocOriginsAlreadyRegistered(context.Background(), r, "kc", keycloakAdminCLI, "cbweb3",
 		[]string{"http://localhost:45645", "http://localhost:3030"})
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v; want true, nil", ok, err)
@@ -44,7 +44,7 @@ func TestNOCOriginsAlreadyRegistered_TrueWhenAllPresent(t *testing.T) {
 
 func TestNOCOriginsAlreadyRegistered_FalseWhenOneIsMissing(t *testing.T) {
 	r := &reconcileRunner{readOut: "http://localhost:45645\n"}
-	ok, _ := nocOriginsAlreadyRegistered(context.Background(), r, "kc", keycloakAdminCLI, "cbweb3", "pw",
+	ok, _ := nocOriginsAlreadyRegistered(context.Background(), r, "kc", keycloakAdminCLI, "cbweb3",
 		[]string{"http://localhost:45645", "http://localhost:3030"})
 	if ok {
 		t.Fatal("reported satisfied while the standalone NOC origin is absent")
@@ -56,7 +56,7 @@ func TestNOCOriginsAlreadyRegistered_FalseWhenOneIsMissing(t *testing.T) {
 // "Could not ask" must mean "run the step", and the Run starts Keycloak itself.
 func TestNOCOriginsAlreadyRegistered_UnreachableKeycloakRunsTheStepRatherThanFailing(t *testing.T) {
 	r := &reconcileRunner{readErr: errors.New("Error: No such container")}
-	ok, err := nocOriginsAlreadyRegistered(context.Background(), r, "kc", keycloakAdminCLI, "cbweb3", "pw",
+	ok, err := nocOriginsAlreadyRegistered(context.Background(), r, "kc", keycloakAdminCLI, "cbweb3",
 		[]string{"http://localhost:3030"})
 	if err != nil {
 		t.Fatalf("err = %v; an unreachable Keycloak must not fail the apply", err)
@@ -67,7 +67,7 @@ func TestNOCOriginsAlreadyRegistered_UnreachableKeycloakRunsTheStepRatherThanFai
 }
 
 func TestNOCOriginsReconcileScript_SetsTheFullList(t *testing.T) {
-	got, err := nocOriginsReconcileScript(keycloakAdminCLI, "cbweb3", "pw",
+	got, err := nocOriginsReconcileScript(keycloakAdminCLI, "cbweb3",
 		[]string{"http://localhost:45645", "http://localhost:3030"})
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +97,7 @@ func TestNOCOriginsReconcileScript_SetsTheFullList(t *testing.T) {
 }
 
 func TestNOCOriginsReconcileScript_RejectsAMalformedOrigin(t *testing.T) {
-	if _, err := nocOriginsReconcileScript(keycloakAdminCLI, "cbweb3", "pw",
+	if _, err := nocOriginsReconcileScript(keycloakAdminCLI, "cbweb3",
 		[]string{"http://localhost:3030/"}); err == nil {
 		t.Fatal("no error; a value that cannot be embedded must not reach kcadm")
 	}
@@ -132,7 +132,7 @@ func TestOriginsMatchDeclared_ParsesKcadmCSV(t *testing.T) {
 // apply — so the "an origin added by hand is removed" promise was not kept.
 func TestNOCOriginsAlreadyRegistered_FalseWhenAnUndeclaredOriginIsPresent(t *testing.T) {
 	r := &reconcileRunner{readOut: "http://localhost:45645,http://localhost:3030,https://evil.example\n"}
-	ok, err := nocOriginsAlreadyRegistered(context.Background(), r, "kc", keycloakAdminCLI, "cbweb3", "pw",
+	ok, err := nocOriginsAlreadyRegistered(context.Background(), r, "kc", keycloakAdminCLI, "cbweb3",
 		[]string{"http://localhost:45645", "http://localhost:3030"})
 	if err != nil {
 		t.Fatal(err)

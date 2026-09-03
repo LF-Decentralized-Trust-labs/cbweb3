@@ -35,11 +35,10 @@ import (
 // adminUsersReadScript builds the kcadm script that reports which realm roles each declared user
 // currently holds. One line per user, so a user that does not exist at all is distinguishable from
 // one that exists without its roles.
-func adminUsersReadScript(kc, realm, adminPassword string, users []AdminUser) string {
+func adminUsersReadScript(kc, realm string, users []AdminUser) string {
 	var b strings.Builder
 	b.WriteString(kcadmPreamble)
-	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password %[2]s >/dev/null 2>&1 || exit 1\n",
-		kc, adminPassword)
+	fmt.Fprintf(&b, "%s >/dev/null 2>&1 || exit 1\n", kcadmLogin(kc))
 	for _, u := range users {
 		// `|| true` per user: a missing user makes get-roles exit non-zero, and that is an answer
 		// (it holds nothing), not a reason to abandon the sweep.
@@ -106,11 +105,11 @@ func adminUsersSatisfied(out string, users []AdminUser) bool {
 // adminUsersAlreadyProvisioned is the step's Check. An unreachable Keycloak answers "not
 // satisfied", so the Run brings it up and converges — the same self-sufficiency
 // reconcile-noc-origins relies on.
-func adminUsersAlreadyProvisioned(ctx context.Context, r exec.CommandRunner, container, kc, realm, adminPassword string, users []AdminUser) (bool, error) {
+func adminUsersAlreadyProvisioned(ctx context.Context, r exec.CommandRunner, container, kc, realm string, users []AdminUser) (bool, error) {
 	if len(users) == 0 {
 		return true, nil
 	}
-	out, err := r.Run(ctx, "docker", "exec", container, "bash", "-c", adminUsersReadScript(kc, realm, adminPassword, users))
+	out, err := r.Run(ctx, "docker", "exec", container, "bash", "-c", adminUsersReadScript(kc, realm, users))
 	if err != nil {
 		return false, nil
 	}
@@ -120,14 +119,13 @@ func adminUsersAlreadyProvisioned(ctx context.Context, r exec.CommandRunner, con
 // reconcileAdminUsers creates any missing realm role, user and grant. It reuses the same builder
 // the initial provisioning uses, so the two cannot drift: whatever provision-keycloak-* would have
 // created on a fresh deploy is what converges here on an existing one.
-func reconcileAdminUsers(ctx context.Context, r exec.CommandRunner, container, kc, realm, adminPassword string, users []AdminUser) error {
+func reconcileAdminUsers(ctx context.Context, r exec.CommandRunner, container, kc, realm string, users []AdminUser) error {
 	if len(users) == 0 {
 		return nil
 	}
 	var b strings.Builder
 	b.WriteString(kcadmPreamble)
-	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password %[2]s && ",
-		kc, adminPassword)
+	fmt.Fprintf(&b, "%s && ", kcadmLogin(kc))
 	appendKeycloakUsers(&b, kc, realm, users)
 	if _, err := r.Run(ctx, "docker", "exec", container, "bash", "-c", b.String()); err != nil {
 		return fmt.Errorf("reconcile admin users: %w", err)
