@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"log"
@@ -98,7 +99,9 @@ func New(cfg config.Config) (*App, error) {
 	// via the compliance participant registry.
 	supervisorHandler := handlers.NewSupervisorHandler(complianceGRPC).WithParticipantResolver(complianceGRPC)
 
-	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure, cfg.BankCode)
+	csrfSecret := resolveCSRFSecret(cfg.CSRFSecret)
+	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure, cfg.BankCode).
+		WithCSRFSecret(csrfSecret)
 	complianceHandler := handlers.NewComplianceHandler(identityManager, complianceGRPC)
 
 	// Shared api-gateway DB connection (optional). Backs the Investigation Module
@@ -128,6 +131,7 @@ func New(cfg config.Config) (*App, error) {
 	}
 
 	deps := router.Dependencies{
+		CSRFSecret:        csrfSecret,
 		AuthHandler:       authHandler,
 		ComplianceHandler: complianceHandler,
 		GovernanceHandler: governanceHandler,
@@ -315,4 +319,27 @@ func serverConfigWith(read, write, idle time.Duration) fiber.Config {
 		WriteTimeout: write,
 		IdleTimeout:  idle,
 	}
+}
+
+// resolveCSRFSecret returns the key that binds CSRF tokens to their session.
+//
+// A generated fallback rather than a fatal error, because refusing to boot would take
+// down every gateway on the first deploy that has not set the variable — including
+// read traffic, which CSRF has nothing to do with. The fallback is safe on a single
+// instance and LOUD, because it is not safe beyond one: across replicas a token
+// minted by one gateway fails on another, and across a restart every open session's
+// token stops validating. Both surface as 403 on some mutating requests and not
+// others, which is among the worst symptoms to diagnose from a bug report.
+func resolveCSRFSecret(configured string) []byte {
+	if configured != "" {
+		return []byte(configured)
+	}
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		log.Fatalf("FATAL: cannot generate a CSRF secret: %v", err)
+	}
+	log.Printf("WARNING: CSRF_SECRET is not set; generated a per-process key. " +
+		"Mutating requests will fail across replicas and after any restart. " +
+		"Set CSRF_SECRET to the same value on every instance of this gateway.")
+	return secret
 }

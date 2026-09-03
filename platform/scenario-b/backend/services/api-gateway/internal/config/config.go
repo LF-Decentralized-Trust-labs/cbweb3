@@ -67,12 +67,17 @@ func Load() Config {
 	}
 
 	return Config{
-		AppPort:                 getEnv("APP_PORT", "8080"),
-		RequestTimeout:          time.Duration(getEnvInt("REQUEST_TIMEOUT_SEC", 5)) * time.Second,
-		AuthGRPCAddr:            getEnv("AUTH_GRPC_ADDR", "localhost:9091"),
-		ComplianceGRPCAddr:      getEnv("COMPLIANCE_GRPC_ADDR", "localhost:9093"),
-		PaymentGRPCAddr:         getEnv("PAYMENT_GRPC_ADDR", ""),
-		CookieSecure:            getEnvBool("COOKIE_SECURE", false),
+		AppPort:            getEnv("APP_PORT", "8080"),
+		RequestTimeout:     time.Duration(getEnvInt("REQUEST_TIMEOUT_SEC", 5)) * time.Second,
+		AuthGRPCAddr:       getEnv("AUTH_GRPC_ADDR", "localhost:9091"),
+		ComplianceGRPCAddr: getEnv("COMPLIANCE_GRPC_ADDR", "localhost:9093"),
+		PaymentGRPCAddr:    getEnv("PAYMENT_GRPC_ADDR", ""),
+		// Defaults to TRUE. An insecure default means a deployment that forgets the
+		// variable ships session cookies that a plain-HTTP hop can read, and nothing
+		// says so. Local development over HTTP is the case that needs the opt-out, and
+		// it is the case where someone is present to set it — so the explicit act
+		// belongs there, not in production.
+		CookieSecure:            getEnvBool("COOKIE_SECURE", true),
 		CSRFSecret:              getEnv("CSRF_SECRET", ""),
 		CentralBankAPIURL:       getEnv("CENTRAL_BANK_API_URL", ""),
 		BankCode:                bankCode,

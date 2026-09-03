@@ -29,8 +29,13 @@ const schema = z.object({
 
 type LoginForm = z.infer<typeof schema>;
 
-const defaultClientId = (import.meta.env.VITE_KC_CLIENT_ID ?? "").trim();
-const defaultClientSecret = (import.meta.env.VITE_KC_CLIENT_SECRET ?? "").trim();
+// The login form starts empty, deliberately.
+//
+// It used to seed itself from VITE_KC_CLIENT_ID / VITE_KC_CLIENT_SECRET, which are
+// build-time values: Vite inlines them into the bundle, so a production build shipped
+// a confidential client secret inside JavaScript any visitor can read. The literals
+// were empty in the repo, which made the exposure easy to miss — but the exposure is
+// the wiring, not the value, and it lives on in the Dockerfile build args.
 
 export function LoginPage() {
   const navigate = useNavigate();
