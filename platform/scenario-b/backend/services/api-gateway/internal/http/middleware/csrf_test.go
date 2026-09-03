@@ -134,13 +134,51 @@ func TestCSRF_TokenIsBoundToItsSession(t *testing.T) {
 	}
 }
 
-// TestCSRF_NoSessionIsRefused: with no session there is nothing to bind to, and the
-// absence must not act as a wildcard that skips the check.
-func TestCSRF_NoSessionIsRefused(t *testing.T) {
-	token, _ := NewCSRFToken(testSecret, testSession)
-	resp := csrfRequest(t, csrfApp(t), http.MethodPost, token, token, "")
+// TestCSRF_NoSessionIsNotGuarded pins the scope of the control, and the reasoning
+// matters more than the assertion.
+//
+// CSRF defends a credential the BROWSER attaches on its own. A cross-site attack
+// therefore always carries the victim's session cookie — the browser sends it
+// unasked — so guarding only cookie-bearing requests still covers every real attack.
+// A request with no session cookie is either unauthenticated, and authentication
+// refuses it, or authenticated by something a cross-site page cannot set.
+//
+// An earlier version of this guard refused these, which broke the product: the
+// onboarding proxy on a commercial-bank gateway builds a FRESH request to the
+// central bank with neither cookie nor header, and server-to-server calls have no
+// ambient credential to abuse. It was caught in a browser, after every unit test
+// passed.
+//
+// This is NOT the self-selected Bearer exemption the R2-H-13 review rejected. That
+// one skipped the check whenever an Authorization header was present WHILE the
+// session cookie was still attached and still usable — the caller picked the
+// exemption and kept the credential. The next test pins that distinction.
+func TestCSRF_NoSessionIsNotGuarded(t *testing.T) {
+	resp := csrfRequest(t, csrfApp(t), http.MethodPost, "", "", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("POST with no session cookie: got %d, want 200 — there is no ambient "+
+			"credential here, so there is nothing for CSRF to protect", resp.StatusCode)
+	}
+}
+
+// TestCSRF_SessionPresentIsAlwaysGuarded is the other half, and the one that keeps
+// the exemption above honest: as soon as a session cookie rides along, the check
+// applies and cannot be waived by anything the caller sends.
+func TestCSRF_SessionPresentIsAlwaysGuarded(t *testing.T) {
+	app := csrfApp(t)
+
+	// A caller that supplies an Authorization header must NOT thereby skip the check
+	// while still holding a usable session cookie. That was the review's finding 3.
+	req := httptest.NewRequest(http.MethodPost, "/r", strings.NewReader("{}"))
+	req.AddCookie(&http.Cookie{Name: "access_token", Value: testSession})
+	req.Header.Set("Authorization", "Bearer something")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
 	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("POST with no session: got %d, want 403", resp.StatusCode)
+		t.Errorf("a session-bearing POST skipped the check by presenting a Bearer header: "+
+			"got %d, want 403", resp.StatusCode)
 	}
 }
 

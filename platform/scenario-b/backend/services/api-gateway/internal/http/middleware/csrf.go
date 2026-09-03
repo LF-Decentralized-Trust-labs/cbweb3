@@ -87,8 +87,9 @@ type CSRFConfig struct {
 	// Secret keys the HMAC that binds a token to its session.
 	Secret []byte
 	// SessionID extracts the session identifier a token must be bound to. It
-	// returns "" when the request carries no session, which the guard treats as a
-	// refusal rather than as a wildcard.
+	// returns "" when the request carries no session cookie, and the guard then lets
+	// the request through — see the reasoning in CSRF below: with no ambient
+	// credential there is nothing for this control to defend.
 	SessionID func(*fiber.Ctx) string
 	// Exempt reports whether a request is outside the guard's scope.
 	//
@@ -107,9 +108,11 @@ type CSRFConfig struct {
 //
 //   - The header must be present AND match the cookie AND carry a valid binding for
 //     THIS session. An empty header is an explicit refusal, never treated as a match.
-//   - There is no Bearer exemption. Skipping the check whenever a request
-//     authenticated by header lets a caller opt out of CSRF simply by omitting the
-//     cookie — the exemption is self-selected, which is no protection at all.
+//   - There is no Bearer exemption. The rejected design skipped the check whenever
+//     an Authorization header was present WHILE the session cookie was still
+//     attached and still usable, so a caller could waive the control and keep the
+//     credential. Here a session cookie always triggers the check, whatever else
+//     the caller sends.
 //   - Comparison is constant-time via hmac.Equal.
 func CSRF(cfg CSRFConfig) fiber.Handler {
 	return func(c *fiber.Ctx) error {
@@ -125,13 +128,36 @@ func CSRF(cfg CSRFConfig) fiber.Handler {
 			sessionID = cfg.SessionID(c)
 		}
 
+		// No session cookie means no ambient credential, and CSRF exists to protect
+		// exactly that: a credential the BROWSER attaches on its own. A cross-site
+		// attack always carries the victim's cookie, because the browser sends it
+		// without being asked — so the guard still covers every real attack. A request
+		// without one is either unauthenticated (authentication will refuse it) or
+		// authenticated by something a cross-site page cannot set, which CORS already
+		// prevents.
+		//
+		// This is NOT the self-selected Bearer exemption the review rejected. That one
+		// skipped the check whenever an Authorization header was present, while the
+		// session cookie was still attached and still usable — the caller chose the
+		// exemption and kept the credential. Here the exemption applies only when there
+		// is no ambient credential at all, which an attacker in a browser cannot arrange.
+		//
+		// It is also load-bearing for the server-to-server hops inside this product: the
+		// onboarding proxy on a commercial-bank gateway builds a FRESH request to the
+		// central bank carrying neither cookie nor CSRF header. Refusing it broke bank
+		// onboarding end to end, which is how this was found — in a browser, after every
+		// unit test passed.
+		if sessionID == "" {
+			return c.Next()
+		}
+
 		header := c.Get(CSRFHeaderName)
 		cookie := c.Cookies(CSRFCookieName)
 
 		// Every branch answers with the same code and message. Distinguishing
 		// "missing" from "mismatched" tells an attacker which half to work on and
 		// helps a legitimate client not at all — the remedy is identical.
-		if header == "" || cookie == "" || sessionID == "" ||
+		if header == "" || cookie == "" ||
 			!hmac.Equal([]byte(header), []byte(cookie)) ||
 			!ValidCSRFToken(cfg.Secret, header, sessionID) {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
