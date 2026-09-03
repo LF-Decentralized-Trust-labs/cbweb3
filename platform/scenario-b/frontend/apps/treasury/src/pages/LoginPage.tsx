@@ -43,8 +43,8 @@ export function LoginPage() {
   const form = useForm<LoginForm>({
     resolver: zodResolver(schema),
     defaultValues: {
-      clientId: defaultClientId,
-      clientSecret: defaultClientSecret,
+      clientId: "",
+      clientSecret: "",
     },
   });
 
