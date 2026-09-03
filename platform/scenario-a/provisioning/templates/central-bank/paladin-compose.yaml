@@ -12,8 +12,20 @@
 # no SPOKE_DATA_DIR bind mount. Deviation from the original design; see the
 # addendum in specs/026-tk4-compose-central-bank/plan.md.
 
+# Container log rotation, applied to every service in this file.
+#
+# Without it Docker's json-file driver has no size cap and no rotation: the
+# Scenario A Paladin containers reached 96 GB (~2.4 GB/day) and a full disk takes
+# the whole network down. 50m x 5 caps each service at 250 MB.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   paladin-data-init:
+    logging: *cbweb3_logging
     image: alpine:3.23
     user: "0:0"
     volumes:
@@ -24,6 +36,7 @@ services:
   # Service keys are fixed (Compose forbids ${...} in service names); the spoke
   # id is carried in container_name instead.
   paladin-cb:
+    logging: *cbweb3_logging
     image: ${PALADIN_IMAGE}
     container_name: paladin-${SPOKE_ID}-cb
     user: "${PALADIN_UID:-1000}:${PALADIN_GID:-1000}"
@@ -32,7 +45,7 @@ services:
       - "${PALADIN_CB_WS_PORT}:8549"
       - "${PALADIN_CB_GRPC_PORT}:9000"
     environment:
-      - PALADIN_LOG_LEVEL=debug
+      - PALADIN_LOG_LEVEL=${PALADIN_LOG_LEVEL:-info}
     volumes:
       # Read-only in practice (Paladin only reads config.yaml/tls.{crt,key} at
       # startup); seeded root-owned 0644/0755 by writeVolumeFile, so no init

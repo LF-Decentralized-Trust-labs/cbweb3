@@ -62,6 +62,7 @@ func (s *renderConfigJoinStep) Run(ctx context.Context) error {
 		// Unique per-bank base-ledger submitter key so co-located banks on the spoke's Besu do
 		// not collide on nonce (which wedges Pente deploys). See fundedOperatorKey.
 		FundedOperatorKey: fundedOperatorKey(s.spokeID, s.bankID),
+		LogLevel:          paladinLogLevel(),
 	}
 	rendered, err := renderTemplateToBytes(tmplPath, data)
 	if err != nil {

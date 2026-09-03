@@ -17,8 +17,20 @@
 #   GOVERNANCE_PORT / TREASURY_PORT / SUPERVISOR_PORT / NOC_PORT / BANK_PORT   host ports
 #   FRONTEND_IMAGE_TAG    image tag suffix (build => local)
 
+# Container log rotation, applied to every service in this file.
+#
+# Without it Docker's json-file driver has no size cap and no rotation: the
+# Scenario A Paladin containers reached 96 GB (~2.4 GB/day) and a full disk takes
+# the whole network down. 50m x 5 caps each service at 250 MB.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   governance:
+    logging: *cbweb3_logging
     build:
       context: ${FRONTEND_CONTEXT:?FRONTEND_CONTEXT is required}
       dockerfile: apps/governance/Dockerfile
@@ -37,6 +49,7 @@ services:
       - entity_net
 
   treasury:
+    logging: *cbweb3_logging
     build:
       context: ${FRONTEND_CONTEXT}
       dockerfile: apps/treasury/Dockerfile
@@ -55,6 +68,7 @@ services:
       - entity_net
 
   supervisor:
+    logging: *cbweb3_logging
     build:
       context: ${FRONTEND_CONTEXT}
       dockerfile: apps/supervisor/Dockerfile
@@ -71,6 +85,7 @@ services:
       - entity_net
 
   noc:
+    logging: *cbweb3_logging
     build:
       context: ${FRONTEND_CONTEXT}
       dockerfile: apps/noc/Dockerfile
@@ -90,6 +105,7 @@ services:
       - entity_net
 
   bank:
+    logging: *cbweb3_logging
     build:
       context: ${FRONTEND_CONTEXT}
       dockerfile: apps/bank/Dockerfile
