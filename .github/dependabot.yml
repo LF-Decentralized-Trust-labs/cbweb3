@@ -1,25 +1,145 @@
 # SPDX-License-Identifier: Apache-2.0
+#
+# One update entry per ecosystem. Each entry declares two groups so that
+# Dependabot batches its work instead of opening a PR per dependency:
+#
+#   <ecosystem>-version   — all routine version bumps, one PR per directory
+#   <ecosystem>-security  — all security advisories, one PR per directory
+#
+# Security updates stay in their own group so an advisory fix is never held
+# behind a routine bump that happens to be failing CI.
 version: 2
 
 updates:
+  # ---------------------------------------------------------------- actions --
+  # Every step is pinned to a full commit SHA with the release as a trailing
+  # comment. Dependabot rewrites both, so the comment stays honest.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+      day: monday
     open-pull-requests-limit: 5
     commit-message:
       prefix: "ci"
     labels:
       - dependencies
       - ci
+    groups:
+      actions-version:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      actions-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
 
+  # -------------------------------------------------------------------- pip --
+  # Docs toolchain only. Deliberately scoped to the repository root: the sole
+  # other requirements.txt lives under a Go vendor/ tree and is not ours.
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: weekly
+      day: monday
     open-pull-requests-limit: 5
     commit-message:
       prefix: "docs"
     labels:
       - dependencies
       - documentation
+    groups:
+      pip-version:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      pip-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  # ------------------------------------------------------------------ gomod --
+  # Every Go module under platform/ (services, shared libraries, toolkits,
+  # provisioning scripts and test modules). go mod vendor does not emit a
+  # go.mod, so the wildcard cannot reach into vendor/ trees.
+  - package-ecosystem: gomod
+    directories:
+      - "/**"
+    schedule:
+      interval: weekly
+      day: tuesday
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps"
+    labels:
+      - dependencies
+      - go
+    groups:
+      gomod-version:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      gomod-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  # -------------------------------------------------------------------- npm --
+  # Lockfile roots only. The frontend apps and packages are npm workspaces and
+  # are resolved from their workspace root, not updated independently.
+  - package-ecosystem: npm
+    directories:
+      - "/platform/launcher"
+      - "/platform/scenario-a/frontend"
+      - "/platform/scenario-b/frontend"
+      - "/platform/scenario-a/interop/hub-and-spoke/cacti"
+      - "/platform/scenario-b/interop/hub-and-spoke/cacti"
+    schedule:
+      interval: weekly
+      day: wednesday
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps"
+    labels:
+      - dependencies
+      - javascript
+    groups:
+      npm-version:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      npm-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  # ----------------------------------------------------------------- docker --
+  # Base images in every first-party Dockerfile. The globs are enumerated
+  # rather than "/**" so that the two Dockerfiles vendored inside
+  # scenario-a/backend/services/api-gateway/vendor/ are left alone.
+  - package-ecosystem: docker
+    directories:
+      - "/platform/*"
+      - "/platform/*/backend/services/*"
+      - "/platform/*/frontend/apps/*"
+      - "/platform/*/interop/hub-and-spoke/cacti"
+      - "/platform/*/tools/act"
+    schedule:
+      interval: weekly
+      day: thursday
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps"
+    labels:
+      - dependencies
+      - docker
+    groups:
+      docker-version:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      docker-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
