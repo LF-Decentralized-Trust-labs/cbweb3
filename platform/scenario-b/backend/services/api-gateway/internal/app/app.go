@@ -311,8 +311,12 @@ func New(cfg config.Config) (*App, error) {
 	// CORS middleware: only enable if explicitly configured to avoid security issues.
 	if corsOrigins := os.Getenv("CORS_ALLOW_ORIGINS"); corsOrigins != "" {
 		fiberApp.Use(cors.New(cors.Config{
-			AllowOrigins:     corsOrigins,
-			AllowHeaders:     "Authorization, Content-Type, X-Requested-With, Accept, X-Correlation-Id",
+			AllowOrigins: corsOrigins,
+			// X-XSRF-TOKEN is required, not optional: axios attaches it to every request once
+			// withXSRFToken is set, which turns even a simple GET into a preflighted one. A
+			// gateway that omits it here rejects the preflight and the portal fails with
+			// net::ERR_FAILED — no status, no body, and nothing a Go test can observe.
+			AllowHeaders:     "Authorization, Content-Type, X-Requested-With, Accept, X-Correlation-Id, X-XSRF-TOKEN",
 			AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
 			AllowCredentials: true,
 		}))
