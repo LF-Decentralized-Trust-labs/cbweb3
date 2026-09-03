@@ -18,6 +18,7 @@ package orchestrator
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -134,9 +135,7 @@ func TestProvisioningTemplates_DoNotHardcodeDebug(t *testing.T) {
 			if strings.HasPrefix(trimmed, "#") {
 				continue
 			}
-			if strings.Contains(trimmed, "level: debug") ||
-				strings.Contains(trimmed, "PALADIN_LOG_LEVEL=debug") ||
-				strings.Contains(trimmed, "PALADIN_LOG_LEVEL: debug") {
+			if hardcodesDebugLevel(trimmed) {
 				offenders = append(offenders, filepath.ToSlash(path)+":"+itoa(i+1)+" "+trimmed)
 			}
 		}
@@ -149,6 +148,80 @@ func TestProvisioningTemplates_DoNotHardcodeDebug(t *testing.T) {
 	if len(offenders) > 0 {
 		t.Errorf("the debug log level is hardcoded in %d place(s); make it an env override with an "+
 			"info default instead:\n  %s", len(offenders), strings.Join(offenders, "\n  "))
+	}
+}
+
+// debugLevelAssignment matches a log level pinned to debug, in any spelling this
+// template tree can hold: a YAML `level:` key or a compose `PALADIN_LOG_LEVEL`
+// entry, written with `:` or `=`, the value bare or wrapped in either quote, with
+// any surrounding whitespace and an optional trailing comment.
+//
+// It replaces three `strings.Contains` checks that matched only the bare forms.
+// `level: "debug"` is valid YAML, produces exactly the same Paladin config, and
+// passed the guard — a reformatting pass or a yq round-trip is all it takes to
+// introduce it. A guard a quote can evade is the failure mode this file exists to
+// prevent, so the shape is matched rather than the literal.
+//
+// The key is `[a-z_]*level` rather than an enumeration so PALADIN_LOG_LEVEL and any
+// future FOO_LOG_LEVEL are both covered, and the value is compared
+// case-insensitively because DEBUG configures the same thing.
+//
+// Deliberately NOT matched: `level: {{.LogLevel}}` and
+// `PALADIN_LOG_LEVEL=${PALADIN_LOG_LEVEL:-info}`, which are the fixed forms, and
+// `debugQueries: false`, whose key does not end in `level`.
+var debugLevelAssignment = regexp.MustCompile(
+	`(?i)(?:^|[\s\-])[a-z_]*level\s*[:=]\s*["']?debug["']?\s*(?:#.*)?$`)
+
+// hardcodesDebugLevel reports whether one already-trimmed, non-comment line pins the
+// log level to debug.
+func hardcodesDebugLevel(trimmed string) bool {
+	return debugLevelAssignment.MatchString(trimmed)
+}
+
+// TestHardcodesDebugLevel_SeesEverySpelling is the guard on the guard. The matcher
+// it covers replaced a substring check that `level: "debug"` walked straight past,
+// so the quoting and spacing variants are pinned explicitly rather than trusted.
+//
+// The negatives matter as much: a matcher that fired on the fixed forms would fail
+// the whole tree the day it landed, and one that fired on debugQueries would teach
+// the next reader to ignore it.
+func TestHardcodesDebugLevel_SeesEverySpelling(t *testing.T) {
+	t.Parallel()
+
+	hardcoded := []string{
+		"level: debug",
+		`level: "debug"`,
+		"level: 'debug'",
+		"level:   debug",
+		"level:debug",
+		"level: DEBUG",
+		"level: debug  # noisy, but still hardcoded",
+		"- PALADIN_LOG_LEVEL=debug",
+		`- PALADIN_LOG_LEVEL="debug"`,
+		"PALADIN_LOG_LEVEL: debug",
+		"      - PALADIN_LOG_LEVEL=debug",
+	}
+	for _, line := range hardcoded {
+		if !hardcodesDebugLevel(strings.TrimSpace(line)) {
+			t.Errorf("hardcodesDebugLevel(%q) = false; this spelling pins the level to debug "+
+				"and the guard must see it", line)
+		}
+	}
+
+	fine := []string{
+		"level: {{.LogLevel}}",
+		"level: info",
+		`level: "info"`,
+		"- PALADIN_LOG_LEVEL=${PALADIN_LOG_LEVEL:-info}",
+		"debugQueries: false",
+		"debug: true",
+		"image: paladin-debug:latest",
+	}
+	for _, line := range fine {
+		if hardcodesDebugLevel(strings.TrimSpace(line)) {
+			t.Errorf("hardcodesDebugLevel(%q) = true; this does not pin the level to debug and "+
+				"flagging it would make the guard something reviewers learn to skip", line)
+		}
 	}
 }
 
