@@ -15,9 +15,9 @@ import (
 
 // runnerFuncs holds injectable engine functions for testing.
 type runnerFuncs struct {
-	runFound   func(ctx context.Context, m *manifest.Manifest, deps orchestrator.Deps) error
+	runFound   func(ctx context.Context, m *manifest.Manifest, deps orchestrator.Deps) (orchestrator.RunOutcome, error)
 	emitBundle func(ctx context.Context, in bundle.BundleInput) (*bundle.JoinBundle, error)
-	runJoin    func(ctx context.Context, m *manifest.Manifest, b *bundle.JoinBundle, deps orchestrator.JoinDeps) error
+	runJoin    func(ctx context.Context, m *manifest.Manifest, b *bundle.JoinBundle, deps orchestrator.JoinDeps) (orchestrator.RunOutcome, error)
 	loadBundle func(path string) (*bundle.JoinBundle, error)
 }
 
@@ -81,17 +81,16 @@ func runFoundMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyRes
 		result.Steps = pendingSteps(m)
 		return result, err
 	}
+	deps.Force = rebuildForced(in, m)
 
-	// Snapshot what was already finished BEFORE the engine runs. Without it the
-	// report cannot tell work this run did from work it found already done.
-	doneBefore := completedSteps(m.Spec.Node.DataDir)
-
-	// Run the 10-step idempotent provisioning engine.
-	runErr := fns.runFound(ctx, m, deps)
+	// Run the 10-step idempotent provisioning engine. The outcome names the steps it
+	// actually executed — the report cannot infer that from state, because a step the
+	// engine's Check found already satisfied is persisted exactly like one that ran.
+	outcome, runErr := fns.runFound(ctx, m, deps)
 
 	// Read final state to build the step report regardless of error.
 	state, _ := orchestrator.LoadState(m.Spec.Node.DataDir)
-	result.Steps = buildStepResults(plannedStepOrder(m), state, doneBefore)
+	result.Steps = buildStepResults(plannedStepOrder(m), state, outcome.Ran)
 
 	if ctx.Err() != nil {
 		// Mark the last step that was running when context was cancelled (recorded
@@ -213,13 +212,12 @@ func runJoinMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyResu
 		result.Steps = pendingSteps(m)
 		return result, err
 	}
+	deps.Force = rebuildForced(in, m)
 
-	doneBefore := completedSteps(m.Spec.Node.DataDir)
-
-	runErr := fns.runJoin(ctx, m, b, deps)
+	outcome, runErr := fns.runJoin(ctx, m, b, deps)
 
 	state, _ := orchestrator.LoadState(m.Spec.Node.DataDir)
-	result.Steps = buildStepResults(plannedStepOrder(m), state, doneBefore)
+	result.Steps = buildStepResults(plannedStepOrder(m), state, outcome.Ran)
 
 	if ctx.Err() != nil {
 		for i := len(result.Steps) - 1; i >= 0; i-- {
@@ -255,6 +253,16 @@ func runJoinMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyResu
 	return result, nil
 }
 
+// rebuildForced resolves --rebuild into the set of steps the engine must run even
+// when their Check reports satisfied. Nil unless the flag was given, so an ordinary
+// apply keeps every Check and does not pay for an image build it does not need.
+func rebuildForced(in ApplyInput, m *manifest.Manifest) orchestrator.ForcedSteps {
+	if !in.Rebuild {
+		return nil
+	}
+	return orchestrator.RebuildForcedSteps(m.Spec.Mode)
+}
+
 // plannedStepOrder returns the steps this manifest will actually execute. Both the
 // apply report and the dry-run plan go through here so they cannot diverge — never
 // read orchestrator.CanonicalStepOrder / CanonicalJoinStepOrder directly.
@@ -264,12 +272,19 @@ func plannedStepOrder(m *manifest.Manifest) []string {
 
 // buildStepResults constructs the step report from orchestrator state.
 //
-// doneBefore names the steps that were already complete when this run started. A
-// finished step is reported as "executed" when this run did the work and "skipped"
-// only when it genuinely had nothing to do — the report used to say "skipped" for
-// both, so a first apply described ten freshly executed steps as skipped while
-// stamping each with a new completedAt.
-func buildStepResults(stepOrder []string, state orchestrator.ProvisioningState, doneBefore map[string]bool) []StepResult {
+// ran comes from the engine and names the steps whose Run this invocation actually
+// called. A finished step is reported as "executed" only when it is in that set, and
+// "skipped" when the engine's Check found the work already done.
+//
+// The engine has to answer this because state cannot: a step whose Check was
+// satisfied is persisted as "done" exactly like a step that ran, deliberately, so a
+// stale "failed" converges on an idempotent re-run. This function used to infer the
+// answer by diffing state against a snapshot taken before the run, which is a
+// different question — "is it done now that was not done before" — and the two
+// diverge precisely when someone deletes a step from the state file to force a
+// rebuild: the step reported "executed" while Check short-circuited and the work
+// never happened.
+func buildStepResults(stepOrder []string, state orchestrator.ProvisioningState, ran map[string]bool) []StepResult {
 	results := make([]StepResult, len(stepOrder))
 	for i, name := range stepOrder {
 		sr := StepResult{Name: name}
@@ -279,10 +294,10 @@ func buildStepResults(stepOrder []string, state orchestrator.ProvisioningState, 
 				found = true
 				switch s.Status {
 				case "done":
-					if doneBefore[name] {
-						sr.Status = "skipped"
-					} else {
+					if ran[name] {
 						sr.Status = "executed"
+					} else {
+						sr.Status = "skipped"
 					}
 					sr.CompletedAt = s.CompletedAt
 				case "failed":
@@ -342,21 +357,4 @@ func resolveLocalProfileFromInput(in ApplyInput) LocalProfile {
 		p.OutputDir = filepath.Dir(in.Manifest.Spec.Node.DataDir)
 	}
 	return p
-}
-
-// completedSteps reads the steps already marked done in the state file, before a run
-// starts. A missing or unreadable state file means a first run: nothing was done
-// before, so nothing can be reported as skipped.
-func completedSteps(dataDir string) map[string]bool {
-	state, err := orchestrator.LoadState(dataDir)
-	if err != nil {
-		return nil
-	}
-	done := make(map[string]bool, len(state.Steps))
-	for _, s := range state.Steps {
-		if s.Status == "done" {
-			done[s.Step] = true
-		}
-	}
-	return done
 }

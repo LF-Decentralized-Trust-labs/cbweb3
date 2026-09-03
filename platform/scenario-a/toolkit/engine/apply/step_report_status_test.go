@@ -13,10 +13,12 @@ import (
 // all ten steps read `status: skipped` while each carried a fresh completedAt —
 // contradicting itself, and telling the operator nothing about what just happened.
 //
-// What separates the two is the state that existed BEFORE the engine ran, which is
-// why the pre-run set of finished steps is now passed in rather than inferred from
-// timestamps: comparing completedAt against a run start would depend on clock
-// resolution and on the state file and the report agreeing about time.
+// The first fix inferred the distinction by diffing the final state against a
+// snapshot taken before the engine ran. That answers "is it done now that was not
+// done before", which is a near-miss for "did this run do the work" — and the two
+// disagree in the one case an operator most needs the report to be right about (see
+// TestStepReportCallsACheckSatisfiedStepSkipped). The engine now returns the set of
+// steps whose Run it actually called, and that set is what these tests pass in.
 
 func doneState(names ...string) orchestrator.ProvisioningState {
 	st := orchestrator.ProvisioningState{}
@@ -28,15 +30,25 @@ func doneState(names ...string) orchestrator.ProvisioningState {
 	return st
 }
 
+// ranSet is the engine's answer, in the shape buildStepResults consumes.
+func ranSet(names ...string) map[string]bool {
+	ran := make(map[string]bool, len(names))
+	for _, n := range names {
+		ran[n] = true
+	}
+	return ran
+}
+
 // TestStepReportDistinguishesExecutedFromSkipped is the whole point: same final
-// state, different report, decided by what was already done beforehand.
+// state, different report, decided by what the engine actually ran.
 func TestStepReportDistinguishesExecutedFromSkipped(t *testing.T) {
 	order := []string{"write-genesis", "start-besu", "deploy-contracts"}
 	state := doneState("write-genesis", "start-besu", "deploy-contracts")
 
-	// "write-genesis" was already finished when this run started; the other two
-	// were not, so this run did them.
-	results := buildStepResults(order, state, map[string]bool{"write-genesis": true})
+	// The engine's Check found "write-genesis" already satisfied and ran the other
+	// two. All three end the run marked done — that is why state alone cannot
+	// answer this and the engine has to.
+	results := buildStepResults(order, state, ranSet("start-besu", "deploy-contracts"))
 
 	want := map[string]string{
 		"write-genesis":    "skipped",
@@ -54,18 +66,43 @@ func TestStepReportDistinguishesExecutedFromSkipped(t *testing.T) {
 }
 
 // TestStepReportOnAFirstRunClaimsNothingWasSkipped covers the case that exposed the
-// bug: nothing existed before, so nothing can honestly be reported as skipped.
+// original bug: a run that started from nothing did every step, and a report calling
+// them skipped while stamping each with a fresh completedAt contradicts itself.
 func TestStepReportOnAFirstRunClaimsNothingWasSkipped(t *testing.T) {
 	order := []string{"write-genesis", "start-besu"}
-	results := buildStepResults(order, doneState("write-genesis", "start-besu"), nil)
+	results := buildStepResults(order, doneState(order...), ranSet(order...))
 
 	for _, sr := range results {
 		if sr.Status == "skipped" {
-			t.Errorf("%s reported as skipped on a run that had no prior state", sr.Name)
+			t.Errorf("%s reported as skipped on a run that executed it", sr.Name)
 		}
 		if sr.Status != "executed" {
 			t.Errorf("%s: status = %q, want %q", sr.Name, sr.Status, "executed")
 		}
+	}
+}
+
+// TestStepReportCallsACheckSatisfiedStepSkipped is the regression the pre-run
+// snapshot could not catch, and the reason the engine now reports its own outcome.
+//
+// The scenario is ordinary: an operator deletes a step from
+// .provisioning-state.yaml to force it to run again — the documented way to make
+// start-besu rebuild. The step is then absent from any pre-run snapshot, so the old
+// inference labelled it "executed" the moment it appeared as done afterwards. But
+// the engine's Check looks at the world, not at the file: the container is up, so
+// Check answers true, Run is never called, and `docker compose --build` never
+// happens. The report said the rebuild ran. It had not.
+func TestStepReportCallsACheckSatisfiedStepSkipped(t *testing.T) {
+	order := []string{"start-besu"}
+
+	// No prior state entry (it was deleted), done afterwards, and the engine ran
+	// nothing — exactly the combination that used to read "executed".
+	results := buildStepResults(order, doneState("start-besu"), ranSet())
+
+	if results[0].Status != "skipped" {
+		t.Errorf("start-besu: status = %q, want skipped — Check resolved the step and Run was "+
+			"never called, so reporting it as executed tells the operator a rebuild happened "+
+			"when it did not", results[0].Status)
 	}
 }
 
@@ -78,7 +115,7 @@ func TestStepReportKeepsFailedAndPending(t *testing.T) {
 		{Step: "start-besu", Status: "failed"},
 	}}
 
-	results := buildStepResults(order, state, map[string]bool{"write-genesis": true})
+	results := buildStepResults(order, state, ranSet())
 
 	want := map[string]string{
 		"write-genesis":    "skipped",

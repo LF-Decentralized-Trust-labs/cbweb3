@@ -40,6 +40,7 @@ This runbook describes the complete procedure for bringing up the CBWeb3 environ
   - [Frontend: make frontend-spoke-all](#frontend-make-frontend-spoke-all)
   - [Health verification](#health-verification)
   - [End-to-end demo (HTLC cross-spoke)](#end-to-end-demo-htlc-cross-spoke)
+  - [Redeploying after a code change (`--rebuild`)](#redeploying-after-a-code-change---rebuild)
   - [Teardown](#teardown)
 - [Scenario B — International Hub](#scenario-b--international-hub)
 - [Troubleshooting](#troubleshooting)
@@ -396,6 +397,34 @@ Per-entity scripts:
 ./tryouts/tryout-spoke-a-bank-a.sh   # Onboarding + payment Bank-A
 ./tryouts/tryout-spoke-b-bank-b.sh   # Onboarding + payment Bank-B
 ```
+
+---
+
+### Redeploying after a code change (`--rebuild`)
+
+The steps that build this entity's service and portal images are gated on a **health
+probe** — does the api-gateway answer `/healthz`, does each portal serve a page. Neither
+question can see the source tree. So after editing a Go service or a React app, a plain
+apply finds the containers healthy, reports the step satisfied, and never reaches the
+`docker compose up --build` inside it. The stack keeps serving the previous binary while
+the report says everything is fine.
+
+```bash
+cbweb3 apply -f <manifest.yaml> --rebuild
+```
+
+`--rebuild` overrides that check for those steps only: the images are rebuilt from the
+current source and compose recreates the containers on the new image id. It does **not**
+touch chain state, contracts, PKI or genesis, and it does not re-run the rest of the
+pipeline — Besu, Paladin and the deploy steps keep their normal checks.
+
+The report tells the two apart: a step this run actually rebuilt reads `executed`, one
+whose check stood reads `skipped`.
+
+> Deleting the step's line from `<dataDir>/.provisioning-state.yaml` does **not** work,
+> and never did. This engine calls every step's `Check` regardless of persisted state,
+> so the probe still answers "healthy" and the step is still skipped. Until this flag
+> existed, that workaround also made the report claim the step had `executed`.
 
 ---
 

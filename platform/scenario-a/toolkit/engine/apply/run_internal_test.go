@@ -101,8 +101,8 @@ func TestRun_SuccessPath(t *testing.T) {
 
 	bundleCalled := false
 	fns := runnerFuncs{
-		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) error {
-			return nil
+		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) (orchestrator.RunOutcome, error) {
+			return orchestrator.RunOutcome{}, nil
 		},
 		emitBundle: func(_ context.Context, _ bundle.BundleInput) (*bundle.JoinBundle, error) {
 			bundleCalled = true
@@ -137,8 +137,8 @@ func TestRun_FailurePath(t *testing.T) {
 	m := loadRunManifest(t, dataDir)
 
 	fns := runnerFuncs{
-		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) error {
-			return fmt.Errorf("step %s: injected failure", orchestrator.CanonicalStepOrder[2])
+		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) (orchestrator.RunOutcome, error) {
+			return orchestrator.RunOutcome{}, fmt.Errorf("step %s: injected failure", orchestrator.CanonicalStepOrder[2])
 		},
 		emitBundle: func(_ context.Context, _ bundle.BundleInput) (*bundle.JoinBundle, error) {
 			t.Error("emitBundle must not be called when runFound fails")
@@ -170,8 +170,8 @@ func TestRun_IdempotenceAllDone(t *testing.T) {
 
 	bundleCallCount := 0
 	fns := runnerFuncs{
-		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) error {
-			return nil
+		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) (orchestrator.RunOutcome, error) {
+			return orchestrator.RunOutcome{}, nil
 		},
 		emitBundle: func(_ context.Context, _ bundle.BundleInput) (*bundle.JoinBundle, error) {
 			bundleCallCount++
@@ -203,8 +203,8 @@ func TestRun_BundlePathAfterSuccess(t *testing.T) {
 	m := loadRunManifest(t, dataDir)
 
 	fns := runnerFuncs{
-		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) error {
-			return nil
+		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) (orchestrator.RunOutcome, error) {
+			return orchestrator.RunOutcome{}, nil
 		},
 		emitBundle: func(_ context.Context, _ bundle.BundleInput) (*bundle.JoinBundle, error) {
 			return validEmittedBundleForTest(), nil
@@ -233,11 +233,13 @@ func TestRun_InterruptedStepStatus(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	fns := runnerFuncs{
-		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) error {
+		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) (orchestrator.RunOutcome, error) {
 			// Simulate orchestrator: 2 steps done, step 3 was in progress and marked failed.
 			writeDoneAndFailed(t, dataDir, 2, orchestrator.CanonicalStepOrder[2])
 			cancel()
-			return context.Canceled
+			// The engine reports what it ran even when the run aborts — the two
+			// finished steps are the reason the report can call them executed.
+			return ranOutcome(orchestrator.CanonicalStepOrder[:2]...), context.Canceled
 		},
 		emitBundle: func(_ context.Context, _ bundle.BundleInput) (*bundle.JoinBundle, error) {
 			t.Error("emitBundle must not be called on interrupt")

@@ -19,6 +19,10 @@ import (
 // Deps holds all external dependencies injected into the orchestration engine.
 // All fields are required unless marked optional.
 type Deps struct {
+	// Force names steps that must run even when their Check reports satisfied.
+	// Set from --rebuild; nil on an ordinary apply. See ForcedSteps.
+	Force ForcedSteps
+
 	// KeyProvider manages secp256k1 keys. Never nil.
 	KeyProvider keyprovider.KeyProvider
 
@@ -121,6 +125,10 @@ func (t Timeouts) resolved() Timeouts {
 // JoinDeps holds all external dependencies injected into the mode:join engine
 // (RunJoin). All fields are required unless marked optional.
 type JoinDeps struct {
+	// Force names steps that must run even when their Check reports satisfied.
+	// Set from --rebuild; nil on an ordinary apply. See ForcedSteps.
+	Force ForcedSteps
+
 	// KeyProvider manages the commercial bank's blockchain secp256k1 key. Never nil.
 	KeyProvider keyprovider.KeyProvider
 

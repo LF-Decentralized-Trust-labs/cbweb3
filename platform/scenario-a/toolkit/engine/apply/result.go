@@ -16,8 +16,13 @@ import (
 // ApplyInput carries everything resolved from CLI flags and the parsed manifest.
 // It is the boundary object between cmd/cbweb3/main.go and engine/apply.
 type ApplyInput struct {
-	Manifest   *manifest.Manifest
-	DryRun     bool
+	Manifest *manifest.Manifest
+	DryRun   bool
+	// Rebuild (--rebuild) forces the steps that build this entity's service and
+	// portal images to run even when their Check reports satisfied. Those Checks are
+	// liveness probes, so an edited source tree leaves them answering "already done"
+	// and the container keeps serving the previous binary.
+	Rebuild    bool
 	OutputFmt  string // "yaml" | "json"; default "yaml"
 	OutputDir  string // where to write bundles/<spoke-id>.bundle.yaml
 	BesuRPCURL string // http://localhost:<rpc.port> (local profile)
