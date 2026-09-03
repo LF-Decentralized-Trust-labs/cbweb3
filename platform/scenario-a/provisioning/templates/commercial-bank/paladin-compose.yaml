@@ -35,7 +35,18 @@ services:
     user: "0:0"
     volumes:
       - bank_data:/data/bank
-    command: ["sh", "-c", "mkdir -p /data/bank && chmod -R 777 /data/bank"]
+    # Pre-create the Paladin key store directory on the volume and hand it to
+    # uid 1000. BOTH halves are load-bearing:
+    #   - mkdir: Paladin's filesystem key store does NOT create its own directory.
+    #     It fails to boot with "PD020800: Path 'keystore' does not exist" and the
+    #     start-paladin step then dies on a health-check timeout. This is what the
+    #     removed `/data/keystore` tmpfs entry was silently providing besides the
+    #     write permission, and missing it broke a full deploy on 2026-09-03.
+    #   - the final chmod 600: the recursive 777 above is the legacy safety net for
+    #     root-owned volume content, but the key store now lives inside that tree
+    #     and `-seed.key` is private key material Paladin writes 0600. Restoring it
+    #     keeps a world-readable seed from being re-created on every bring-up.
+    command: ["sh", "-c", "mkdir -p /data/bank/keystore && chmod -R 777 /data/bank && find /data/bank/keystore -type f -exec chmod 600 {} +"]
     restart: "no"
 
   # Service key is fixed (Compose forbids ${...} in service names); the spoke and
@@ -58,8 +69,17 @@ services:
       - bank_paladin_config:/etc/paladin
       - bank_data:/data
     tmpfs:
+      # /app/jna ONLY — see the long note in the central-bank paladin-compose.yaml.
+      # /data/keystore must never be added here: it holds the bip32 seed that
+      # derives the salted Pente endorsement identities, a Pente group's endorser
+      # set is immutable once written to the base ledger, and a seed regenerated
+      # by any container start (a plain `docker restart` suffices) kills every
+      # existing group with PenteInvalidEndorser, reported as PD012214.
+      # paladin-bank-data-init both creates /data/bank/keystore and makes the tree
+      # writable by uid 1000; the mkdir is not optional, because the tmpfs entry
+      # was creating the directory too and Paladin's key store creates neither
+      # (PD020800 → start-paladin health-check timeout).
       - /app/jna:exec,mode=1777
-      - /data/keystore:mode=0777
     networks:
       - spoke_network
     extra_hosts:
