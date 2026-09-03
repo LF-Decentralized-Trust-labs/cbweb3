@@ -79,7 +79,7 @@ func TestRunJoin_AllStepsDone(t *testing.T) {
 	steps, mocks := mockJoinSteps(true) // every Check returns done=true
 
 	var buf bytes.Buffer
-	if err := runJoinWithSteps(context.Background(), m, testJoinBundle(), testJoinDeps(), &buf, steps); err != nil {
+	if _, err := runJoinWithSteps(context.Background(), m, testJoinBundle(), testJoinDeps(), &buf, steps); err != nil {
 		t.Fatalf("RunJoin: %v", err)
 	}
 	for _, mk := range mocks {
@@ -96,7 +96,7 @@ func TestRunJoin_AllStepsSucceed(t *testing.T) {
 	steps, mocks := mockJoinSteps(false)
 
 	var buf bytes.Buffer
-	if err := runJoinWithSteps(context.Background(), m, testJoinBundle(), testJoinDeps(), &buf, steps); err != nil {
+	if _, err := runJoinWithSteps(context.Background(), m, testJoinBundle(), testJoinDeps(), &buf, steps); err != nil {
 		t.Fatalf("RunJoin: %v", err)
 	}
 	for _, mk := range mocks {
@@ -137,7 +137,7 @@ func TestRunJoin_ResumeFromStep5(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runJoinWithSteps(context.Background(), m, testJoinBundle(), testJoinDeps(), &buf, steps); err != nil {
+	if _, err := runJoinWithSteps(context.Background(), m, testJoinBundle(), testJoinDeps(), &buf, steps); err != nil {
 		t.Fatalf("RunJoin: %v", err)
 	}
 	for i := 0; i < 4; i++ {
@@ -156,7 +156,7 @@ func TestRunJoin_NilBundle(t *testing.T) {
 	dataDir := t.TempDir()
 	m := testJoinManifest(dataDir)
 	var buf bytes.Buffer
-	err := runJoinWithSteps(context.Background(), m, nil, testJoinDeps(), &buf, nil)
+	_, err := runJoinWithSteps(context.Background(), m, nil, testJoinDeps(), &buf, nil)
 	if !errors.Is(err, ErrBundleNotFound) {
 		t.Errorf("expected ErrBundleNotFound, got %v", err)
 	}
@@ -174,7 +174,7 @@ func TestRunJoin_ProvisioningLocked(t *testing.T) {
 
 	steps, _ := mockJoinSteps(false)
 	var buf bytes.Buffer
-	err = runJoinWithSteps(context.Background(), m, testJoinBundle(), testJoinDeps(), &buf, steps)
+	_, err = runJoinWithSteps(context.Background(), m, testJoinBundle(), testJoinDeps(), &buf, steps)
 	if !errors.Is(err, ErrProvisioningLocked) {
 		t.Errorf("expected ErrProvisioningLocked, got %v", err)
 	}

@@ -26,6 +26,34 @@ var ErrGenesisCorrupt = errors.New("orchestrator: genesis.json is present but co
 // Exposed here for documentation convenience; canonical source is deps.go.
 var defaultTimeoutsDoc = DefaultTimeouts()
 
+// RunOutcome records what a run actually DID, which the persisted state cannot say.
+//
+// State stores "done" both for a step whose Run succeeded and for one the Check
+// found already satisfied — deliberately, so a stale "failed" converges on an
+// idempotent re-run, and two steps branch on that exact value
+// (step_register_nodes.go, step_register_paladin_node.go). Widening the persisted
+// vocabulary would therefore change when those steps re-execute.
+//
+// So the distinction travels back to the caller instead. The apply report needs it:
+// inferring "executed" from a before/after state snapshot answers a different
+// question — "was this step already recorded?" — and the two answers diverge exactly
+// when a step's Check short-circuits with no prior entry, which is the case that
+// makes a report claim work nobody did.
+type RunOutcome struct {
+	// Ran holds the steps whose Run was invoked AND returned nil. A step satisfied
+	// by Check is absent; so is one whose Run failed, which the report shows as
+	// failed rather than executed.
+	Ran map[string]bool
+}
+
+// ranStep records a step the engine actually executed.
+func (o *RunOutcome) ranStep(name string) {
+	if o.Ran == nil {
+		o.Ran = map[string]bool{}
+	}
+	o.Ran[name] = true
+}
+
 // RunFound provisions a new spoke in mode:found (central bank founding a new network).
 // It executes the 11-step sequence idempotently: each step is skipped if already complete.
 // The first step (start-besu) brings up the spoke bootnode and generates genesis,
@@ -42,21 +70,26 @@ var defaultTimeoutsDoc = DefaultTimeouts()
 // Returns ErrGenesisCorrupt if SPOKE_DATA_DIR/genesis/genesis.json exists but is corrupt.
 // Returns ErrProvisioningLocked if another process holds the file lock.
 // Returns a wrapped step error on step failure.
-func RunFound(ctx context.Context, m *manifest.Manifest, deps Deps) error {
+func RunFound(ctx context.Context, m *manifest.Manifest, deps Deps) (RunOutcome, error) {
 	return runFoundWithSteps(ctx, m, deps, os.Stdout, nil)
 }
 
 // runFoundWithSteps is the internal implementation that accepts an explicit step list
 // and log writer, enabling unit testing without subprocesses or Docker.
 // When steps is nil, the production step list is constructed from manifest and deps.
-func runFoundWithSteps(ctx context.Context, m *manifest.Manifest, deps Deps, w io.Writer, steps []Step) error {
+func runFoundWithSteps(ctx context.Context, m *manifest.Manifest, deps Deps, w io.Writer, steps []Step) (RunOutcome, error) {
 	spokeID := m.Spec.Spoke.ID
 	dataDir := m.Spec.Node.DataDir
 	deps.Timeouts = deps.Timeouts.resolved()
 
+	// Accumulated as the loop goes, and returned on EVERY path including failure:
+	// the steps that ran before an abort still ran, and a report that dropped them
+	// would describe a different run than the one that happened.
+	var outcome RunOutcome
+
 	// Validate required deps.
 	if deps.PaladinCBURL == "" {
-		return fmt.Errorf("orchestrator: deps.PaladinCBURL is required")
+		return outcome, fmt.Errorf("orchestrator: deps.PaladinCBURL is required")
 	}
 
 	// 1. Inspect genesis state (non-destructive). mode:found now owns the Besu
@@ -65,23 +98,23 @@ func runFoundWithSteps(ctx context.Context, m *manifest.Manifest, deps Deps, w i
 	// genesis aborts — genesis-init must never overwrite/regenerate it (FIX-2).
 	result, err := genesis.GuardGenesis(spokeID, dataDir, false, w)
 	if err != nil {
-		return fmt.Errorf("orchestrator: genesis check: %w", err)
+		return outcome, fmt.Errorf("orchestrator: genesis check: %w", err)
 	}
 	if result.Decision == genesis.DecisionAbort {
-		return ErrGenesisCorrupt
+		return outcome, ErrGenesisCorrupt
 	}
 
 	// 2. Acquire file lock to prevent concurrent provisioning of the same spoke.
 	unlock, err := lockState(dataDir)
 	if err != nil {
-		return err // ErrProvisioningLocked or I/O error
+		return outcome, err // ErrProvisioningLocked or I/O error
 	}
 	defer unlock()
 
 	// 3. Load persisted state.
 	state, err := LoadState(dataDir)
 	if err != nil {
-		return fmt.Errorf("orchestrator: load state: %w", err)
+		return outcome, fmt.Errorf("orchestrator: load state: %w", err)
 	}
 	if state.SpokeID == "" {
 		state.SpokeID = spokeID
@@ -95,12 +128,19 @@ func runFoundWithSteps(ctx context.Context, m *manifest.Manifest, deps Deps, w i
 	// 5. Execute each step: check → skip or run → persist.
 	for _, step := range steps {
 		if err := ctx.Err(); err != nil {
-			return err
+			return outcome, err
 		}
 
 		done, err := step.Check(ctx)
 		if err != nil {
-			return fmt.Errorf("step %s: check: %w", step.Name(), err)
+			return outcome, fmt.Errorf("step %s: check: %w", step.Name(), err)
+		}
+		// --rebuild overrides a satisfied Check for the build steps: a healthy
+		// container proves the service is up, not that it is running the current
+		// source. Logged so a forced re-run is never a mystery in the log.
+		if done && deps.Force[step.Name()] {
+			logDetail(w, spokeID, step.Name(), "forced by --rebuild: check reported satisfied, rebuilding anyway")
+			done = false
 		}
 		if done {
 			logSkipped(w, spokeID, step.Name())
@@ -108,7 +148,7 @@ func runFoundWithSteps(ctx context.Context, m *manifest.Manifest, deps Deps, w i
 			// run converges to the real state on idempotent re-runs.
 			state = markStep(state, step.Name(), "done", time.Now().UTC().Format(time.RFC3339))
 			if err := saveState(dataDir, state); err != nil {
-				return fmt.Errorf("step %s: save state: %w", step.Name(), err)
+				return outcome, fmt.Errorf("step %s: save state: %w", step.Name(), err)
 			}
 			continue
 		}
@@ -122,17 +162,18 @@ func runFoundWithSteps(ctx context.Context, m *manifest.Manifest, deps Deps, w i
 			state = markStep(state, step.Name(), "failed", "")
 			_ = saveState(dataDir, state)
 			logFailed(w, spokeID, step.Name(), runErr)
-			return fmt.Errorf("step %s: %w", step.Name(), runErr)
+			return outcome, fmt.Errorf("step %s: %w", step.Name(), runErr)
 		}
 
+		outcome.ranStep(step.Name())
 		state = markStep(state, step.Name(), "done", time.Now().UTC().Format(time.RFC3339))
 		if err := saveState(dataDir, state); err != nil {
-			return fmt.Errorf("step %s: save state: %w", step.Name(), err)
+			return outcome, fmt.Errorf("step %s: save state: %w", step.Name(), err)
 		}
 		logCompleted(w, spokeID, step.Name())
 	}
 
-	return nil
+	return outcome, nil
 }
 
 // buildSteps constructs the ordered list of production Step implementations.
@@ -532,16 +573,20 @@ var ErrBundleNotFound = errors.New("orchestrator: join bundle is required for mo
 //   - b is a validated join bundle (see bundle.ValidateForJoin).
 //   - deps.KeyProvider is non-nil and deps.BankCode is non-empty.
 //   - deps.ComposeTemplatePath points at the commercial-bank docker-compose.yaml.
-func RunJoin(ctx context.Context, m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps) error {
+func RunJoin(ctx context.Context, m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps) (RunOutcome, error) {
 	return runJoinWithSteps(ctx, m, b, deps, os.Stdout, nil)
 }
 
-func runJoinWithSteps(ctx context.Context, m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, w io.Writer, steps []Step) error {
+func runJoinWithSteps(ctx context.Context, m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, w io.Writer, steps []Step) (RunOutcome, error) {
+	// See RunFound: returned on every path, because a step that ran before an abort
+	// still ran.
+	var outcome RunOutcome
+
 	if b == nil {
-		return ErrBundleNotFound
+		return outcome, ErrBundleNotFound
 	}
 	if deps.BankCode == "" {
-		return fmt.Errorf("orchestrator: deps.BankCode is required for mode:join")
+		return outcome, fmt.Errorf("orchestrator: deps.BankCode is required for mode:join")
 	}
 	spokeID := m.Spec.Spoke.ID
 	dataDir := m.Spec.Node.DataDir
@@ -549,13 +594,13 @@ func runJoinWithSteps(ctx context.Context, m *manifest.Manifest, b *bundle.JoinB
 
 	unlock, err := lockState(dataDir)
 	if err != nil {
-		return err
+		return outcome, err
 	}
 	defer unlock()
 
 	state, err := LoadState(dataDir)
 	if err != nil {
-		return fmt.Errorf("orchestrator: load state: %w", err)
+		return outcome, fmt.Errorf("orchestrator: load state: %w", err)
 	}
 	if state.SpokeID == "" {
 		state.SpokeID = spokeID
@@ -567,12 +612,19 @@ func runJoinWithSteps(ctx context.Context, m *manifest.Manifest, b *bundle.JoinB
 
 	for _, step := range steps {
 		if err := ctx.Err(); err != nil {
-			return err
+			return outcome, err
 		}
 
 		done, err := step.Check(ctx)
 		if err != nil {
-			return fmt.Errorf("step %s: check: %w", step.Name(), err)
+			return outcome, fmt.Errorf("step %s: check: %w", step.Name(), err)
+		}
+		// --rebuild overrides a satisfied Check for the build steps: a healthy
+		// container proves the service is up, not that it is running the current
+		// source. Logged so a forced re-run is never a mystery in the log.
+		if done && deps.Force[step.Name()] {
+			logDetail(w, spokeID, step.Name(), "forced by --rebuild: check reported satisfied, rebuilding anyway")
+			done = false
 		}
 		if done {
 			logSkipped(w, spokeID, step.Name())
@@ -580,7 +632,7 @@ func runJoinWithSteps(ctx context.Context, m *manifest.Manifest, b *bundle.JoinB
 			// run converges to the real state on idempotent re-runs.
 			state = markStep(state, step.Name(), "done", time.Now().UTC().Format(time.RFC3339))
 			if err := saveState(dataDir, state); err != nil {
-				return fmt.Errorf("step %s: save state: %w", step.Name(), err)
+				return outcome, fmt.Errorf("step %s: save state: %w", step.Name(), err)
 			}
 			continue
 		}
@@ -607,17 +659,18 @@ func runJoinWithSteps(ctx context.Context, m *manifest.Manifest, b *bundle.JoinB
 			if step.Name() == StepStartBackend {
 				continue
 			}
-			return fmt.Errorf("step %s: %w", step.Name(), runErr)
+			return outcome, fmt.Errorf("step %s: %w", step.Name(), runErr)
 		}
 
+		outcome.ranStep(step.Name())
 		state = markStep(state, step.Name(), "done", time.Now().UTC().Format(time.RFC3339))
 		if err := saveState(dataDir, state); err != nil {
-			return fmt.Errorf("step %s: save state: %w", step.Name(), err)
+			return outcome, fmt.Errorf("step %s: save state: %w", step.Name(), err)
 		}
 		logCompleted(w, spokeID, step.Name())
 	}
 
-	return nil
+	return outcome, nil
 }
 
 // buildJoinSteps constructs the ordered list of production Step implementations
