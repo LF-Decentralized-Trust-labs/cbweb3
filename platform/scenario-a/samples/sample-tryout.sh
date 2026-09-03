@@ -69,13 +69,39 @@ print(d if d is not None else "")
 BODY=""  # last response body (set by try()/call())
 CODE=""  # last HTTP status code (set by try()/call())
 
+# XSRF token per access token, filled by login() and read by try().
+#
+# The gateway mints an XSRF-TOKEN cookie at login, bound to that access token, and
+# CSRF (middleware/csrf.go) fires on any mutating request carrying the access_token
+# cookie — which is exactly what try() sends. The header must be present, equal to
+# the cookie, and a valid binding for that session, so the value has to come from
+# the server; it cannot be invented here.
+#
+# Kept in FILES, not a shell array: every call site invokes login in a command
+# substitution (`ITAU_TOK=$(login ...)`), which runs in a subshell, so an array
+# assignment inside login is discarded when that subshell exits and the parent
+# reads back an empty token. cksum (POSIX) rather than md5sum, which macOS spells
+# differently.
+XSRF_DIR=$(mktemp -d)
+trap 'rm -rf "$XSRF_DIR"' EXIT
+xsrf_key() { printf '%s' "$1" | cksum | cut -d' ' -f1; }
+
 # try METHOD URL TOKEN [BODY] — curl with cookie auth; sets BODY + CODE and NEVER
 # stops the script (only a curl transport failure aborts). Use when a non-2xx is a
 # valid, handled outcome (e.g. probing for already-onboarded state).
 try() {
   local method=$1 url=$2 token=$3 body=${4:-}
   local args=(-sS -m 120 -w $'\n%{http_code}' -X "$method" -H 'Content-Type: application/json')
-  [[ -n $token ]] && args+=(-b "access_token=$token")
+  if [[ -n $token ]]; then
+    local xsrf="" xf="$XSRF_DIR/$(xsrf_key "$token")"
+    [[ -f $xf ]] && xsrf=$(cat "$xf")
+    if [[ -n $xsrf ]]; then
+      # One -b: repeated flags do not merge into a single Cookie header.
+      args+=(-b "access_token=$token; XSRF-TOKEN=$xsrf" -H "X-XSRF-TOKEN: $xsrf")
+    else
+      args+=(-b "access_token=$token")
+    fi
+  fi
   [[ -n $body ]]  && args+=(-d "$body")
   local out
   out=$(curl "${args[@]}" "$url") || die "curl failed: $method $url"
@@ -97,13 +123,17 @@ call() {
 # login GATEWAY_URL USERNAME PASSWORD — echoes an accessToken via the gateway's real
 # POST /api/v1/auth/login (password grant; clientId/clientSecret = username/password).
 login() {
-  local out tok
-  out=$(curl -sS -m 30 -X POST "$1/api/v1/auth/login" \
+  local out tok jar
+  jar=$(mktemp)
+  out=$(curl -sS -m 30 -c "$jar" -X POST "$1/api/v1/auth/login" \
     -H 'Content-Type: application/json' \
     -d "{\"clientId\":\"$2\",\"clientSecret\":\"$3\"}") \
-    || die "login curl failed for $2"
+    || { rm -f "$jar"; die "login curl failed for $2"; }
   tok=$(printf '%s' "$out" | jget accessToken)
-  [[ -n $tok ]] || die "login failed for $2: $out"
+  [[ -n $tok ]] || { rm -f "$jar"; die "login failed for $2: $out"; }
+  # Netscape cookie jar: domain flag path secure expiry NAME VALUE.
+  awk '$6=="XSRF-TOKEN"{print $7}' "$jar" | tail -1 > "$XSRF_DIR/$(xsrf_key "$tok")"
+  rm -f "$jar"
   printf '%s' "$tok"
 }
 
