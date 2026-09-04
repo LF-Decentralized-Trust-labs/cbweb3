@@ -1,3 +1,20 @@
+# Container log rotation. Same 50m x 5 policy the provisioning templates use, and
+# it is here for the same incident: Scenario A's Paladin containers reached 96 GB
+# because Docker's json-file driver runs uncapped by default.
+#
+# This file is NOT under provisioning/templates, so the tree-walking half of
+# provisioning_log_policy_test.go never saw it — the relay was the one service in a
+# live stack still on the unbounded default after that fix. The guard now names this
+# path explicitly instead of discovering it, so it cannot fall out of scope again.
+#
+# The relay is the worst service to leave uncapped: it polls both chains
+# continuously, so it writes steadily rather than in bursts.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   cacti-htlc-relay:
     build:
@@ -32,6 +49,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    logging: *cbweb3_logging
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/v1/health"]
       interval: 10s

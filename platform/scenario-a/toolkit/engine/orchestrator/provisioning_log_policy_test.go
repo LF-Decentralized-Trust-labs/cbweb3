@@ -28,6 +28,30 @@ import (
 // templatesDir is the provisioning template tree, relative to this package.
 const templatesDir = "../../../provisioning/templates"
 
+// bringUpComposesOutsideTemplates lists, BY NAME, every compose file that starts a
+// container in the Scenario A bring-up and does not live under templatesDir.
+//
+// Naming them is the point. The first version of this guard walked templatesDir and
+// nothing else, so it audited the directory its author was already looking at and
+// reported success for everything outside it. The Cacti relay was never in scope —
+// not dropped from it — and stayed on the unbounded json-file default while the
+// test went green. It was found by reading HostConfig.LogConfig on a running stack,
+// not by reading YAML.
+//
+// A discovered list would repeat the mistake in a new shape: anything the glob does
+// not reach is silently exempt. An explicit list fails loudly when a path moves,
+// which is why composeExists below is a hard error rather than a skip.
+//
+// Membership rule: it belongs here if the bring-up starts it. Verified by tracing
+// what actually launches containers, not by globbing for compose files —
+// provisioning/scripts/start-cacti.sh:26 brings this one up, and it is the only
+// such file today. The frontend/ and backend/ composes are developer-only paths
+// (make frontend-spoke-*), and interop/hub-and-spoke/noc/docker-compose.yaml has no
+// reference anywhere; none of the three is part of a deploy.
+var bringUpComposesOutsideTemplates = []string{
+	"../../../interop/hub-and-spoke/cacti/docker-compose.yaml",
+}
+
 // composeService is the slice of a compose service this test judges. Everything
 // else is ignored, so an unrelated schema change does not break the guard.
 type composeService struct {
@@ -78,7 +102,16 @@ func composeTemplates(t *testing.T) []string {
 // Both options are required. max-size alone rotates into an unbounded number of
 // files; max-file alone caps the count of files that each grow forever.
 func TestProvisioningTemplates_CapContainerLogs(t *testing.T) {
-	for _, path := range composeTemplates(t) {
+	paths := composeTemplates(t)
+	for _, extra := range bringUpComposesOutsideTemplates {
+		if _, err := os.Stat(extra); err != nil {
+			t.Fatalf("named bring-up compose %s is unreadable (%v). It is listed here because the "+
+				"bring-up starts it; if it moved, update this list — do not delete the entry, or the "+
+				"file goes back to being silently exempt.", extra, err)
+		}
+		paths = append(paths, extra)
+	}
+	for _, path := range paths {
 		t.Run(filepath.Base(filepath.Dir(path))+"/"+filepath.Base(path), func(t *testing.T) {
 			raw, err := os.ReadFile(path)
 			if err != nil {
