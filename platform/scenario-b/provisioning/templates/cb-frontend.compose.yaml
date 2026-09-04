@@ -3,8 +3,27 @@
 # separate noc template. Each SPA bakes its api-gateway URL at BUILD time (VITE_*),
 # so the toolkit builds a per-entity image; here we only run it. All apps serve on
 # nginx container port 80. Stateless; no secrets.
+# Container log rotation, applied to every service in this file.
+#
+# Without it Docker's json-file driver has no size cap and no rotation: the
+# Scenario A Paladin containers reached 96 GB (~2.4 GB/day) and a full disk takes
+# the whole network down. 50m x 5 caps each service at 250 MB.
+#
+# Both options are load-bearing. max-size alone rotates into an unbounded number of
+# files; max-file alone caps the count of files that each grow forever.
+#
+# The anchor is not brevity: without it a new service is added with no logging block
+# and the ceiling silently fails to apply to that container. With it the omission is
+# visible in review, and toolkit/engine/composetemplate fails the build.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   governance-frontend:
+    logging: *cbweb3_logging
     image: "${GOVERNANCE_FRONTEND_IMAGE:?}"
     container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-governance-frontend"
     ports:
@@ -14,6 +33,7 @@ services:
     restart: always
 
   treasury-frontend:
+    logging: *cbweb3_logging
     image: "${TREASURY_FRONTEND_IMAGE:?}"
     container_name: "${CONTAINER_PREFIX}-${ENTITY}-treasury-frontend"
     ports:
@@ -23,6 +43,7 @@ services:
     restart: always
 
   supervisor-frontend:
+    logging: *cbweb3_logging
     image: "${SUPERVISOR_FRONTEND_IMAGE:?}"
     container_name: "${CONTAINER_PREFIX}-${ENTITY}-supervisor-frontend"
     ports:

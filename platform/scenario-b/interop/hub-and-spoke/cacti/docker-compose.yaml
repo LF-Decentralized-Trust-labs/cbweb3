@@ -1,5 +1,20 @@
+# Container log rotation. Same policy as the provisioning templates (50m x 5 =
+# 250 MB), declared here because this file is NOT under provisioning/templates —
+# the relay is brought up separately by provisioning/scripts/start-cacti.sh, so it
+# sat outside the template guard and was the one container in a 69-container stack
+# still running on the uncapped json-file default.
+#
+# It is also the wrong service to leave uncapped: it is long-lived and polls both
+# chains continuously, so it writes steadily rather than in bursts.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   cacti-liquidity-relay:
+    logging: *cbweb3_logging
     build:
       context: ../../..
       dockerfile: interop/hub-and-spoke/cacti/Dockerfile
