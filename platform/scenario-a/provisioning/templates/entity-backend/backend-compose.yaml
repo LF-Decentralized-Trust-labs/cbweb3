@@ -113,6 +113,16 @@ services:
       PAYMENT_GRPC_PORT: "9094"
       PALADIN_URL: ${PALADIN_URL:?PALADIN_URL is required}
       PALADIN_IDENTITY: ${PALADIN_IDENTITY:?PALADIN_IDENTITY is required}
+      # The spoke this orchestrator belongs to, used for the receiver-locality
+      # check. Passed explicitly because it CANNOT be parsed back out of
+      # PALADIN_IDENTITY: a node name is <spokeId>-<bankId> and both halves may
+      # contain hyphens, so "spoke-costa-rica-cb1" is indistinguishable from a
+      # spoke called "spoke-costa" with a bank called "rica-cb1".
+      #
+      # Optional on purpose (:- and not :?): an environment deployed before this
+      # line exists keeps starting, and the service falls back to the old
+      # two-segment guess — which is what it did all along.
+      SPOKE_ID: ${SPOKE_ID:-}
       CACTI_API_URL: ${CACTI_API_URL:-http://host.docker.internal:4000}
       # Besu signing path (HTLC) is per-relationship and only wired once a bilateral
       # contract exists. At found (CB-only) it is OFF, so no operator key is needed.

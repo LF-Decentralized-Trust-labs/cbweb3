@@ -493,25 +493,61 @@ func isHTLCCounterparty(sender, receiver, bankID string) (bool, error) {
 	if bankID == "" {
 		return false, nil
 	}
-	senderBank, sErr := bankIDFromIdentity(sender)
-	receiverBank, rErr := bankIDFromIdentity(receiver)
-	if sErr != nil {
-		return false, sErr
-	}
-	if rErr != nil {
-		return false, rErr
-	}
-	return senderBank == bankID || receiverBank == bankID, nil
+	// Membership is TESTED, not extracted. bankIDFromIdentity cannot recover the
+	// bank id when the spoke id carries hyphens ("spoke-costa-rica-cb1" reads as
+	// "rica-cb1"), and it returns that wrong value with a nil error — which is how
+	// the lock's own creator got "not a counterparty of this HTLC".
+	return identityBelongsToBank(sender, bankID) || identityBelongsToBank(receiver, bankID), nil
 }
 
-// bankIDFromIdentity extracts the bank identifier from a Paladin identity string.
-// e.g. "funded_operator@spoke-a-bank-a" → "bank-a"
+// identityBelongsToBank reports whether a Paladin identity belongs to bankID.
 //
-// The Paladin identity format "{name}@{spoke-word}-{letter}-{bankID}" is structural
-// to this function: the bankID is the third dash-delimited segment after the "@".
-// If Paladin changes this naming convention, this function will return an error and
-// all authorization checks will fail closed until the implementation is updated.
-// Mirrors identity.BankID in the payment-orchestrator; keep both in sync or move to a shared module.
+// This is the authorization primitive; prefer it over bankIDFromIdentity, which
+// cannot be made correct. A node name is `<spokeId>-<bankId>` and BOTH halves may
+// contain hyphens, so no split recovers the two parts:
+//
+//	spoke-costa-rica-cb1   spokeId=spoke-costa-rica  bankId=cb1
+//	spoke-brl-bank-itau    spokeId=spoke-brl         bankId=bank-itau
+//
+// Both shapes are live — LNET manifests use cb1…cb6, the samples use bank-itau.
+// Testing is exact where extracting is not: the caller already knows the bank id
+// it is asking about, so the identity only has to end at that boundary. The
+// leading "-" prevents substring spoofing: "bank" must not match a node ending in
+// "-bank-abc", and "cb1" must not match one ending in "-cb11".
+//
+// A party stored as a bare bank id ("cb1") is accepted by exact equality.
+//
+// Kept in sync with identity.BelongsToBank in the payment-orchestrator and
+// identityBelongsToBank in the bank portal's features/fx/identity.ts. All three
+// carry the same case table in their tests; change them together.
+func identityBelongsToBank(paladinIdentity, bankID string) bool {
+	bankID = strings.TrimSpace(bankID)
+	if bankID == "" {
+		return false
+	}
+	node := strings.TrimSpace(paladinIdentity)
+	if at := strings.Index(node, "@"); at >= 0 {
+		node = node[at+1:]
+	}
+	if node == "" {
+		return false
+	}
+	return node == bankID || strings.HasSuffix(node, "-"+bankID)
+}
+
+// bankIDFromIdentity extracts the bank identifier from a Paladin identity string,
+// assuming the spoke id is exactly two hyphen-separated segments.
+//
+// DO NOT USE FOR AUTHORIZATION — use identityBelongsToBank. The assumption is
+// false: a spoke id may carry more segments ("spoke-costa-rica"), and the 3-way
+// split then returns part of the spoke name glued to the bank id ("rica-cb1")
+// with NO error, so callers cannot tell. The comment this replaced claimed the
+// function "will return an error and all authorization checks will fail closed";
+// it does not, and they did not.
+//
+// It remains for the one caller that genuinely needs a stored label rather than a
+// decision (the PvP ledger's receiver_bank_id column), which is tracked as its
+// own defect because fixing it needs a schema or config decision.
 func bankIDFromIdentity(paladinIdentity string) (string, error) {
 	parts := strings.SplitN(paladinIdentity, "@", 2)
 	if len(parts) < 2 {
