@@ -144,6 +144,7 @@ func main() {
 			BaseURL:            penteURL,
 			FXAgreementAddress: getEnv("FX_AGREEMENT_PENTE_CONTRACT_ADDRESS", os.Getenv("FX_AGREEMENT_ADDRESS")),
 			Identity:           getEnv("PALADIN_IDENTITY", "funded_operator@spoke-a-cb"),
+			Logger:             logger,
 		})
 		pente = penteClient
 		fxAgreementPente = penteClient

@@ -1810,6 +1810,14 @@ func (s *paymentOrchestratorService) validateHTLCTermsAgainstAgreement(
 // to their EVM addresses using ptx_resolveVerifier. Fields that are already 0x-prefixed
 // addresses are left unchanged. This allows callers (and the frontend) to use Paladin
 // identities (e.g. "funded_operator@spoke-a-bank-c") for all party fields.
+//
+// NOT WIRED INTO ProposeFXAgreement — only tests call it, and wiring it as written would break
+// every cross-spoke propose. Paladin's registry is per-node, so resolving a remote counterparty
+// returns PD012100 and `resolve` turns that into a hard error, rejecting the proposal. Party
+// addresses are instead derived by partyAddress() and resolved per-group at submission time by
+// PenteClient.resolvePartyAddr. Kept because federated resolution (the gateway already federates
+// the identity roster over the relay) is the shape a correct fix would take; do not enable it
+// without that.
 func resolveFXPartyAddresses(ctx context.Context, req *pb.ProposeFXAgreementRequest, zeto ports.ZetoOperator) (*pb.ProposeFXAgreementRequest, error) {
 	if zeto == nil {
 		return req, nil // no Paladin configured — pass through (dev/test mode)
@@ -1922,14 +1930,31 @@ func buildFXProposalParams(tradeID string, req *pb.ProposeFXAgreementRequest) (p
 // in this group's EVM, so a deterministic non-zero address is derived from it (sha256[12:]) so
 // propose validations pass (counterpartyB != 0) and the identity stays recoverable. The Paladin
 // identity remains the source of truth in the service/relay layer.
+//
+// The "is it already an address?" test MUST be common.IsHexAddress, NOT a zero-address check on
+// the parsed value. common.HexToAddress is lenient: given a non-address string it left-pads an
+// odd length, decodes as far as the first non-hex byte and returns whatever it got. Every
+// odd-length identity therefore decodes the leading "0f" of "0funded_operator@..." and comes back
+// as the same NON-zero garbage address 0x00...000F, which the old check accepted as real. On the
+// LNET roster that collapsed 4 of 9 identities onto one address — including two central banks,
+// spoke-costa-rica-cb (35 chars) and spoke-peru-cb (29) — making the settlement agents of an FX
+// agreement indistinguishable from each other and from spoke-chile-cb3/cb4 in the originator's
+// immutable record. Identities of even length were unaffected, which is why this stayed hidden.
+//
+// This is the same leniency that made HTLC locks revert with HTLC__ParticipantNotVerified; see the
+// note on the same predicate in adapters/besu/client.go Lock.
+//
+// The derived address is still a placeholder that belongs to nobody: it only has to be non-zero
+// and distinct per identity. It is the counterparty's OWN group that holds the resolvable address
+// authorization is checked against (see resolvePartyAddr in adapters/paladin/pente_client.go).
 // TODO(035): confirm on-chain party-address semantics for cross-spoke parties against a live deploy.
 func partyAddress(v string) common.Address {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return common.Address{}
 	}
-	if a := common.HexToAddress(v); a != (common.Address{}) {
-		return a
+	if common.IsHexAddress(v) {
+		return common.HexToAddress(v)
 	}
 	h := sha256.Sum256([]byte(v))
 	return common.BytesToAddress(h[12:])
