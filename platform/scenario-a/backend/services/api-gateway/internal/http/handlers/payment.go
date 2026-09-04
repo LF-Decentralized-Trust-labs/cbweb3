@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -49,7 +50,10 @@ type AuditLogWriter interface {
 // gateway wires this in.
 type PvPLedger interface {
 	RecordLeg(ctx context.Context, in services.SettledLegInput) error
-	ListCreditsForBank(ctx context.Context, bankID string) ([]services.PvPCreditRow, error)
+	// ListCreditsForBank takes the membership predicate rather than deciding scope
+	// itself: the same rule must govern authorization and this query, and the
+	// predicate lives here (identityBelongsToBank) so there is one definition.
+	ListCreditsForBank(ctx context.Context, bankID string, belongs func(identity string) bool) ([]services.PvPCreditRow, error)
 }
 
 // PaymentHandler exposes the payment-orchestrator operations as REST endpoints.
@@ -1186,9 +1190,16 @@ func (h *PaymentHandler) RecordSettledPvPLeg(c *fiber.Ctx) error {
 	if body.ContractID == "" || body.Receiver == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "contract_id and receiver are required"})
 	}
+	// The bank id is a query label, not a scoping decision (scoping tests the stored
+	// identity — see ListCreditsForBank), so a derivation failure must not discard the
+	// leg. It used to answer 400 here, and the reporting orchestrator only logs a
+	// warning and never retries: an unparseable receiver identity silently erased an
+	// already-settled movement from the ledger.
 	receiverBankID, err := bankIDFromIdentity(body.Receiver)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "unparseable receiver identity: " + err.Error()})
+		receiverBankID = ""
+		slog.Warn("pvp ledger: could not derive a bank label from the receiver identity — recording the leg anyway",
+			"contract_id", body.ContractID, "trade_id", body.TradeID, "receiver", body.Receiver, "error", err)
 	}
 	settledAt, err := time.Parse(time.RFC3339, body.SettledAt)
 	if err != nil {
@@ -1229,7 +1240,10 @@ func (h *PaymentHandler) ListSettledPvPCredits(c *fiber.Ctx) error {
 	if h.pvpLedger == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "pvp ledger not configured"})
 	}
-	rows, err := h.pvpLedger.ListCreditsForBank(c.Context(), bankID)
+	// Bind the bank so the service receives exactly the authorization rule, with no
+	// second copy of it and no chance of the two arguments being swapped.
+	belongs := func(identity string) bool { return identityBelongsToBank(identity, bankID) }
+	rows, err := h.pvpLedger.ListCreditsForBank(c.Context(), bankID, belongs)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
