@@ -823,6 +823,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		// position, so the relayer queue has nothing to retry and the payer's unspent reserve
 		// would sit on the issuing CB's Hub address indefinitely.
 		startResidueRetryWorker(orchestrator, swapRepo)
+		startBridgeOutRetryWorker(orchestrator, swapRepo)
 
 		// 009-commercial-cross-currency-swap: Wire quote generator with 15s TTL (T030/T031).
 		var quoteReserve services.AMMReserveReader
