@@ -685,7 +685,14 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 	// Best-effort: report the settled leg to the Central Bank so the receiving
 	// bank sees the incoming credit (its own orchestrator holds no record of the
 	// leg). Failures are logged and never undo the settlement.
-	s.reportSettledLeg(record)
+	//
+	// Off the response path on purpose. This used to be a synchronous call, which
+	// was harmless only because the reporter was never constructed — the env var it
+	// looked for was set nowhere. Now that it is wired and retries, a central bank
+	// that is down would have added its whole retry window to every settle
+	// response. Settlement is already final at this point; the report is a
+	// notification about it, so the caller must not wait for it.
+	go s.reportSettledLeg(record)
 
 	return &pb.SettleHTLCResponse{
 		HtlcTxHash: htlcTxHash,
@@ -710,8 +717,15 @@ func (s *paymentOrchestratorService) reportSettledLeg(record *domain.HTLCRecord)
 		SettledAt:  record.UpdatedAt,
 	}
 	if err := s.settlementReporter.ReportSettledLeg(context.Background(), leg); err != nil {
-		s.logger.Warn("failed to report settled PvP leg to central bank",
-			"contract_id", record.ContractID, "trade_id", record.AgreementID, "error", err)
+		// ERROR, not Warn: after the bounded retries are exhausted this movement
+		// exists on-chain and in no ledger, and the receiving bank's statement will
+		// never show it. Every field needed to replay the report by hand is here,
+		// because there is no queue that will do it later.
+		s.logger.Error("settled PvP leg NOT recorded at the central bank — the receiving bank will not see this credit",
+			"contract_id", record.ContractID, "trade_id", record.AgreementID,
+			"sender", record.Sender, "receiver", record.Receiver,
+			"amount", record.Amount, "settled_at", record.UpdatedAt.UTC().Format(time.RFC3339),
+			"error", err)
 	}
 }
 
