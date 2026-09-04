@@ -18,6 +18,7 @@ import {
 } from "@cbweb3/ui";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { spokeIdsFromRoster } from "../features/fx/spoke-roster";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
 import { useIdentityStore } from "../stores/identity.store";
 
@@ -59,14 +60,6 @@ function OptionSelect({
   );
 }
 
-// Derive the spoke id (e.g. "spoke-brl") from a Paladin identity such as
-// "funded_operator@spoke-brl-bank-itau".
-function spokeFromIdentity(identity: string): string {
-  const node = identity.includes("@") ? identity.slice(identity.indexOf("@") + 1) : identity;
-  const parts = node.split("-");
-  return parts.length >= 2 ? `${parts[0]}-${parts[1]}` : node;
-}
-
 // Latin American settlement currencies (ISO 4217) selectable on the receive leg.
 const LATAM_CURRENCIES = [
   "ARS", "BOB", "BRL", "CLP", "COP", "CRC", "CUP", "DOP", "GTQ",
@@ -105,11 +98,10 @@ export function AgreementProposalPage() {
       ? identityError ?? "Unable to load the identity roster. Check the API gateway and try again."
       : "The Paladin identity roster is not configured. Set PALADIN_IDENTITIES or enable Pente group membership on the API gateway, then reload.";
 
-  // Unique spoke ids derived from the identity roster, sorted.
-  const spokes = useMemo(
-    () => Array.from(new Set(identities.map(spokeFromIdentity))).sort(),
-    [identities],
-  );
+  // Spoke ids from the roster's central-bank entries. Derived there and not from
+  // the bank entries because a bank node carries no separator that tells the
+  // spoke id from the bank id — see features/fx/spoke-roster.ts.
+  const spokes = useMemo(() => spokeIdsFromRoster(identities), [identities]);
 
   const [counterpartyB, setCounterpartyB] = useState("");
   const [settlementAgent, setSettlementAgent] = useState("");
