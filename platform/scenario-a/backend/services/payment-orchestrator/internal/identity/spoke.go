@@ -8,9 +8,17 @@ import (
 	"strings"
 )
 
-// SpokePrefix extracts the spoke identifier from a Paladin identity string.
+// SpokePrefix guesses the spoke identifier from a Paladin identity string by
+// taking the first two hyphen-separated segments.
 // e.g. "funded_operator@spoke-a-bank-a" → "spoke-a"
 // Returns empty string if the format is unexpected.
+//
+// FALLBACK ONLY. The guess is wrong whenever the spoke id carries more than two
+// segments ("spoke-costa-rica-cb1" → "spoke-costa") and it cannot be made right:
+// a node name is <spokeId>-<bankId> with hyphens allowed in both halves, so the
+// boundary is not recoverable. The authoritative source is the SPOKE_ID
+// environment variable, which the toolkit exports; main.go prefers it and warns
+// when it has to come here instead.
 func SpokePrefix(paladinIdentity string) string {
 	parts := strings.SplitN(paladinIdentity, "@", 2)
 	if len(parts) < 2 {

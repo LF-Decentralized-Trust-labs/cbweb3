@@ -239,13 +239,32 @@ func main() {
 	}
 	logger.Info("fx expiry check interval configured", "seconds", fxExpiryCheckIntervalU)
 
-	// Extract spoke prefix from PALADIN_IDENTITY for receiver validation.
-	// e.g. "funded_operator@spoke-a-bank-a" → "spoke-a"
-	spokePrefix := identity.SpokePrefix(paladinIdentity)
-	if spokePrefix != "" {
-		logger.Info("spoke prefix configured for receiver validation", "spokePrefix", spokePrefix)
-	} else {
-		logger.Warn("could not extract spoke prefix from PALADIN_IDENTITY — receiver locality check disabled")
+	// The spoke this orchestrator belongs to, for the receiver-locality check.
+	//
+	// SPOKE_ID is authoritative and is the only correct source: a node name is
+	// <spokeId>-<bankId> and both halves may contain hyphens, so the spoke id
+	// cannot be parsed back out of PALADIN_IDENTITY —
+	// "spoke-costa-rica-cb1" is indistinguishable from a spoke "spoke-costa"
+	// with a bank "rica-cb1".
+	//
+	// identity.SpokePrefix remains the fallback for an environment deployed
+	// before SPOKE_ID was wired into the compose template. It guesses two
+	// segments, which conflates any two spokes sharing them; the warning says so
+	// rather than reporting a healthy configuration.
+	spokePrefix := strings.TrimSpace(os.Getenv("SPOKE_ID"))
+	switch {
+	case spokePrefix != "":
+		logger.Info("spoke configured for receiver validation", "spokeID", spokePrefix, "source", "SPOKE_ID")
+	default:
+		spokePrefix = identity.SpokePrefix(paladinIdentity)
+		if spokePrefix != "" {
+			logger.Warn("SPOKE_ID is not set — falling back to a two-segment guess from "+
+				"PALADIN_IDENTITY, which cannot distinguish spokes sharing their first two "+
+				"segments; re-apply the entity to have the toolkit set SPOKE_ID",
+				"guessedSpokeID", spokePrefix, "paladinIdentity", paladinIdentity)
+		} else {
+			logger.Warn("neither SPOKE_ID nor a parseable PALADIN_IDENTITY — receiver locality check disabled")
+		}
 	}
 
 	// Settlement reporter: forwards settled PvP legs to the Central Bank gateway

@@ -136,20 +136,21 @@ func TestBankID_IsUnsafeForAuthorization(t *testing.T) {
 	}
 }
 
-// TestSpokePrefix_ConflatesSpokesSharingTwoSegments records a LATENT defect,
-// deliberately left unfixed here.
+// TestSpokePrefix_ConflatesSpokesSharingTwoSegments pins the limitation that
+// makes SpokePrefix a FALLBACK rather than the source of truth.
 //
-// SpokePrefix has the same two-segment assumption as the old BankID, so
-// "spoke-costa-rica-cb1" yields "spoke-costa". Its only consumer is
-// isLocalReceiver, which compares the service's own prefix against a receiver's —
-// both truncated the same way — so today it still answers correctly and no
-// routing is wrong.
+// It carries the same two-segment assumption as BankID, so
+// "spoke-costa-rica-cb1" yields "spoke-costa". The service now reads the spoke id
+// from SPOKE_ID, which the toolkit already exports to the compose environment, and
+// only falls back here when that variable is absent — an environment deployed
+// before the template carried it. main.go logs a WARNING in that case rather than
+// reporting a healthy configuration.
 //
-// It breaks the moment two spokes share their first two segments: they become
-// indistinguishable, and a receiver on a DIFFERENT spoke is accepted as local.
-// Fixing it properly means passing the spoke id in explicitly (the toolkit knows
-// it; the orchestrator has no SPOKE_ID in its config today), which is a template
-// and config change, not a parser change. Tracked as its own card.
+// The limitation is asserted, not merely documented: two spokes sharing their
+// first two segments become indistinguishable, and a receiver on a DIFFERENT
+// spoke would be accepted as local. That is the reason the fallback must stay a
+// fallback, and why this test should outlive the fallback's removal only as its
+// justification.
 func TestSpokePrefix_ConflatesSpokesSharingTwoSegments(t *testing.T) {
 	a := identity.SpokePrefix("funded_operator@spoke-costa-rica-cb1")
 	b := identity.SpokePrefix("funded_operator@spoke-costa-brava-cb1")
