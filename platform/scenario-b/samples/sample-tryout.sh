@@ -33,6 +33,13 @@ MACRO="http://localhost:41747"        # bank-macro (Argentina) — the beneficia
 # operator carries commercial_bank + ROLE_COMMERCIAL_BANK.
 BR_CB_USER="admin@brasil.governance.gov";     BR_CB_PASS="brasil-governance-local"
 AR_CB_USER="admin@argentina.governance.gov";  AR_CB_PASS="argentina-governance-local"
+# approve-kyc is gated on ROLE_ADMISSION (spec 042), which the GOVERNANCE user does
+# not hold — with a governance token the route answers
+# 403 {"required_role":["ROLE_ADMISSION"]}. Both sample CBs provision an admission
+# operator in their manifest's spec.adminUsers; this is the same split scenario-a's
+# tryout already accounts for (4182e98d).
+BR_ADM_USER="admin@brasil.admission.gov";     BR_ADM_PASS="brasil-admission-local"
+AR_ADM_USER="admin@argentina.admission.gov";  AR_ADM_PASS="argentina-admission-local"
 ITAU_USER="admin@itau.brasil.com";            ITAU_PASS="itau-bank-local"
 MACRO_USER="admin@macro.argentina.com";       MACRO_PASS="macro-bank-local"
 
@@ -77,10 +84,35 @@ print(d if d is not None else "")
 BODY=""; CODE=""
 
 # try METHOD URL TOKEN [BODY] [HEADER] — curl; sets BODY+CODE; never stops on non-2xx.
+# XSRF token per access token, filled by login() and read by try().
+#
+# The gateway mints an XSRF-TOKEN cookie at login, bound to that access token, and
+# CSRF (middleware/csrf.go) fires on any mutating request carrying the access_token
+# cookie — which is exactly what try() sends. The header must be present, equal to
+# the cookie, and a valid binding for that session, so the value has to come from
+# the server; it cannot be invented here.
+#
+# Kept in FILES, not a shell array: every call site invokes login in a command
+# substitution, which runs in a subshell, so an array assignment inside login is
+# discarded when that subshell exits and the parent reads back an empty token.
+# cksum (POSIX) rather than md5sum, which macOS spells differently.
+XSRF_DIR=$(mktemp -d)
+trap 'rm -rf "$XSRF_DIR"' EXIT
+xsrf_key() { printf '%s' "$1" | cksum | cut -d' ' -f1; }
+
 try() {
   local method=$1 url=$2 token=$3 body=${4:-} header=${5:-}
   local args=(-sS -m 180 -w $'\n%{http_code}' -X "$method" -H 'Content-Type: application/json')
-  [[ -n $token ]]  && args+=(-b "access_token=$token")
+  if [[ -n $token ]]; then
+    local xsrf="" xf="$XSRF_DIR/$(xsrf_key "$token")"
+    [[ -f $xf ]] && xsrf=$(cat "$xf")
+    if [[ -n $xsrf ]]; then
+      # One -b: repeated flags do not merge into a single Cookie header.
+      args+=(-b "access_token=$token; XSRF-TOKEN=$xsrf" -H "X-XSRF-TOKEN: $xsrf")
+    else
+      args+=(-b "access_token=$token")
+    fi
+  fi
   [[ -n $body ]]   && args+=(-d "$body")
   [[ -n $header ]] && args+=(-H "$header")
   local out; out=$(curl "${args[@]}" "$url") || die "curl failed: $method $url"
@@ -97,11 +129,15 @@ call() {
 
 # login GATEWAY USER PASS — echoes accessToken.
 login() {
-  local out tok
-  out=$(curl -sS -m 30 -X POST "$1/api/v1/auth/login" -H 'Content-Type: application/json' \
-        -d "{\"clientId\":\"$2\",\"clientSecret\":\"$3\"}") || die "login curl failed for $2"
+  local out tok jar
+  jar=$(mktemp)
+  out=$(curl -sS -m 30 -c "$jar" -X POST "$1/api/v1/auth/login" -H 'Content-Type: application/json' \
+        -d "{\"clientId\":\"$2\",\"clientSecret\":\"$3\"}") || { rm -f "$jar"; die "login curl failed for $2"; }
   tok=$(printf '%s' "$out" | jget accessToken)
-  [[ -n $tok ]] || die "login failed for $2: $out"
+  [[ -n $tok ]] || { rm -f "$jar"; die "login failed for $2: $out"; }
+  # Netscape cookie jar: domain flag path secure expiry NAME VALUE.
+  awk '$6=="XSRF-TOKEN"{print $7}' "$jar" | tail -1 > "$XSRF_DIR/$(xsrf_key "$tok")"
+  rm -f "$jar"
   printf '%s' "$tok"
 }
 
@@ -114,6 +150,8 @@ login() {
 relogin() {
   BR_TOK=$(login "$BR_CB" "$BR_CB_USER" "$BR_CB_PASS")
   AR_TOK=$(login "$AR_CB" "$AR_CB_USER" "$AR_CB_PASS")
+  BR_ADM_TOK=$(login "$BR_CB" "$BR_ADM_USER" "$BR_ADM_PASS")
+  AR_ADM_TOK=$(login "$AR_CB" "$AR_ADM_USER" "$AR_ADM_PASS")
   ITAU_TOK=$(login "$ITAU" "$ITAU_USER" "$ITAU_PASS")
   MACRO_TOK=$(login "$MACRO" "$MACRO_USER" "$MACRO_PASS")
 }
@@ -121,7 +159,7 @@ relogin() {
 # pool_status TOKEN — echoes the pool status string (EMPTY/ACTIVE/…) for $POOL.
 pool_status() { try GET "$BR_CB/api/v2/amm/pool/$POOL/status" "$1"; printf '%s' "$BODY" | jget pool_status; }
 
-# onboard LABEL BANK_URL BANK_TOK CB_URL CB_TOK INSTITUTION COUNTRY EMAIL USERNAME
+# onboard LABEL BANK_URL BANK_TOK CB_URL CB_ADMISSION_TOK INSTITUTION COUNTRY EMAIL USERNAME
 # Drives the governance-portal onboarding (mirrors scenario-a): the bank initiates
 # (the api-gateway smart proxy injects the CSR + KMS key), the CB approves KYC, and
 # the bank completes (PoP signature → CB-signed cert → on-chain participant). The bank
@@ -142,7 +180,8 @@ onboard() {
   fi
   [[ -n $subj ]] || die "$label onboarding: no subject/user_id"
   ok "$label credential requested (subject=$subj, wallet=$(printf '%s' "$BODY" | jget wallet_address))"
-  # CB governance approves KYC (route lives under /compliance/ in scenario-b).
+  # The CB's ADMISSION operator approves KYC — not governance, which the router
+  # refuses (route lives under /compliance/ in scenario-b).
   call POST "$cb_url/api/v1/compliance/approve-kyc" "$cb_tok" "{\"subject\":\"$subj\",\"reason\":\"sample-tryout onboarding approval\"}"
   ok "$label KYC approved by its central bank"
   # Bank completes: PoP signature → CB signs the CSR + registers the participant on-chain.
@@ -156,6 +195,8 @@ printf '%s%s cbweb3 Scenario B — sample tryout (cross-currency swap) %s\n' "$B
 step "Login — Brazil CB, Argentina CB, and bank-itau"
 BR_TOK=$(login "$BR_CB" "$BR_CB_USER" "$BR_CB_PASS");   ok "logged in at Brazil CB (governance)"
 AR_TOK=$(login "$AR_CB" "$AR_CB_USER" "$AR_CB_PASS");   ok "logged in at Argentina CB (governance)"
+BR_ADM_TOK=$(login "$BR_CB" "$BR_ADM_USER" "$BR_ADM_PASS"); ok "logged in at Brazil CB (admission)"
+AR_ADM_TOK=$(login "$AR_CB" "$AR_ADM_USER" "$AR_ADM_PASS"); ok "logged in at Argentina CB (admission)"
 ITAU_TOK=$(login "$ITAU" "$ITAU_USER" "$ITAU_PASS");    ok "logged in as bank-itau (commercial_bank, Brazil)"
 MACRO_TOK=$(login "$MACRO" "$MACRO_USER" "$MACRO_PASS"); ok "logged in as bank-macro (commercial_bank, Argentina)"
 
@@ -165,9 +206,9 @@ MACRO_TOK=$(login "$MACRO" "$MACRO_USER" "$MACRO_PASS"); ok "logged in as bank-m
 # bank-itau is the swap initiator (Brazil); bank-macro is the beneficiary (Argentina)
 # whose ACTIVE participant record lets the bridge-out resolve its on-chain wallet.
 step "Onboard the commercial banks through their central banks' governance portals"
-onboard "bank-itau"  "$ITAU"  "$ITAU_TOK"  "$BR_CB" "$BR_TOK" "Banco Itau"  "BR" "ops@itau.br"      "bank-itau-user"
+onboard "bank-itau"  "$ITAU"  "$ITAU_TOK"  "$BR_CB" "$BR_ADM_TOK" "Banco Itau"  "BR" "ops@itau.br"      "bank-itau-user"
 relogin  # itau's on-chain onboarding (approve-kyc + complete) may have aged the tokens
-onboard "bank-macro" "$MACRO" "$MACRO_TOK" "$AR_CB" "$AR_TOK" "Banco Macro" "AR" "ops@macro.ar"     "bank-macro-user"
+onboard "bank-macro" "$MACRO" "$MACRO_TOK" "$AR_CB" "$AR_ADM_TOK" "Banco Macro" "AR" "ops@macro.ar"     "bank-macro-user"
 
 # ═══════════════════════════════ CURRENCIES ═════════════════════════════════════
 # W-tokens are deployed + registered at found-spoke by the hub compliance service,
