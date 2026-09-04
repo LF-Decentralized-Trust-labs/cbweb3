@@ -268,15 +268,31 @@ func main() {
 	}
 
 	// Settlement reporter: forwards settled PvP legs to the Central Bank gateway
-	// so the receiving bank sees the incoming credit on its statement. Enabled
-	// only when CB_INTERNAL_API_URL is set (commercial-bank orchestrators);
-	// authenticated with the shared INTERNAL_RELAY_AUTH_SECRET.
+	// so the receiving bank sees the incoming credit on its statement. A receiving
+	// bank's own orchestrator holds no record of an incoming leg — the counterparty
+	// locked it elsewhere and the amount is private — so this report is the ONLY
+	// source of that movement.
+	//
+	// It defaults to CENTRAL_BANK_API_URL, which the toolkit already renders for
+	// every entity and which already has exactly the right shape: a commercial
+	// bank gets its own spoke's CB gateway, and a central bank gets an empty value
+	// (a CB receives these reports, it does not send them). CB_INTERNAL_API_URL
+	// stays as an explicit override for the rare case of pointing the reporter
+	// somewhere else.
+	//
+	// Reading only CB_INTERNAL_API_URL is what left this switched off everywhere:
+	// that name appears nowhere but here — not in a template, not in the toolkit,
+	// not in deploy-lnet — so the reporter was never constructed, pvp_settled_legs
+	// was never written by the product, and the credit side of every bank's
+	// statement was permanently empty.
 	var settlementReporter ports.SettlementReporter
-	if cbURL := getEnv("CB_INTERNAL_API_URL", ""); cbURL != "" {
+	if cbURL := settlementReportURL(os.Getenv); cbURL != "" {
 		settlementReporter = cbreport.New(cbURL, os.Getenv("INTERNAL_RELAY_AUTH_SECRET"))
 		logger.Info("settlement reporter configured", "cb_url", cbURL)
 	} else {
-		logger.Warn("CB_INTERNAL_API_URL not set — settled PvP legs will not be reported to the central bank (receiver credits will not appear)")
+		// Expected on a central-bank orchestrator. On a commercial bank it means
+		// incoming credits will not appear on any statement.
+		logger.Warn("no central bank URL (CB_INTERNAL_API_URL / CENTRAL_BANK_API_URL) — settled PvP legs will not be reported (receiver credits will not appear)")
 	}
 
 	grpcServer, startRelayWorkers, err := server.New(server.Config{
@@ -349,6 +365,23 @@ func main() {
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("payment-orchestrator: serve: %v", err)
 	}
+}
+
+// settlementReportURL resolves the central-bank base URL the settlement reporter
+// posts to. Extracted from main so it can be tested: the defect it fixes was not a
+// logic error but a wiring one — the reporter read a name that nothing set — and a
+// wiring error is only catchable by asserting which names are consulted.
+//
+// CB_INTERNAL_API_URL is the explicit override. CENTRAL_BANK_API_URL is the default
+// because the toolkit already renders it per entity, with exactly the right shape:
+// a commercial bank gets its own spoke's central bank, and a central bank gets an
+// empty value, which correctly leaves the reporter off (a CB receives these
+// reports, it does not send them).
+func settlementReportURL(getenv func(string) string) string {
+	if v := strings.TrimSpace(getenv("CB_INTERNAL_API_URL")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(getenv("CENTRAL_BANK_API_URL"))
 }
 
 func getEnv(key, fallback string) string {
