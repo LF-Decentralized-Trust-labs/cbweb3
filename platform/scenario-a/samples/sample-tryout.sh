@@ -462,6 +462,40 @@ for ((waited=0; waited<=30; waited+=5)); do
 done
 [[ -n $REDEEM_OK ]] || info "[redeem] exact deltas not observed within 30s (tCeBM $T_BEFORE→$T_AFTER, fCeBM $F_BEFORE→$F_AFTER); direction is correct — Zeto projection may still be catching up"
 
+# ═══════════════════════ RECEIVER CREDIT (the settlement report) ═══════════════
+# cb2 received the destination leg. Its OWN orchestrator holds no record of that —
+# cb1 locked the leg and the amount is private — so the only way cb2 can see the
+# movement is the report cb1's orchestrator posts to the central bank.
+#
+# Nothing asserted this before, and that is why it shipped broken twice over, by
+# two independent causes: the reporter was never constructed (it read an env name
+# set nowhere in the repository), and the query serving the credits scoped on a
+# derived bank id that disagreed with cb2's real code. Either alone makes the
+# credit invisible, and no test ever asked cb2 whether it could see money it had
+# received.
+#
+# This step needs cb2 specifically: it is a bank whose id a positional split gets
+# wrong ("spoke-costa-rica-cb2" reads as "rica-cb2"), so it fails if either half
+# regresses.
+step "cb2 sees the incoming PvP leg as a credit on its statement (poll every 5s, up to 60s)"
+CREDIT_OK=""
+for waited in 0 5 10 15 20 25 30 35 40 45 50 55 60; do
+  CB2_TOK=$(login "$CB2" "$CB2_USER" "$CB2_PASS")
+  try GET "$CB2/api/v1/statement" "$CB2_TOK"
+  CREDITS=$(printf '%s' "$BODY" | python3 -c '
+import sys, json
+try:
+    movs = json.load(sys.stdin).get("movements", [])
+except Exception:
+    print(0); raise SystemExit
+print(sum(1 for m in movs if m.get("direction") == "credit" and m.get("kind") == "pvp_settlement"))' 2>/dev/null || echo 0)
+  if [[ "${CREDITS:-0}" -ge 1 ]]; then
+    CREDIT_OK=1; ok "cb2 statement shows $CREDITS incoming PvP credit(s) after ${waited}s"; break
+  fi
+  [[ $waited -lt 60 ]] && info "[credit] not projected yet after ${waited}s — retrying in 5s" && sleep 5
+done
+[[ -n $CREDIT_OK ]] || die "cb2 received the destination leg but its statement shows NO PvP credit after 60s — either the settlement report never reached the central bank, or the credit query is not scoping on cb2. The symptom is identical for both causes; check the CB's pvp_settled_legs table to tell them apart."
+
 # ── done ────────────────────────────────────────────────────────────────────────
 printf '\n%s✓ tryout complete — cross-spoke PvP settled + reserve redeemed%s\n' "$GREEN$BOLD" "$RST"
 ok "agreement $TRADE_ID: proposed (spoke-brl) → relayed → accepted → both legs locked → settled (secret revealed)"
