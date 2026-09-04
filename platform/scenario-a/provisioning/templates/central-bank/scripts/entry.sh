@@ -83,6 +83,15 @@ fi
 
 echo "[entry] NAT profile: ${BESU_NAT_PROFILE} | flags: ${NAT_FLAGS}"
 
+# --revert-reason-enabled returns the revert data of a failed call instead of an
+# empty body. Paladin cannot decode what Besu does not send: without the flag a
+# reverting private transition surfaces only as "PD012214: Unable to decode revert
+# data (no revert data available)", and the real custom error — PenteInvalidEndorser
+# in the FX incident of 2026-09-03 — has to be recovered by replaying the
+# transaction through eth_call by hand. Besu holds the revert data for the duration
+# of the call, which is why it ships off; on these node sizes that cost is worth
+# paying to keep a private revert diagnosable.
+#
 # NAT_FLAGS and BOOTNODE_FLAG are intentionally unquoted: word splitting is the
 # mechanism that passes multi-word flags (e.g. "--nat-method=NONE --p2p-host=X")
 # as separate Besu arguments. When BOOTNODE_FLAG is empty, the unquoted expansion
@@ -91,6 +100,7 @@ exec /opt/besu/bin/besu \
     --data-path=/opt/besu/data \
     --genesis-file=/opt/besu/genesis/genesis.json \
     --min-gas-price=0 \
+    --revert-reason-enabled=true \
     --rpc-http-enabled=true \
     --rpc-http-api=ETH,NET,QBFT,ADMIN \
     --rpc-http-host=0.0.0.0 \
