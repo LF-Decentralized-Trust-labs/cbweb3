@@ -1,0 +1,75 @@
+# yaml-language-server: $schema=../../provisioning/schema/v1/participant-deployment.schema.yaml
+#
+# Banco Central de Costa Rica — funda o spoke costarriquenho (spoke-costa-rica).
+#
+# WHY THIS SPOKE EXISTS — it is a naming-convention fixture, not a third country
+# for its own sake. Every other sample spoke id has exactly TWO dash-separated
+# segments (spoke-brl, spoke-cop, spoke-ars) and every other sample bank id starts
+# with "bank-". LNET uses the other live convention: a country name that contains a
+# hyphen, and bare bank ids (cb1…cb6). Code that recovers a bank or spoke id by
+# splitting a node name on "-" is correct for every other sample and wrong here:
+#
+#   spoke-brl-bank-itau        spokeId=spoke-brl         bankId=bank-itau
+#   spoke-costa-rica-cb1       spokeId=spoke-costa-rica  bankId=cb1
+#
+# Four defects of that one root cause reached a deployed environment because no
+# local fixture could reproduce the shape (PRs #210, #211, #212, #213). Keep the
+# hyphen in this spoke id and the bare form of its bank ids — they ARE the test.
+#
+# mode: found  → este nó é o bootnode, faz deploy dos contratos do spoke e
+#                emite o join bundle (samples/bundles/spoke-costa-rica.bundle.yaml).
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-costa-rica
+spec:
+  scenario: a
+  environment: local
+  role: central-bank
+  mode: found
+  displayName: Banco Central de Costa Rica
+  spoke:
+    # THREE segments on purpose. A two-word country is what turns a positional
+    # split into a wrong answer; do not "simplify" this to spoke-crc.
+    id: spoke-costa-rica
+    chainId: 1340
+    currency: CRC
+    fiatTokenName: Fiat CRC
+    fiatTokenSymbol: fCeBM_CRC
+  node:
+    advertisedHost: cbweb3-spoke-costa-rica-besu.central-bank-costa-rica
+    rpc:
+      port: 8945
+    ws:
+      port: 8955
+    p2p:
+      port: 31603
+    dataDir: cbweb3-data/central-bank-costa-rica
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  # Relay Cacti local (RL-1): precisa estar no ar ANTES do apply.
+  relay:
+    endpoint: http://localhost:4000
+  cbEndpoint: http://cbweb3-api-gateway.central-bank-costa-rica:8080/api/v1/onboarding/credential-request
+  adminUsers:
+    - role: ROLE_GOVERNANCE
+      username: admin@costarica.governance.gov
+      password: costarica-governance-local
+    - role: ROLE_TREASURY
+      username: admin@costarica.treasury.gov
+      password: costarica-treasury-local
+    - role: ROLE_SUPERVISOR
+      username: admin@costarica.supervisor.gov
+      password: costarica-supervisor-local
+    # ROLE_ADMISSION is required by spec 042 — a central bank manifest without it
+    # loads no CB manifest at all (the omission that PR #209 fixed for LNET).
+    - role: ROLE_ADMISSION
+      username: admin@costarica.admission.gov
+      password: costarica-admission-local
+    - role: ROLE_NOC_ADMIN
+      username: admin@costarica.noc.gov
+      password: costarica-noc-local
+  launcher: enable
+  launcherPort: 5200
+  proxy: disable

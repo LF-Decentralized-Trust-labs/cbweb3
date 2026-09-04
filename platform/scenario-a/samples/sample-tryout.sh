@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # sample-tryout.sh — end-to-end walkthrough of the deployed sample stack via REAL
-# api-gateway REST calls (no portal clicking). Drives: onboarding (Brazil + Colombia),
+# api-gateway REST calls (no portal clicking). Drives: onboarding (Brazil + Costa Rica),
 # reserve issuance, tokenization, balances, a cross-spoke FX agreement, relay, accept,
 # and the PvP leg.
 #
@@ -19,9 +19,20 @@ set -uo pipefail
 BR_CB="http://localhost:18645"          # central-bank-brazil
 ITAU="http://localhost:18646"           # bank-itau
 BRADESCO="http://localhost:18647"       # bank-bradesco
-CO_CB="http://localhost:18745"          # central-bank-colombia
-BANCOLOMBIA="http://localhost:18746"    # bank-bancolombia
-DAVIVIENDA="http://localhost:18747"     # bank-davivienda
+# Costa Rica carries the LNET naming convention on purpose — a hyphenated spoke id
+# and bare bank ids (cb1, cb2). Code that recovers a bank or spoke id by splitting a
+# node name on "-" is right for spoke-brl-bank-itau and wrong for
+# spoke-costa-rica-cb1, and this leg is what makes that reachable from a local run.
+#
+# IF YOU EVER RENAME THIS COUNTRY BACK: rename the IDENTIFIERS first, then the
+# country. "BANCOLOMBIA" contains "COLOMBIA", so replacing the country first turns
+# it into `BANCOSTA RICA="..."` — which `bash -n` ACCEPTS, because it parses as a
+# command plus an argument, so the script breaks only at runtime. Anchored regexes
+# do not save you either: "_" is a word character, so \bNAME\b misses NAME_TOK and
+# \bNAME misses ID_NAME.
+CR_CB="http://localhost:18945"          # central-bank-costa-rica
+CB1="http://localhost:18946"    # cb1 (Costa Rica, bankId nu)
+CB2="http://localhost:18947"     # cb2 (Costa Rica, bankId nu)
 
 # ── login credentials (username / password; passed to /auth/login) ─────────────
 # Brazil CB
@@ -29,19 +40,19 @@ DAVIVIENDA="http://localhost:18747"     # bank-davivienda
 # hold — with a governance token it answers 403 {"required_role":["ROLE_ADMISSION"]}.
 BR_ADM_USER="admin@brasil.admission.gov";   BR_ADM_PASS="brasil-admission-local"
 BR_TRE_USER="admin@brasil.treasury.gov";    BR_TRE_PASS="brasil-treasury-local"
-# Colombia CB
-CO_ADM_USER="admin@colombia.admission.gov";  CO_ADM_PASS="colombia-admission-local"
-CO_TRE_USER="admin@colombia.treasury.gov";   CO_TRE_PASS="colombia-treasury-local"
+# Costa Rica CB
+CR_ADM_USER="admin@costarica.admission.gov";  CR_ADM_PASS="costarica-admission-local"
+CR_TRE_USER="admin@costarica.treasury.gov";   CR_TRE_PASS="costarica-treasury-local"
 # Banks
 ITAU_USER="admin@itau.brasil.com";               ITAU_PASS="itau-bank-local"
 BRADESCO_USER="admin@bradesco.brasil.com";       BRADESCO_PASS="bradesco-bank-local"
-BANCOLOMBIA_USER="admin@bancolombia.colombia.com"; BANCOLOMBIA_PASS="bancolombia-bank-local"
-DAVIVIENDA_USER="admin@davivienda.colombia.com";   DAVIVIENDA_PASS="davivienda-bank-local"
+CB1_USER="admin@cb1.costarica.com"; CB1_PASS="cb1-bank-local"
+CB2_USER="admin@cb2.costarica.com";   CB2_PASS="cb2-bank-local"
 
 # ── on-chain Paladin identities used in the FX agreement routing ────────────────
-ID_BANCOLOMBIA="funded_operator@spoke-cop-bank-bancolombia"
+ID_CB1="funded_operator@spoke-costa-rica-cb1"
 ID_BR_CB="funded_operator@spoke-brl-cb"
-ID_DAVIVIENDA="funded_operator@spoke-cop-bank-davivienda"
+ID_CB2="funded_operator@spoke-costa-rica-cb2"
 ID_BRADESCO="funded_operator@spoke-brl-bank-bradesco"
 
 # ── output helpers ─────────────────────────────────────────────────────────────
@@ -242,62 +253,62 @@ step "Brazil admission approved both (done inline above); verify onboarding stat
 poll_onboarding Itau "$ITAU" "$ITAU_TOK"
 poll_onboarding Bradesco "$BRADESCO" "$BRADESCO_TOK"
 
-# ═══════════════════════════════ ONBOARDING — COLOMBIA ═════════════════════════
-step "Login Bancolombia + request onboarding"
-BANCOLOMBIA_TOK=$(login "$BANCOLOMBIA" "$BANCOLOMBIA_USER" "$BANCOLOMBIA_PASS"); ok "logged in as Bancolombia"
-CO_ADM_TOK=$(login "$CO_CB" "$CO_ADM_USER" "$CO_ADM_PASS")
-onboard "$BANCOLOMBIA" "$BANCOLOMBIA_TOK" "$CO_CB" "$CO_ADM_TOK" "Bancolombia" CO admin@bancolombia.colombia.com bancolombia_admin
+# ═══════════════════════════════ ONBOARDING — COSTA RICA ═════════════════════════
+step "Login cb1 + request onboarding"
+CB1_TOK=$(login "$CB1" "$CB1_USER" "$CB1_PASS"); ok "logged in as cb1"
+CR_ADM_TOK=$(login "$CR_CB" "$CR_ADM_USER" "$CR_ADM_PASS")
+onboard "$CB1" "$CB1_TOK" "$CR_CB" "$CR_ADM_TOK" "cb1" CR admin@cb1.costarica.com cb1_admin
 
-step "Login Davivienda + request onboarding"
-DAVIVIENDA_TOK=$(login "$DAVIVIENDA" "$DAVIVIENDA_USER" "$DAVIVIENDA_PASS"); ok "logged in as Davivienda"
+step "Login cb2 + request onboarding"
+CB2_TOK=$(login "$CB2" "$CB2_USER" "$CB2_PASS"); ok "logged in as cb2"
 # Refresh the admission token (see the Bradesco note): reused across two banks it
 # can out-live its 300s lifespan on a slow stack.
-CO_ADM_TOK=$(login "$CO_CB" "$CO_ADM_USER" "$CO_ADM_PASS")
-onboard "$DAVIVIENDA" "$DAVIVIENDA_TOK" "$CO_CB" "$CO_ADM_TOK" "Davivienda" CO admin@davivienda.colombia.com davivienda_admin
+CR_ADM_TOK=$(login "$CR_CB" "$CR_ADM_USER" "$CR_ADM_PASS")
+onboard "$CB2" "$CB2_TOK" "$CR_CB" "$CR_ADM_TOK" "cb2" CR admin@cb2.costarica.com cb2_admin
 
-step "Colombia admission approved both (done inline above); verify onboarding status"
-poll_onboarding Bancolombia "$BANCOLOMBIA" "$BANCOLOMBIA_TOK"
-poll_onboarding Davivienda "$DAVIVIENDA" "$DAVIVIENDA_TOK"
+step "Costa Rica admission approved both (done inline above); verify onboarding status"
+poll_onboarding cb1 "$CB1" "$CB1_TOK"
+poll_onboarding cb2 "$CB2" "$CB2_TOK"
 
 # ═══════════════════════════════ ISSUANCE (reserve / fCeBM) ════════════════════
 step "Issue 1000000 BRL to Itaú (treasury Brazil approves)"
 BR_TRE_TOK=$(login "$BR_CB" "$BR_TRE_USER" "$BR_TRE_PASS")
 issue "$ITAU" "$ITAU_TOK" "$BR_CB" "$BR_TRE_TOK" 1000000 "Itau/BRL"
 
-step "Issue 500000000 COP to Bancolombia (treasury Colombia approves)"
-CO_TRE_TOK=$(login "$CO_CB" "$CO_TRE_USER" "$CO_TRE_PASS")
-issue "$BANCOLOMBIA" "$BANCOLOMBIA_TOK" "$CO_CB" "$CO_TRE_TOK" 500000000 "Bancolombia/COP"
+step "Issue 500000000 CRC to cb1 (treasury Costa Rica approves)"
+CR_TRE_TOK=$(login "$CR_CB" "$CR_TRE_USER" "$CR_TRE_PASS")
+issue "$CB1" "$CB1_TOK" "$CR_CB" "$CR_TRE_TOK" 500000000 "cb1/CRC"
 
 # ═══════════════════════════════ TOKENIZATION (tCeBM / Zeto) ═══════════════════
 step "Tokenize 50000 BRL with Itaú (treasury Brazil approves)"
 tokenize "$ITAU" "$ITAU_TOK" "$BR_CB" "$BR_TRE_TOK" 50000 "Itau/BRL"
 
-step "Tokenize 250000 COP with Bancolombia (treasury Colombia approves)"
-tokenize "$BANCOLOMBIA" "$BANCOLOMBIA_TOK" "$CO_CB" "$CO_TRE_TOK" 250000 "Bancolombia/COP"
+step "Tokenize 250000 CRC with cb1 (treasury Costa Rica approves)"
+tokenize "$CB1" "$CB1_TOK" "$CR_CB" "$CR_TRE_TOK" 250000 "cb1/CRC"
 
 # ═══════════════════════════════ BALANCES ══════════════════════════════════════
 step "Check balances for both commercial banks"
 call GET "$ITAU/api/v1/token/fiat-balance" "$ITAU_TOK";        ok "Itaú fiat (fCeBM) balance: $(printf '%s' "$BODY" | jget balance)"
 call GET "$ITAU/api/v1/token/balance" "$ITAU_TOK";             ok "Itaú token (tCeBM) balance: $(printf '%s' "$BODY" | jget balance)"
-call GET "$BANCOLOMBIA/api/v1/token/fiat-balance" "$BANCOLOMBIA_TOK"; ok "Bancolombia fiat (fCeBM) balance: $(printf '%s' "$BODY" | jget balance)"
-call GET "$BANCOLOMBIA/api/v1/token/balance" "$BANCOLOMBIA_TOK";      ok "Bancolombia token (tCeBM) balance: $(printf '%s' "$BODY" | jget balance)"
+call GET "$CB1/api/v1/token/fiat-balance" "$CB1_TOK"; ok "cb1 fiat (fCeBM) balance: $(printf '%s' "$BODY" | jget balance)"
+call GET "$CB1/api/v1/token/balance" "$CB1_TOK";      ok "cb1 token (tCeBM) balance: $(printf '%s' "$BODY" | jget balance)"
 
 # ═══════════════════════════════ FX AGREEMENT (propose) ════════════════════════
-step "Itaú creates cross-spoke FX agreement (BRL 1000 -> COP 5000)"
+step "Itaú creates cross-spoke FX agreement (BRL 1000 -> CRC 5000)"
 EXPIRY=$(( $(date +%s) + 86400 ))
 call POST "$ITAU/api/v1/payments/fx/agreements" "$ITAU_TOK" "{
-  \"counterparty_b\":\"$ID_BANCOLOMBIA\",
+  \"counterparty_b\":\"$ID_CB1\",
   \"settlement_agent\":\"$ID_BR_CB\",
-  \"custodian\":\"$ID_BANCOLOMBIA\",
-  \"beneficiary\":\"$ID_DAVIVIENDA\",
+  \"custodian\":\"$ID_CB1\",
+  \"beneficiary\":\"$ID_CB2\",
   \"source_spoke_id\":\"spoke-brl\",
-  \"dest_spoke_id\":\"spoke-cop\",
+  \"dest_spoke_id\":\"spoke-costa-rica\",
   \"source_receiver\":\"$ID_BRADESCO\",
-  \"dest_receiver\":\"$ID_DAVIVIENDA\",
+  \"dest_receiver\":\"$ID_CB2\",
   \"origin_amount\":\"1000\",
   \"counter_amount\":\"5000\",
   \"origin_currency\":\"BRL\",
-  \"counter_currency\":\"COP\",
+  \"counter_currency\":\"CRC\",
   \"rate\":\"5\",
   \"expiry_date\":$EXPIRY
 }"
@@ -307,32 +318,32 @@ ok "agreement created: trade_id=$TRADE_ID tx_hash=$(printf '%s' "$BODY" | jget t
 
 # ═══════════════════════════════ RELAY (checkpoint) ═══════════════════════════
 # The agreement relays cross-spoke asynchronously (source Pente commit -> Cacti relay
-# -> dest-chain -> Bancolombia's FX indexer projection), so a fixed sleep races the
+# -> dest-chain -> cb1's FX indexer projection), so a fixed sleep races the
 # relay. Poll the destination fetch every 5s for up to 60s instead; a 404 just retries.
-step "Bancolombia fetches the relayed agreement (poll every 5s, up to 60s)"
+step "cb1 fetches the relayed agreement (poll every 5s, up to 60s)"
 FX_STATE=""
 for ((waited=0; waited<=60; waited+=5)); do
-  try GET "$BANCOLOMBIA/api/v1/payments/fx/agreements/$TRADE_ID" "$BANCOLOMBIA_TOK"
+  try GET "$CB1/api/v1/payments/fx/agreements/$TRADE_ID" "$CB1_TOK"
   if [[ $CODE -eq 200 ]]; then
     FX_STATE=$(printf '%s' "$BODY" | jget agreement.state)
-    [[ -n $FX_STATE ]] && { ok "Bancolombia sees agreement $TRADE_ID (state=$FX_STATE) after ${waited}s"; break; }
+    [[ -n $FX_STATE ]] && { ok "cb1 sees agreement $TRADE_ID (state=$FX_STATE) after ${waited}s"; break; }
   fi
   [[ $waited -lt 60 ]] && info "[relay] not visible yet after ${waited}s (HTTP $CODE) — retrying in 5s" && sleep 5
 done
-[[ -n $FX_STATE ]] || die "Bancolombia could not see the relayed agreement $TRADE_ID within 60s (last HTTP $CODE): $BODY"
+[[ -n $FX_STATE ]] || die "cb1 could not see the relayed agreement $TRADE_ID within 60s (last HTTP $CODE): $BODY"
 
 # ═══════════════════════════════ ACCEPTANCE (counterparty B) ══════════════════
-# Bancolombia is counterparty_b, so it accepts the agreement directly (empty body →
+# cb1 is counterparty_b, so it accepts the agreement directly (empty body →
 # on_behalf=false). The accept response returns only trade_id + tx_hash; the ACCEPTED
 # state is projected asynchronously, so confirm it by polling the fetch afterwards.
-step "Bancolombia accepts the FX agreement"
-call POST "$BANCOLOMBIA/api/v1/payments/fx/agreements/$TRADE_ID/accept" "$BANCOLOMBIA_TOK"
-ok "Bancolombia submitted acceptance for $TRADE_ID (tx_hash=$(printf '%s' "$BODY" | jget tx_hash))"
+step "cb1 accepts the FX agreement"
+call POST "$CB1/api/v1/payments/fx/agreements/$TRADE_ID/accept" "$CB1_TOK"
+ok "cb1 submitted acceptance for $TRADE_ID (tx_hash=$(printf '%s' "$BODY" | jget tx_hash))"
 
 step "Confirm the agreement transitions out of $FX_STATE (poll every 5s, up to 30s)"
 ACCEPT_STATE="$FX_STATE"
 for ((waited=0; waited<=30; waited+=5)); do
-  try GET "$BANCOLOMBIA/api/v1/payments/fx/agreements/$TRADE_ID" "$BANCOLOMBIA_TOK"
+  try GET "$CB1/api/v1/payments/fx/agreements/$TRADE_ID" "$CB1_TOK"
   s=$(printf '%s' "$BODY" | jget agreement.state)
   if [[ -n $s && $s != "$FX_STATE" ]]; then
     ACCEPT_STATE=$s; ok "agreement $TRADE_ID is now state=$ACCEPT_STATE (was $FX_STATE) after ${waited}s"; break
@@ -371,11 +382,11 @@ step "Check the source lock status"
 call GET "$ITAU/api/v1/htlc/status/$CONTRACT_ID" "$ITAU_TOK"
 ok "source HTLC state=$(printf '%s' "$BODY" | jget state) counterparty_locked=$(printf '%s' "$BODY" | jget counterparty_locked)"
 
-# 2) Destination leg — Bancolombia locks the counter amount (COP) to the destination
-#    receiver (Davivienda) using the SAME hashLock, so a single secret unlocks both legs.
-step "Bancolombia locks the destination leg with the same hash (5000 COP → Davivienda)"
-call POST "$BANCOLOMBIA/api/v1/htlc/lock-with-hash" "$BANCOLOMBIA_TOK" \
-  "{\"hash_lock\":\"$HASH_LOCK\",\"receiver\":\"$ID_DAVIVIENDA\",\"amount\":\"5000\",\"agreement_id\":\"$TRADE_ID\"}"
+# 2) Destination leg — cb1 locks the counter amount (CRC) to the destination
+#    receiver (cb2) using the SAME hashLock, so a single secret unlocks both legs.
+step "cb1 locks the destination leg with the same hash (5000 CRC → cb2)"
+call POST "$CB1/api/v1/htlc/lock-with-hash" "$CB1_TOK" \
+  "{\"hash_lock\":\"$HASH_LOCK\",\"receiver\":\"$ID_CB2\",\"amount\":\"5000\",\"agreement_id\":\"$TRADE_ID\"}"
 DEST_CONTRACT_ID=$(printf '%s' "$BODY" | jget contract_id)
 [[ -n $DEST_CONTRACT_ID ]] || die "destination lock returned no contract_id: $BODY"
 ok "destination locked (contract_id=$DEST_CONTRACT_ID htlc_tx=$(printf '%s' "$BODY" | jget htlc_tx_hash))"
@@ -383,7 +394,7 @@ ok "destination locked (contract_id=$DEST_CONTRACT_ID htlc_tx=$(printf '%s' "$BO
 # 2b) Wait for the relay to confirm the destination lock back on the SOURCE. In cross-spoke
 #     mode SettleHTLC is gated on counterparty_locked (set by the relay's lock-event handler);
 #     settling before that returns "counterparty spoke has not yet locked its leg".
-step "Wait for the relay to confirm Bancolombia's leg on the source (counterparty_locked; poll every 5s, up to 60s)"
+step "Wait for the relay to confirm cb1's leg on the source (counterparty_locked; poll every 5s, up to 60s)"
 CP_LOCKED=""
 for ((waited=0; waited<=60; waited+=5)); do
   try GET "$ITAU/api/v1/htlc/status/$CONTRACT_ID" "$ITAU_TOK"
@@ -394,8 +405,8 @@ done
 [[ $CP_LOCKED == [Tt]rue ]] || die "relay did not confirm the counterparty lock within 60s (counterparty_locked=$CP_LOCKED) — settle would be rejected; check relay logs"
 
 # 3) Settle — Itaú reveals the secret on the source leg. The relay observes the reveal and
-#    settles the destination leg on spoke-cop, completing the atomic cross-spoke swap.
-step "Itaú settles the source leg by revealing the secret (relayed to spoke-cop)"
+#    settles the destination leg on spoke-costa-rica, completing the atomic cross-spoke swap.
+step "Itaú settles the source leg by revealing the secret (relayed to spoke-costa-rica)"
 call POST "$ITAU/api/v1/htlc/settle" "$ITAU_TOK" \
   "{\"contract_id\":\"$CONTRACT_ID\",\"secret\":\"$SECRET\"}"
 ok "source settled (htlc_tx=$(printf '%s' "$BODY" | jget htlc_tx_hash) zeto_tx=$(printf '%s' "$BODY" | jget zeto_tx_hash))"
@@ -403,7 +414,7 @@ ok "source settled (htlc_tx=$(printf '%s' "$BODY" | jget htlc_tx_hash) zeto_tx=$
 step "Confirm the destination leg settles via the relay (poll every 5s, up to 60s)"
 DEST_STATE=""
 for ((waited=0; waited<=60; waited+=5)); do
-  try GET "$BANCOLOMBIA/api/v1/htlc/status/$DEST_CONTRACT_ID" "$BANCOLOMBIA_TOK"
+  try GET "$CB1/api/v1/htlc/status/$DEST_CONTRACT_ID" "$CB1_TOK"
   DEST_STATE=$(printf '%s' "$BODY" | jget state)
   [[ $DEST_STATE == *SETTLED* ]] && { ok "destination leg SETTLED after ${waited}s — atomic swap complete"; break; }
   [[ $waited -lt 60 ]] && info "[settle] destination state '$DEST_STATE' after ${waited}s — waiting for relay, retrying in 5s" && sleep 5
