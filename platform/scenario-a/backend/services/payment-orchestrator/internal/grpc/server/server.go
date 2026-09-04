@@ -857,15 +857,11 @@ func (s *paymentOrchestratorService) SearchHTLC(ctx context.Context, req *pb.Sea
 		// When the caller provides their BankID, only return records their institution is party to.
 		// Use exact segment matching to prevent prefix-collision false positives.
 		if callerIdentity != "" {
-			senderBank, sErr := identity.BankID(r.Sender)
-			receiverBank, rErr := identity.BankID(r.Receiver)
-			if sErr != nil {
-				s.logger.Warn("SearchHTLC: unparseable sender identity — excluding record", "sender", r.Sender, "error", sErr)
-			}
-			if rErr != nil {
-				s.logger.Warn("SearchHTLC: unparseable receiver identity — excluding record", "receiver", r.Receiver, "error", rErr)
-			}
-			if senderBank != callerIdentity && receiverBank != callerIdentity {
+			// Membership is TESTED, not extracted: a spoke id may contain hyphens
+			// ("spoke-costa-rica"), so no split recovers the bank id. See
+			// identity.BelongsToBank.
+			if !identity.BelongsToBank(r.Sender, callerIdentity) &&
+				!identity.BelongsToBank(r.Receiver, callerIdentity) {
 				continue
 			}
 		}
@@ -904,21 +900,16 @@ func (s *paymentOrchestratorService) checkHTLCCounterparty(ctx context.Context, 
 	if callerBankID == "" {
 		return nil
 	}
-	senderBank, sErr := identity.BankID(sender)
-	receiverBank, rErr := identity.BankID(receiver)
-	if sErr != nil {
-		s.logger.Warn("checkHTLCCounterparty: unparseable sender identity", "sender", sender, "error", sErr)
-	}
-	if rErr != nil {
-		s.logger.Warn("checkHTLCCounterparty: unparseable receiver identity", "receiver", receiver, "error", rErr)
-	}
-	if senderBank == callerBankID || receiverBank == callerBankID {
+	if identity.BelongsToBank(sender, callerBankID) || identity.BelongsToBank(receiver, callerBankID) {
 		return nil
 	}
 	// Structured audit log for a compliance-relevant authorization decision
 	// (Constitution Principle VI): a denial must never be swallowed silently.
+	// The raw identities are logged rather than a parsed bank id: the parse is what
+	// was wrong, and an audit line that repeats the parser's mistake describes a
+	// decision that was never made on those values.
 	s.logger.Warn("authorization denied: caller is not a counterparty of HTLC",
-		"caller", callerBankID, "sender_bank", senderBank, "receiver_bank", receiverBank)
+		"caller", callerBankID, "sender", sender, "receiver", receiver)
 	return status.Errorf(codes.PermissionDenied, "caller is not a counterparty of this HTLC")
 }
 
@@ -939,21 +930,15 @@ func (s *paymentOrchestratorService) checkFXParty(ctx context.Context, record *d
 	// bare bank ids ("bank-a"); accept a match against either form. A parse failure
 	// is logged but is not by itself fatal — the raw-value comparison still applies,
 	// and a caller that matches neither form is denied (fail closed).
-	originatorBank, oErr := identity.BankID(record.Originator)
-	counterpartyBank, cErr := identity.BankID(record.CounterpartyB)
-	if oErr != nil {
-		s.logger.Warn("checkFXParty: unparseable originator identity", "originator", record.Originator, "error", oErr)
-	}
-	if cErr != nil {
-		s.logger.Warn("checkFXParty: unparseable counterparty identity", "counterparty_b", record.CounterpartyB, "error", cErr)
-	}
-	if callerBankID == originatorBank || callerBankID == counterpartyBank ||
-		callerBankID == record.Originator || callerBankID == record.CounterpartyB {
+	// BelongsToBank also accepts the bare-bank-id form, so the previous raw
+	// equality fallbacks are covered by the same call.
+	if identity.BelongsToBank(record.Originator, callerBankID) ||
+		identity.BelongsToBank(record.CounterpartyB, callerBankID) {
 		return nil
 	}
 	s.logger.Warn("authorization denied: caller is not a party to FX agreement",
 		"action", action, "trade_id", record.TradeID, "caller", callerBankID,
-		"originator_bank", originatorBank, "counterparty_bank", counterpartyBank)
+		"originator", record.Originator, "counterparty_b", record.CounterpartyB)
 	return status.Errorf(codes.PermissionDenied, "caller is not a party to this FX agreement")
 }
 
@@ -1103,12 +1088,7 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 			// The originator may arrive as a full Paladin identity
 			// ("op@spoke-a-bank-a") or as a bare bank id ("bank-a"); accept either
 			// form as long as it resolves to the authenticated caller's bank.
-			originatorBank, perr := identity.BankID(req.Originator)
-			mismatch := originatorBank != callerBankID
-			if perr != nil {
-				mismatch = req.Originator != callerBankID
-			}
-			if mismatch {
+			if !identity.BelongsToBank(req.Originator, callerBankID) {
 				s.logger.Warn("authorization denied: propose originator does not match authenticated caller",
 					"trade_id", tradeID, "caller", callerBankID, "originator", req.Originator)
 				return nil, status.Error(codes.PermissionDenied, "originator must match the authenticated caller")
@@ -1235,8 +1215,11 @@ func (s *paymentOrchestratorService) AcceptFXAgreement(ctx context.Context, req 
 	if !req.OnBehalf {
 		callerBankID := callerIdentityFromContext(ctx)
 		if callerBankID != "" {
-			originatorBank, parseErr := identity.BankID(record.Originator)
-			if parseErr == nil && originatorBank == callerBankID {
+			// Previously this used identity.BankID and skipped the check on a parse
+			// error. It never errored on a multi-segment spoke id — it returned a
+			// WRONG id with a nil error, so the comparison silently failed and the
+			// originator could accept its own agreement. Observed on spoke-costa-rica.
+			if identity.BelongsToBank(record.Originator, callerBankID) {
 				return nil, status.Error(codes.PermissionDenied, "originator cannot accept their own FX agreement — only the counterparty may accept")
 			}
 		}
@@ -1310,8 +1293,7 @@ func (s *paymentOrchestratorService) RejectFXAgreement(ctx context.Context, req 
 	if !req.OnBehalf {
 		callerBankID := callerIdentityFromContext(ctx)
 		if callerBankID != "" {
-			originatorBank, parseErr := identity.BankID(record.Originator)
-			if parseErr == nil && originatorBank == callerBankID {
+			if identity.BelongsToBank(record.Originator, callerBankID) {
 				return nil, status.Error(codes.PermissionDenied, "originator cannot reject their own FX agreement — use cancel to withdraw a proposal")
 			}
 		}
