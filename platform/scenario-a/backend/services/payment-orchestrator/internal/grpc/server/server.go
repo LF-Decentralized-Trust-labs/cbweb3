@@ -169,11 +169,12 @@ func (s *paymentOrchestratorService) isLocalReceiver(receiver string) bool {
 	if s.spokePrefix == "" {
 		return true // no spoke configured — skip validation (dev mode)
 	}
-	receiverSpoke := identity.SpokePrefix(receiver)
-	if receiverSpoke == "" {
-		return false // unknown format — reject in production (fail closed)
-	}
-	return receiverSpoke == s.spokePrefix
+	// Membership is TESTED, not extracted — the same rule as BelongsToBank, and for
+	// the same reason. Comparing SpokePrefix(receiver) against s.spokePrefix only
+	// ever worked because BOTH sides were the same wrong guess; reading the local
+	// side from SPOKE_ID made it right and the two stopped agreeing, so a bank could
+	// not lock to its own neighbour on a hyphenated spoke. See BelongsToSpoke.
+	return identity.BelongsToSpoke(receiver, s.spokePrefix)
 }
 
 // loadHTLCsFromDB pre-populates the in-memory HTLC cache from the database.

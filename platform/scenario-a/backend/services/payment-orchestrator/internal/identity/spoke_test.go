@@ -167,3 +167,77 @@ func TestSpokePrefix_ConflatesSpokesSharingTwoSegments(t *testing.T) {
 	// spoke-costa-rica. Both spokes existing at once is what makes this live.
 	t.Log("two distinct spokes compare equal; isLocalReceiver cannot tell them apart")
 }
+
+// TestBelongsToSpoke uses the two live naming conventions, because the defect it
+// guards was invisible under a two-segment spoke id: with SpokePrefix on both sides
+// the check compared two identical wrong guesses and passed.
+func TestBelongsToSpoke(t *testing.T) {
+	for _, tc := range []struct {
+		identity string
+		spokeID  string
+		want     bool
+	}{
+		// The regression case: a bank locking to its neighbour on the same spoke.
+		{"funded_operator@spoke-costa-rica-cb2", "spoke-costa-rica", true},
+		{"funded_operator@spoke-costa-rica-cb1", "spoke-costa-rica", true},
+		{"funded_operator@spoke-costa-rica-cb", "spoke-costa-rica", true},
+		// The conventions that worked by accident must keep working.
+		{"funded_operator@spoke-brl-bank-itau", "spoke-brl", true},
+		{"funded_operator@spoke-brl-cb", "spoke-brl", true},
+		{"funded_operator@spoke-chile-cb3", "spoke-chile", true},
+		// Cross-spoke receivers must be rejected — this is the check's actual job.
+		{"funded_operator@spoke-brl-bank-itau", "spoke-costa-rica", false},
+		{"funded_operator@spoke-costa-rica-cb1", "spoke-brl", false},
+		{"funded_operator@spoke-peru-cb5", "spoke-chile", false},
+		// KNOWN LIMIT, asserted so it is a documented behaviour and not a surprise:
+		// "spoke-costa-rica-cb1" is ambiguous from the string alone (spokeId
+		// "spoke-costa-rica" + bank "cb1", or spokeId "spoke-costa" + bank
+		// "rica-cb1"), so a spoke whose id is a hyphen-boundary prefix of another's
+		// accepts it. This is fail-OPEN and is the residual risk the doc comment
+		// describes; it needs two live spokes named that way, which none are.
+		{"funded_operator@spoke-costa-rica-cb1", "spoke-costa", true},
+		{"funded_operator@spoke-costa-rica-cb1", "spoke", true},
+		// A node named exactly the spoke id is not a node on it (no suffix).
+		{"funded_operator@spoke-costa-rica", "spoke-costa-rica", false},
+		// Degenerate input fails closed.
+		{"", "spoke-brl", false},
+		{"funded_operator@", "spoke-brl", false},
+		{"funded_operator@spoke-brl-cb", "", false},
+		{"funded_operator@spoke-brl-cb", "   ", false},
+		// A bare bank id carries no spoke, so it cannot be verified as local.
+		{"cb1", "spoke-costa-rica", false},
+	} {
+		if got := identity.BelongsToSpoke(tc.identity, tc.spokeID); got != tc.want {
+			t.Errorf("BelongsToSpoke(%q, %q) = %v, want %v", tc.identity, tc.spokeID, got, tc.want)
+		}
+	}
+}
+
+// TestBelongsToSpoke_RejectsThePrefixComparison pins the exact failure mode: the old
+// implementation compared SpokePrefix on both sides. Under a hyphenated spoke id
+// that comparison is wrong in BOTH directions — it accepted nothing once the local
+// side was corrected, and before that it would have accepted a receiver from a
+// DIFFERENT spoke that happened to share the first two segments.
+func TestBelongsToSpoke_RejectsThePrefixComparison(t *testing.T) {
+	const local = "spoke-costa-rica"
+	const receiver = "funded_operator@spoke-costa-rica-cb2"
+
+	// What the old code did.
+	if identity.SpokePrefix(receiver) == local {
+		t.Fatal("SpokePrefix now agrees with the real spoke id — this guard is moot, re-derive it")
+	}
+	// What the fix does.
+	if !identity.BelongsToSpoke(receiver, local) {
+		t.Error("a receiver on the local spoke must be accepted")
+	}
+
+	// Two DIFFERENT spokes sharing the first two segments: the old comparison would
+	// have called them equal.
+	a := "funded_operator@spoke-costa-rica-cb1"
+	if identity.SpokePrefix(a) != identity.SpokePrefix("funded_operator@spoke-costa-verde-cb1") {
+		t.Fatal("the two fixtures no longer share a SpokePrefix; the guard proves nothing")
+	}
+	if identity.BelongsToSpoke("funded_operator@spoke-costa-verde-cb1", local) {
+		t.Error("a receiver on spoke-costa-verde must NOT be local to spoke-costa-rica")
+	}
+}

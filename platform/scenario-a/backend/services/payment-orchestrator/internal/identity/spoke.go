@@ -54,6 +54,61 @@ func BankID(paladinIdentity string) (string, error) {
 	return segs[2], nil
 }
 
+// BelongsToSpoke reports whether a Paladin identity lives on spokeID.
+//
+// This is the spoke counterpart of BelongsToBank, and it exists for the same
+// reason: comparing two EXTRACTED prefixes is not a test of membership. Every
+// node on a spoke is named <spokeId>-<suffix> (the toolkit's cbNodeName appends
+// "-cb", bankNodeName appends "-"+bankId), so membership is a prefix test at that
+// boundary — exact where extraction is a guess.
+//
+// The bug this replaces is worth stating, because it was invisible until a spoke
+// id carried a hyphen. isLocalReceiver used to compare SpokePrefix(receiver)
+// against the orchestrator's own spoke prefix, and BOTH sides were computed by the
+// same wrong split, so they agreed and the check passed:
+//
+//	receiver spoke-costa-rica-cb2   SpokePrefix -> "spoke-costa"   (wrong)
+//	local    spoke-costa-rica-cb1   SpokePrefix -> "spoke-costa"   (wrong)
+//	                                              equal -> accepted
+//
+// Reading the local side from SPOKE_ID made it correct ("spoke-costa-rica") and so
+// broke the symmetry that had been hiding the error: the two stopped agreeing and
+// a bank could no longer lock an HTLC to its own neighbour on the same spoke. Two
+// wrongs had been making a right.
+//
+// KNOWN LIMIT, and it is the same ambiguity that defeats extraction. A node name
+// is <spokeId>-<bankId> with hyphens allowed in both halves, so
+// "spoke-costa-rica-cb1" is genuinely ambiguous from the string alone:
+//
+//	spokeId=spoke-costa-rica  bankId=cb1        both structurally valid
+//	spokeId=spoke-costa       bankId=rica-cb1
+//
+// So an orchestrator whose own spoke is "spoke-costa" accepts a receiver on
+// "spoke-costa-rica" as local. No string test can separate those, and this one
+// resolves the ambiguity by ACCEPTING — the fail-open direction, which is the wrong
+// one for a validation gate. It is tolerated here only because it needs two live
+// spokes whose ids share a hyphen boundary ("spoke-costa" alongside
+// "spoke-costa-rica"), which no environment has today.
+//
+// The exact test is membership in the spoke's participant set, not the shape of a
+// name: the gateway already federates the identity roster over the relay, so the
+// orchestrator could ask instead of guessing. That is a network call on the lock
+// path and a separate decision; see the card referenced in the PR.
+func BelongsToSpoke(paladinIdentity, spokeID string) bool {
+	spokeID = strings.TrimSpace(spokeID)
+	if spokeID == "" {
+		return false
+	}
+	node := strings.TrimSpace(paladinIdentity)
+	if at := strings.Index(node, "@"); at >= 0 {
+		node = node[at+1:]
+	}
+	if node == "" {
+		return false
+	}
+	return strings.HasPrefix(node, spokeID+"-")
+}
+
 // BelongsToBank reports whether a Paladin identity belongs to bankID.
 //
 // This is the authorization primitive. Prefer it over BankID: it TESTS
