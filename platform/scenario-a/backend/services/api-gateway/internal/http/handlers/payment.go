@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -188,6 +190,77 @@ func unknownIdentities(roster []string, identities ...string) []string {
 		}
 		seen[trimmed] = struct{}{}
 		if _, ok := valid[trimmed]; !ok {
+			invalid = append(invalid, trimmed)
+		}
+	}
+	return invalid
+}
+
+// cbNodeSuffix is the toolkit's central-bank node naming rule: cbNodeName(spokeID)
+// is spokeID + "-cb", with no bank id appended.
+const cbNodeSuffix = "-cb"
+
+// spokeIDsFromRoster derives the set of real spoke ids from the Paladin roster.
+//
+// It reads ONLY the central-bank entries, and that narrowness is the point. A node
+// name is <spokeId>-<bankId> and both halves may contain hyphens, so a bank entry
+// cannot be split back into its two parts — that guess is what produced the
+// unroutable "spoke-costa". A central bank's node is exactly <spokeId>-cb, so
+// stripping that one suffix recovers the spoke id verbatim under both live bank-id
+// conventions (cb1… in LNET, bank-itau… in the samples). It is also complete: every
+// spoke has exactly one central bank, so no spoke can be missed by looking only at
+// those entries.
+//
+// Same rule as spokeIdFromCentralBankIdentity in the bank portal (PR #210). The two
+// must not drift.
+func spokeIDsFromRoster(roster []string) map[string]struct{} {
+	spokes := make(map[string]struct{}, len(roster))
+	for _, id := range roster {
+		node := strings.TrimSpace(id)
+		if at := strings.Index(node, "@"); at >= 0 {
+			node = node[at+1:]
+		}
+		if !strings.HasSuffix(node, cbNodeSuffix) {
+			continue
+		}
+		if spokeID := strings.TrimSuffix(node, cbNodeSuffix); spokeID != "" {
+			spokes[spokeID] = struct{}{}
+		}
+	}
+	return spokes
+}
+
+// unknownSpokeIDs returns the non-empty spoke ids, in order and de-duplicated, that
+// are not in the roster-derived set. It mirrors unknownIdentities deliberately: the
+// two validate fields that come from the SAME roster, and one of them being checked
+// while the other was not is what let a non-existent spoke id reach immutable Pente
+// storage.
+//
+// Membership is EXACT. A prefix-tolerant comparison would accept "spoke-costa" for
+// "spoke-costa-rica" — the precise value that was observed on-chain — so it would
+// pass a careless test and still ship the defect.
+//
+// An empty spoke set yields no unknowns. That mirrors unknownIdentities' empty-roster
+// convention, and it is a deliberate fail-OPEN: a roster that somehow carries no
+// central-bank entry would otherwise make every propose fail, which is a worse
+// outage than the defect being guarded. The caller logs when it happens, so the
+// condition is visible rather than silent.
+func unknownSpokeIDs(spokes map[string]struct{}, ids ...string) []string {
+	if len(spokes) == 0 {
+		return nil
+	}
+	var invalid []string
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
+			continue
+		}
+		if _, dup := seen[trimmed]; dup {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		if _, ok := spokes[trimmed]; !ok {
 			invalid = append(invalid, trimmed)
 		}
 	}
@@ -988,6 +1061,34 @@ func (h *PaymentHandler) ProposeFXAgreement(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error":              "one or more party identities are not members of the Paladin roster: " + strings.Join(invalid, ", "),
 			"invalid_identities": invalid,
+		})
+	}
+	// Reject a spoke id that does not exist, from the SAME roster the identities were
+	// just checked against. Without this, a non-empty, non-equal but non-existent id
+	// such as "spoke-costa" passed the orchestrator's shape-only checks and was
+	// written into the Pente group's private storage — which is immutable — and the
+	// failure surfaced much later at the relay, which cannot route it. The damage is
+	// not a rejected request; it is a permanent record plus an agreement that can
+	// never settle.
+	//
+	// PR #210 removed the only known way for the UI to produce a bad value. This is
+	// what makes the API itself safe: the gateway is a REST surface, and any other
+	// client or script can post an arbitrary string.
+	spokes := spokeIDsFromRoster(roster)
+	if len(spokes) == 0 {
+		slog.Warn("propose: no central-bank entries in the Paladin roster — spoke ids cannot be validated",
+			"roster_size", len(roster))
+	}
+	if invalid := unknownSpokeIDs(spokes, req.SourceSpokeID, req.DestSpokeID); len(invalid) > 0 {
+		known := make([]string, 0, len(spokes))
+		for id := range spokes {
+			known = append(known, id)
+		}
+		sort.Strings(known)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":             "one or more spoke ids do not exist: " + strings.Join(invalid, ", ") + " (known: " + strings.Join(known, ", ") + ")",
+			"invalid_spoke_ids": invalid,
+			"known_spoke_ids":   known,
 		})
 	}
 	// Propagate the authenticated caller identity so the orchestrator binds the
