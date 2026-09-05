@@ -3,7 +3,13 @@
 // Package handlers provides the beneficiary eligibility check a central bank answers about its
 // own member banks.
 //
-// GET /internal/amm/beneficiary-eligibility?bank_id=<code>
+// POST /internal/amm/beneficiary-eligibility   {"bank_id": "<code>"}
+//
+// A POST for a read, deliberately. The relay signature covers the method, the path and the
+// BODY — never the query string, because the verifier reconstructs the path with Fiber's
+// c.Path(), which drops it. Passing bank_id in the query would leave the one parameter that
+// selects the answer unsigned, so a captured signature could be replayed against a different
+// bank. In the body it is covered by the same signature as every other internal call.
 //
 // Asked by another central bank, through the Cacti relay, BEFORE it moves any value. It exists
 // because the condition that rejects a delivery is known only here — the participants registry
@@ -48,7 +54,13 @@ func NewBeneficiaryEligibilityHandler(checker BeneficiaryEligibilityCheckerIface
 // tell a definite refusal apart from an unreachable peer — and those two must lead to different
 // decisions, because only one of them is safe to treat as a reason to stop.
 func (h *BeneficiaryEligibilityHandler) HandleCheck(c *fiber.Ctx) error {
-	bankID := c.Query("bank_id")
+	var req struct {
+		BankID string `json:"bank_id"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	bankID := req.BankID
 	if bankID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "bank_id is required",

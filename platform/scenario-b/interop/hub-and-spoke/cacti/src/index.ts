@@ -134,8 +134,8 @@ async function main(): Promise<void> {
     // Pre-flight: asked before any value moves, so a delivery that would be refused is never
     // started. Same spoke_out lookup as the bridge-out, so no central bank has to learn
     // another's address.
-    app.get("/api/v1/cross-currency/beneficiary-check", crossCurrencyRelay.handleBeneficiaryCheck);
-    console.log("[cacti] registered GET /api/v1/cross-currency/beneficiary-check");
+    app.post("/api/v1/cross-currency/beneficiary-check", crossCurrencyRelay.handleBeneficiaryCheck);
+    console.log("[cacti] registered POST /api/v1/cross-currency/beneficiary-check");
   } else {
     console.warn("[cacti] CrossCurrencySwapRelay disabled (missing INTERNAL_RELAY_AUTH_SECRET)");
   }

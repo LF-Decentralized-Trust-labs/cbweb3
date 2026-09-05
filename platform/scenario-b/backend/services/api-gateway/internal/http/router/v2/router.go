@@ -634,7 +634,7 @@ func registerSovereignRoutes(app *fiber.App, deps Dependencies) {
 	// bank receive" rather than two that can drift.
 	if checker, ok := deps.CrossCurrencyBeneficiaryResolver.(handlers.BeneficiaryEligibilityCheckerIface); ok && checker != nil {
 		beh := handlers.NewBeneficiaryEligibilityHandler(checker)
-		app.Get("/internal/amm/beneficiary-eligibility",
+		app.Post("/internal/amm/beneficiary-eligibility",
 			middleware.RequireRelayAuthMigrating(deps.RelayAuth),
 			beh.HandleCheck,
 		)

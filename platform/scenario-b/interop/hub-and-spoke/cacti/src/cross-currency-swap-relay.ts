@@ -85,8 +85,9 @@ export class CrossCurrencySwapRelay {
    * payment it could have known to skip.
    */
   handleBeneficiaryCheck = async (req: Request, res: Response): Promise<void> => {
-    const spokeOut = String(req.query["spoke_out"] ?? "");
-    const bankId = String(req.query["bank_id"] ?? "");
+    const payload = (req.body ?? {}) as { spoke_out?: string; bank_id?: string };
+    const spokeOut = String(payload.spoke_out ?? "");
+    const bankId = String(payload.bank_id ?? "");
     if (!spokeOut || !bankId) {
       res.status(400).json({ error: "spoke_out and bank_id are required" });
       return;
@@ -100,23 +101,34 @@ export class CrossCurrencySwapRelay {
       return;
     }
 
-    const path = `/internal/amm/beneficiary-eligibility?bank_id=${encodeURIComponent(bankId)}`;
-    const headers: Record<string, string> = { "X-Relay-Auth": this.relayAuthSecret };
+    // POST with the bank id in the BODY, not the query.
+    //
+    // The signature covers method, path and body — never the query string, because the
+    // verifying gateway rebuilds the path with Fiber's c.Path(), which drops it. A bank id in
+    // the query would be the one parameter that selects the answer and the one thing left
+    // unsigned, so a captured signature could be replayed against a different bank. Serialized
+    // once, because the signature covers these exact bytes.
+    const path = "/internal/amm/beneficiary-eligibility";
+    const body = JSON.stringify({ bank_id: bankId });
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "X-Relay-Auth": this.relayAuthSecret,
+    };
     if (this.signer) {
-      Object.assign(headers, this.signer.headersFor("GET", path, ""));
+      Object.assign(headers, this.signer.headersFor("POST", path, body));
     }
 
     try {
-      const resp = await this.fetchFn(`${gatewayUrl}${path}`, { method: "GET", headers });
-      const body = await resp.text();
+      const resp = await this.fetchFn(`${gatewayUrl}${path}`, { method: "POST", headers, body });
+      const answer = await resp.text();
       if (!resp.ok) {
         // Pass the status through rather than flattening it: the caller must be able to tell a
         // definite "not eligible" from a peer that could not answer, because only one of those
         // is a safe reason to refuse a payment.
-        res.status(resp.status).send(body);
+        res.status(resp.status).send(answer);
         return;
       }
-      res.type("application/json").send(body);
+      res.type("application/json").send(answer);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       res.status(502).json({ error: `failed to reach spoke gateway: ${msg}` });

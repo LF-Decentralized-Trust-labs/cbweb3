@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 )
@@ -126,13 +125,16 @@ type BeneficiaryPreflight struct {
 // It never returns an error. An unanswerable question is reported as Answered=false so the
 // caller can proceed deliberately rather than by catching an error it might mishandle.
 func (r *CactiCrossCurrencyRelay) CheckBeneficiary(ctx context.Context, spokeOut, bankID string) BeneficiaryPreflight {
-	url := fmt.Sprintf("%s/api/v1/cross-currency/beneficiary-check?spoke_out=%s&bank_id=%s",
-		r.cactiURL, url.QueryEscape(spokeOut), url.QueryEscape(bankID))
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	body, err := json.Marshal(map[string]string{"spoke_out": spokeOut, "bank_id": bankID})
 	if err != nil {
 		return BeneficiaryPreflight{}
 	}
+	endpoint := r.cactiURL + "/api/v1/cross-currency/beneficiary-check"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return BeneficiaryPreflight{}
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("X-Relay-Auth", r.relayAuthSecret)
 
 	resp, err := r.httpClient.Do(httpReq)
