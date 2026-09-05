@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/middleware"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
 	"github.com/gofiber/fiber/v2"
 )
@@ -26,6 +27,10 @@ type BridgeBurnUnlockServiceIface interface {
 // BridgePositionReaderIface reads bridge positions from the DB.
 type BridgePositionReaderIface interface {
 	ListPositions(ctx context.Context, stateFilter string) ([]services.BridgePositionResult, error)
+	// ListPositionsForOwner answers for exactly one bank. Separate from ListPositions because
+	// the two have different audiences: a central bank's own screens want the whole book, and
+	// a commercial bank must never see more than its own rows.
+	ListPositionsForOwner(ctx context.Context, ownerBankID, stateFilter string) ([]services.BridgePositionResult, error)
 }
 
 // BridgeLimitCheckerIface is the transfer limit interface consumed by BridgeHandler (R1-10.1).
@@ -212,6 +217,38 @@ func (h *BridgeHandler) BurnUnlock(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(pos)
+}
+
+// ListPositionsForCaller handles GET /internal/v1/bridge/positions — the listing a commercial
+// bank reaches to see the payments it received.
+//
+// It exists because a beneficiary bank had no record of an incoming cross-currency payment at
+// all: the delivery position is created here, on its central bank's gateway, while its portal
+// asks its own gateway, which holds nothing. Only the balance moved, so an operator could not
+// tell where the money came from, or that it had arrived.
+//
+// The owner is the VERIFIED caller and nothing else. A query parameter is not an identity —
+// no signature covers what one means — so a caller naming another bank gets its own rows, and
+// a caller with no verified identity gets a refusal rather than the whole book.
+func (h *BridgeHandler) ListPositionsForCaller(c *fiber.Ctx) error {
+	caller := strings.TrimSpace(middleware.VerifiedRelayCaller(c))
+	if caller == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "no verified caller: this listing is scoped to one institution and cannot be answered unscoped",
+		})
+	}
+	if supplied := strings.TrimSpace(c.Query("owner_bank_id")); supplied != "" && !strings.EqualFold(supplied, caller) {
+		// Answered either way, but a caller asking about someone else is the fingerprint of the
+		// leak this scoping closes, and it must not pass unrecorded.
+		log.Printf("[bridge-positions] caller %q asked for owner_bank_id=%q; scoping to itself instead",
+			caller, supplied)
+	}
+
+	positions, err := h.posReader.ListPositionsForOwner(c.Context(), caller, c.Query("state"))
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"positions": positions})
 }
 
 // ListPositions handles GET /api/v2/bridge/positions (T068 / FR-033).

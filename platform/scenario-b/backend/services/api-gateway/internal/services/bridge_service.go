@@ -501,6 +501,36 @@ func (s *BridgePositionReader) ListPositions(ctx context.Context, stateFilter st
 	return dtos, nil
 }
 
+// ListPositionsForOwner returns one bank's bridge positions, optionally filtered by state.
+//
+// It exists because ListPositions returns every bank's rows, which is right on a central
+// bank's own screens and wrong the moment a commercial bank can reach the listing — and one
+// has to, or the beneficiary of a cross-currency payment has no record of receiving it: the
+// delivery position is created here, on its CB's gateway, not on its own.
+//
+// The owner is required and is NOT allowed to degrade into "everything". A blank owner is the
+// shape a missing verified caller takes, and answering it unscoped would hand one bank the
+// whole book — the exact leak this method is the narrow alternative to.
+func (s *BridgePositionReader) ListPositionsForOwner(ctx context.Context, ownerBankID, stateFilter string) ([]BridgePositionResult, error) {
+	owner := strings.TrimSpace(ownerBankID)
+	if owner == "" {
+		return nil, fmt.Errorf("bridge positions: an owner is required; refusing to list every bank's positions")
+	}
+	var positions []domain.BridgedAssetPosition
+	q := s.db.WithContext(ctx).Where("owner_bank_id = ?", owner)
+	if stateFilter != "" {
+		q = q.Where("bridge_state = ?", stateFilter)
+	}
+	if err := q.Order("created_at DESC").Find(&positions).Error; err != nil {
+		return nil, err
+	}
+	dtos := make([]BridgePositionResult, len(positions))
+	for i, p := range positions {
+		dtos[i] = *toPositionResult(&p)
+	}
+	return dtos, nil
+}
+
 // HasActiveBridgePosition returns true if the given ownerBankID has at least one
 // BridgedAssetPosition with bridge_state = ACTIVE. Used by the sovereign commit gate
 // (T008 / 007-bridge-based-cb-liquidity) to enforce that the CB has completed the
@@ -626,5 +656,7 @@ func toPositionResult(p *domain.BridgedAssetPosition) *BridgePositionResult {
 		BridgeState:     string(p.BridgeState),
 		RelayerRetries:  p.RelayerRetries,
 		RelayerErrorLog: errLog,
+		CreatedAt:       p.CreatedAt,
+		UpdatedAt:       p.UpdatedAt,
 	}
 }

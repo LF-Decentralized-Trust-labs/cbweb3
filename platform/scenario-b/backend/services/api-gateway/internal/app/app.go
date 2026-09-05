@@ -217,7 +217,10 @@ func New(cfg config.Config) (*App, error) {
 	supervisorHandler := handlers.NewSupervisorHandler(complianceGRPC, zkVerifier)
 	csrfSecret := resolveCSRFSecret(cfg.CSRFSecret)
 	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure).
-		WithCSRFSecret(csrfSecret)
+		WithCSRFSecret(csrfSecret).
+		// Same address the payment proxy stamps onto every deposit this entity creates, so the
+		// portal shows the operator the wallet that will actually be credited.
+		WithEntityWallet(cfg.EntityBesuAddress)
 	complianceHandler := handlers.NewComplianceHandler(identityManager, complianceGRPC)
 
 	// --- Scenario B v2 service wiring (T020) ---

@@ -6,6 +6,7 @@ package handlers
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/middleware"
@@ -24,6 +25,15 @@ type AuthHandler struct {
 	kycManager          interfaces.KYCManager
 	cookieSecure        bool   // mirrors COOKIE_SECURE env var; true = HTTPS only
 	csrfSecret          []byte // keys the HMAC binding a CSRF token to its session
+	// entityWallet is this gateway's own on-chain address (ENTITY_BESU_ADDRESS), served on
+	// /auth/me when the identity provider issues no wallet claim — which is always, today.
+	//
+	// The portal renders this field on the issuance screen so an operator can confirm which
+	// wallet money will be created against. With nothing to render it said "Not available in
+	// session", minutes after onboarding had shown the address on its own success screen. The
+	// address was never missing: it is what every deposit this gateway creates carries as
+	// requester_besu_address.
+	entityWallet string
 }
 
 type loginRequest struct {
@@ -414,6 +424,14 @@ func (h *AuthHandler) ChangeClientSecret(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "client secret changed successfully"})
 }
 
+// WithEntityWallet sets this gateway's own on-chain address, published on /auth/me when the
+// token carries no wallet claim. Optional: a gateway without one omits the field entirely
+// rather than answering with an empty string, which a portal would render as a wallet.
+func (h *AuthHandler) WithEntityWallet(address string) *AuthHandler {
+	h.entityWallet = strings.TrimSpace(address)
+	return h
+}
+
 // Me returns the authenticated user's profile from the claims injected by RequireCookieAuth middleware.
 func (h *AuthHandler) Me(c *fiber.Ctx) error {
 	claims, ok := c.Locals("claims").(domain.TokenClaims)
@@ -425,8 +443,13 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
 		"issuer":  claims.Issuer,
 		"roles":   claims.Roles,
 	}
+	// The claim wins when present — it is the caller's own identity, while entityWallet is the
+	// gateway's. They coincide on a bank gateway, where the operator acts as the institution,
+	// and a future provider that does issue the claim must not be overridden by configuration.
 	if claims.Wallet != "" {
 		resp["wallet"] = claims.Wallet
+	} else if h.entityWallet != "" {
+		resp["wallet"] = h.entityWallet
 	}
 	if claims.Country != "" {
 		resp["country"] = claims.Country
