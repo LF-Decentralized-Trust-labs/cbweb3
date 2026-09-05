@@ -291,7 +291,7 @@ Template: `scenario-a/frontend/.env.example`
 | Variable | Description |
 |----------|-------------|
 | `VITE_API_URL` | API gateway URL used by the app |
-| `VITE_USE_MOCKS` | `true` for development without backend |
+| `VITE_USE_MOCKS` | **Inert in Scenario A** — no portal reads it. Its only reference is an unused export in the treasury app, no `ARG` declares it at build time, and the toolkit never passes it. Setting it changes nothing |
 | `VITE_PORTAL_OWNER` | Portal owner operator (e.g. `BANK_A_OPERATOR`) |
 | `VITE_FIAT_SYMBOL` | Fiat symbol displayed in the app |
 | `VITE_INSTITUTION_NAME` | Institution name displayed in the app |

@@ -93,6 +93,8 @@ In Scenario B, the sidebar contains exactly the following items in order:
 
 Unknown routes redirect to `/` automatically.
 
+Above the navigation items the sidebar shows a **System State** badge: `HALTED` in red when any pair's circuit breaker is halted, and `LIVE` otherwise. It is derived from the same on-chain pair status the [Circuit Breaker](#55-circuit-breaker) screen reads, so the two can no longer disagree. When the condition is indeterminate — no pairs registered, or only part of the pair set is readable — the badge falls back to `LIVE` rather than reporting a halt. The badge is an indicator only; it is not a control.
+
 ---
 
 ## 5. Screens

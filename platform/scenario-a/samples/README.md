@@ -7,20 +7,37 @@
 This directory contains ready-to-use `ParticipantDeployment` manifests for the
 `cbweb3` toolkit, demonstrating the complete scenario:
 
-- **Three independent spokes**, each founded by its own central bank:
+- **Independent spokes**, each founded by its own central bank:
   - `spoke-brl` — founded by `central-bank-brazil` (currency BRL, chainId 1337)
   - `spoke-cop` — founded by `central-bank-colombia` (currency COP, chainId 1338)
   - `spoke-ars` — founded by `central-bank-argentina` (currency ARS, chainId 1339)
+  - `spoke-costa-rica` — founded by `central-bank-costa-rica` (chainId 1340)
 - **Two commercial banks per spoke**, each joining via a join bundle:
   - Brazil: `bank-itau`, `bank-bradesco` → `spoke-brl`
   - Colombia: `bank-bancolombia`, `bank-davivienda` → `spoke-cop`
   - Argentina: `bank-galicia`, `bank-macro` → `spoke-ars`
+  - Costa Rica: `cb1`, `cb2` → `spoke-costa-rica`
+
+Not every spoke is in every bring-up:
+
+| Script | Spokes stood up |
+|---|---|
+| `deploy-all.sh` (default) | Brazil (`spoke-brl`) + Costa Rica (`spoke-costa-rica`) |
+| `deploy-three.sh` | Brazil (`spoke-brl`) + Colombia (`spoke-cop`) + Argentina (`spoke-ars`) |
+
+The default deliberately pairs a two-segment spoke id (`spoke-brl`) with a
+three-segment one (`spoke-costa-rica`): code that recovers a bank or spoke id by
+splitting a node name on `-` is right for the first and wrong for the second. Four
+defects of that root cause reached a deployed environment while every sample spoke
+had a two-segment id (PRs #210–#213). Costa Rica replaced Colombia in the default
+rather than being added to it, so the default covers the defect class at the same
+cost; Colombia remains available in `deploy-three.sh`.
 
 > The bank names are illustrative, used only to demonstrate provisioning.
 
 Everything is provisioned **by configuration** (YAML manifest), without editing
-code and without touching the reference network (`deploy/local` and the Makefile
-remain intact).
+code. The toolkit is the only bring-up path — the legacy `deploy/local` tree was
+removed from both scenarios.
 
 Covers PHASES 1B (toolkit `mode: found`) and 3 (`mode: join`). **PHASE 4**
 (staging/prod: real KMS, real CA, registry images) **is not implemented** — so
@@ -148,10 +165,10 @@ binary **outside** the repository, point it at the root with `CBWEB3_HOME`:
 export CBWEB3_HOME="$(cd ../ && pwd)"   # scenario-a root
 ```
 
-> The templates (`provisioning/templates/...`) and scripts (`deploy/local/...`) are
-> canonical toolkit assets — they are not copied into `samples/`. `deploy-contracts`
-> runs `go test` against those scripts, so the engine always requires the repository
-> to be present.
+> The templates (`provisioning/templates/...`) and scripts
+> (`provisioning/paladin/scripts/...`) are canonical toolkit assets — they are not
+> copied into `samples/`. `deploy-contracts` runs `go test` against those scripts, so
+> the engine always requires the repository to be present.
 
 For the whole session, set the directory where join bundles are emitted —
 pointing it at this `samples/` folder, so that `mode: join` manifests find the
@@ -425,8 +442,8 @@ step (`success` / `skipped` / `failed` / `pending`).
   `provisioning/docs/adr-001-cross-stack-enode-addressing.md`). In a multi-stack
   local deployment, participants of the same spoke share the Docker network
   `cbweb3-<spoke-id>-besu`.
-- **Reference network untouched.** This toolkit does not modify or depend on
-  `deploy/local` or `make/*.mk` — they remain the sample network.
+- **No legacy bring-up.** The `deploy/local` tree was removed; this toolkit is the
+  only path that stands a stack up, and it does not depend on `make/*.mk`.
 
 ---
 
