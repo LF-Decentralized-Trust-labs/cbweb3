@@ -23,7 +23,10 @@ export type CrossCurrencySwapStatus =
   | "SWAP_IN_PROGRESS"
   | "BRIDGE_OUT_PROGRESS"
   | "COMPLETED"
-  | "FAILED";
+  | "FAILED"
+  // Delivered by the retry sweeper after the synchronous call had already failed. Terminal
+  // and paid — kept distinct from COMPLETED because the caller was shown a failure.
+  | "DELIVERED_AFTER_RETRY";
 
 export interface CrossCurrencyQuote {
   quote_id: string;

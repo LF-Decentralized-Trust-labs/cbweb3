@@ -263,6 +263,122 @@ func (r *crossCurrencySwapRepository) DeferResidue(ctx context.Context, swapID s
 		}).Error
 }
 
+// withBridgeOutClaimLock adds FOR UPDATE SKIP LOCKED where the database supports it. Same
+// necessity as withResidueClaimLock: SQLite (the repository tests) has a single writer and
+// rejects the clause, so an ungated version would fail every one of those tests rather than
+// failing in production.
+func withBridgeOutClaimLock(q *gorm.DB, dialect string) *gorm.DB {
+	if dialect != "postgres" {
+		return q
+	}
+	return q.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
+}
+
+// ClaimNextRetryableBridgeOut picks the oldest delivery that failed and is due, and leases it.
+//
+// Only DELIVERY_FAILED is retryable. DELIVERY_NOTIFIED already has a position on CB-B and is
+// driven by that CB's own relayer queue; DELIVERY_ESCALATED gave up and needs a human; an empty
+// status is a legacy row that predates this column and carries no evidence either way, so it is
+// left alone rather than re-delivered on a guess.
+//
+// A NULL next_attempt_at is due immediately, which is what a first failure would leave behind if
+// the schedule write were ever lost.
+//
+// The claim is two statements in ONE SHORT transaction and deliberately does not span the work:
+// the retry dispatches to the relay over the network, so holding row locks across it would keep
+// a transaction — and a pooled connection — open for the length of an HTTP call to another
+// entity, per row. The lease gives the same exclusion without holding anything.
+func (r *crossCurrencySwapRepository) ClaimNextRetryableBridgeOut(ctx context.Context, now time.Time) (*domain.CrossCurrencySwapOperation, error) {
+	var ops []domain.CrossCurrencySwapOperation
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		q := tx.
+			Where("bridge_out_status = ?", domain.BridgeOutDeliveryFailed).
+			// The ceiling is enforced by the QUERY, not only by the status write that escalates
+			// a row. Those are separate statements: if the status write fails while the counter
+			// write succeeds, the row stays DELIVERY_FAILED at the ceiling and without this
+			// bound would be re-dispatched on every sweep forever.
+			Where("bridge_out_attempts < ?", services.BridgeOutMaxAttempts()).
+			Where("bridge_out_next_attempt_at IS NULL OR bridge_out_next_attempt_at <= ?", now).
+			Order("created_at ASC").
+			Limit(1)
+		q = withBridgeOutClaimLock(q, tx.Dialector.Name())
+		if err := q.Find(&ops).Error; err != nil {
+			return err
+		}
+		if len(ops) == 0 {
+			return nil
+		}
+		lease := now.Add(services.BridgeOutClaimLease())
+		return tx.Model(&domain.CrossCurrencySwapOperation{}).
+			Where("swap_id = ?", ops[0].SwapID).
+			Update("bridge_out_next_attempt_at", lease).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(ops) == 0 {
+		return nil, nil
+	}
+	return &ops[0], nil
+}
+
+// UpdateBridgeOutDelivery records the delivery status, the attempt counter and when the next
+// attempt becomes due. A nil nextAttemptAt clears the schedule, which is what a terminal outcome
+// (notified or escalated) leaves behind.
+//
+// It also clears bridge_out_deferred_since: recording an attempt means the row was actually
+// tried, so any deferral window is over. Leaving a stale stamp would make a pause months later
+// escalate on its very first sweep.
+//
+// It does NOT touch `status`. The swap's own verdict was set when the delivery first failed, and
+// a delivery that later succeeds must not silently rewrite a record the payer has already been
+// shown — the recovery is visible in bridge_out_status, which is the field that is actually
+// about the delivery.
+func (r *crossCurrencySwapRepository) UpdateBridgeOutDelivery(ctx context.Context, swapID string, status domain.BridgeOutDeliveryStatus, attempts int, nextAttemptAt *time.Time) error {
+	return r.db.WithContext(ctx).
+		Model(&domain.CrossCurrencySwapOperation{}).
+		Where("swap_id = ?", swapID).
+		Updates(map[string]interface{}{
+			"bridge_out_status":          status,
+			"bridge_out_attempts":        attempts,
+			"bridge_out_next_attempt_at": nextAttemptAt,
+			"bridge_out_deferred_since":  nil,
+		}).Error
+}
+
+// DeferBridgeOut reschedules a row whose pair is halted by governance without touching the
+// attempt counter — deferring is not an attempt — and opens a deferral window if none is open.
+//
+// The stamp is written with COALESCE rather than read-then-write: two sweepers can look at the
+// same row across a claim lease boundary, and a read-modify-write would let the later one move
+// the start of the pause forward. Every move forward pushes the bound further away, which is
+// precisely the unbounded wait this column exists to end.
+func (r *crossCurrencySwapRepository) DeferBridgeOut(ctx context.Context, swapID string, nextAttemptAt, deferredSince time.Time) error {
+	return r.db.WithContext(ctx).
+		Model(&domain.CrossCurrencySwapOperation{}).
+		Where("swap_id = ?", swapID).
+		Updates(map[string]interface{}{
+			"bridge_out_next_attempt_at": nextAttemptAt,
+			"bridge_out_deferred_since":  gorm.Expr("COALESCE(bridge_out_deferred_since, ?)", deferredSince),
+		}).Error
+}
+
+// MarkDeliveredAfterRetry records a recovered delivery: the reason a person reads and the
+// verdict they read first, in one statement so no window exists where the two contradict.
+//
+// Guarded on status = FAILED. The only row this may promote is one the synchronous call gave
+// up on; a COMPLETED row reaching here would mean the delivery succeeded twice, and rewriting
+// its verdict would be a regression, not a repair.
+func (r *crossCurrencySwapRepository) MarkDeliveredAfterRetry(ctx context.Context, swapID string, reason string) error {
+	return r.db.WithContext(ctx).
+		Model(&domain.CrossCurrencySwapOperation{}).
+		Where("swap_id = ? AND status = ?", swapID, domain.SwapStatusFailed).
+		Updates(map[string]interface{}{
+			"failure_reason": reason,
+			"status":         domain.SwapStatusDeliveredAfterRetry,
+		}).Error
+}
+
 // UpdateFailureReason sets the failure_reason field when status=FAILED.
 func (r *crossCurrencySwapRepository) UpdateFailureReason(ctx context.Context, swapID string, reason string) error {
 	return r.db.WithContext(ctx).

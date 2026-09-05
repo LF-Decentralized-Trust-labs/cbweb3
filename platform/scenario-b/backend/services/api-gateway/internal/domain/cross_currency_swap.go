@@ -19,6 +19,19 @@ const (
 	SwapStatusBridgeOutProgress SwapOperationStatus = "BRIDGE_OUT_PROGRESS"
 	SwapStatusCompleted         SwapOperationStatus = "COMPLETED"
 	SwapStatusFailed            SwapOperationStatus = "FAILED"
+	// SwapStatusDeliveredAfterRetry is the terminal state of a swap whose synchronous call
+	// failed at the delivery leg and whose delivery a later retry completed.
+	//
+	// It exists because the verdict column is what an operator reads first, and leaving it at
+	// FAILED after the beneficiary had been paid told them the opposite of what happened — the
+	// recovery was legible only in bridge_out_status and failure_reason, two columns nobody
+	// consults on a row already marked failed.
+	//
+	// It is deliberately NOT COMPLETED. COMPLETED means the whole flow closed inside one call,
+	// and the paths that read it — the transfer-limit quota restore among them — are entitled
+	// to that meaning. This state says something narrower and true: the value reached the
+	// beneficiary, but not on the first attempt, and the caller was already shown a failure.
+	SwapStatusDeliveredAfterRetry SwapOperationStatus = "DELIVERED_AFTER_RETRY"
 )
 
 // ResidueReturnStatus records what happened to the unspent slippage buffer
@@ -43,6 +56,41 @@ const (
 	// value is still on the CB's Hub address and now needs a human. Mirrors the relayer's
 	// RELAYER_EXHAUSTED escalation rather than retrying forever.
 	ResidueReturnEscalated ResidueReturnStatus = "RETURN_ESCALATED"
+)
+
+// BridgeOutDeliveryStatus records what happened to the DELIVERY leg — the notification
+// that makes CB-B burn the wrapped output on the Hub and release the native token to the
+// beneficiary on its spoke.
+//
+// It is separate from SwapOperationStatus for the same reason ResidueReturnStatus is: the
+// swap itself has a verdict of its own, and the delivery's fate must not be conflated with
+// it. Where they differ is which way the asymmetry runs. A failed residue leaves the payer
+// over-debited on a settled payment; a failed delivery leaves value that has already left
+// two balance sheets sitting on the Hub with no beneficiary — the partial settlement the
+// constitution forbids.
+type BridgeOutDeliveryStatus string
+
+const (
+	// BridgeOutDeliveryNotified means the relay accepted the notification. Its terminal state
+	// then lives on CB-B's bridge position, not here — this gateway is not the authority on
+	// what CB-B did next.
+	BridgeOutDeliveryNotified BridgeOutDeliveryStatus = "DELIVERY_NOTIFIED"
+	// BridgeOutDeliveryFailed means the notification could not be delivered or was rejected.
+	// The value is not lost: the wrapped output sits on the Hub address that received the
+	// swap, which the burn would have drawn from. This is the state the retry worker picks up.
+	//
+	// Retryable for the same two reasons the residue return is, and both were built
+	// deliberately for a different purpose (R2-CR-6): nothing that authorizes the burn comes
+	// from the request — CB-B re-derives the amount, the burn-from address and the recipient
+	// from the on-chain swap receipt — and the endpoint is idempotent on swap_tx_hash. A
+	// rejected notification never consumed the hash, so the first successful retry creates the
+	// position and any later repeat is answered with the existing one.
+	BridgeOutDeliveryFailed BridgeOutDeliveryStatus = "DELIVERY_FAILED"
+	// BridgeOutDeliveryEscalated means the retries were exhausted, or a governance pause
+	// outlived the deferral bound. Terminal for automation: the beneficiary still has nothing,
+	// the payer is still debited, and a human has to decide between a late delivery and a
+	// refund. Mirrors ResidueReturnEscalated rather than retrying forever.
+	BridgeOutDeliveryEscalated BridgeOutDeliveryStatus = "DELIVERY_ESCALATED"
 )
 
 // CrossCurrencySwapOperation tracks end-to-end cross-currency swap, linking
@@ -97,8 +145,31 @@ type CrossCurrencySwapOperation struct {
 	// payer stays over-debited, the value sits on the issuing CB's Hub address, and a log line
 	// is the only trace. NULL means the row is not currently deferred.
 	ResidueDeferredSince *time.Time `gorm:"column:residue_deferred_since"`
-	CreatedAt            time.Time  `gorm:"column:created_at;autoCreateTime;index"`
-	CompletedAt          *time.Time `gorm:"column:completed_at"`
+	// BridgeOutStatus tracks whether the delivery notification reached CB-B. Empty on legacy
+	// rows. Leads its composite retry index for the same reason ResidueStatus does: it is the
+	// selective term, and the schedule alone is NULL for nearly every row.
+	BridgeOutStatus BridgeOutDeliveryStatus `gorm:"column:bridge_out_status;default:'';index:idx_swap_bridge_out_retry,priority:1"`
+	// BridgeOutAttempts counts delivery attempts and BridgeOutNextAttemptAt is when the next
+	// becomes due (exponential backoff).
+	//
+	// A rejected notification creates no bridge position on CB-B, so the relayer queue — which
+	// drives the legs that WERE enqueued — has nothing to pick up, and the relay itself
+	// forwards exactly once. Without these two fields the swapped value sits on the Hub with
+	// no beneficiary indefinitely, and the only trace is a log line telling an operator to
+	// contact support.
+	//
+	// The retry needs no payload columns: correlation_id, swap_tx_hash, pool_pair, amount_out
+	// and beneficiary_bank_id are already here, the AMM address is re-resolved from the pair,
+	// and the burn-from address is re-derived by CB-B from the receipt rather than sent.
+	BridgeOutAttempts      int        `gorm:"column:bridge_out_attempts;not null;default:0"`
+	BridgeOutNextAttemptAt *time.Time `gorm:"column:bridge_out_next_attempt_at;index:idx_swap_bridge_out_retry,priority:2"`
+	// BridgeOutDeferredSince is when the current deferral window opened, for a pair halted by
+	// governance. Same contract as ResidueDeferredSince: the first stamp wins, any real attempt
+	// clears it, and it bounds a pause that the attempt counter cannot, because deferring does
+	// not consume an attempt.
+	BridgeOutDeferredSince *time.Time `gorm:"column:bridge_out_deferred_since"`
+	CreatedAt              time.Time  `gorm:"column:created_at;autoCreateTime;index"`
+	CompletedAt            *time.Time `gorm:"column:completed_at"`
 }
 
 // TableName overrides GORM's default table name.

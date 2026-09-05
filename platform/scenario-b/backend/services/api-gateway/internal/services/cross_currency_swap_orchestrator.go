@@ -35,6 +35,10 @@ type CrossCurrencySwapRepository interface {
 	// UpdateResidue records the outcome of the residue return without touching `status`:
 	// the swap is already COMPLETED when Step 4 runs and a failed return must not reopen it.
 	UpdateResidue(ctx context.Context, swapID, amount, positionID string, status domain.ResidueReturnStatus) error
+	// UpdateBridgeOutDelivery records the fate of the delivery notification and, when a retry
+	// is scheduled, when it becomes due. It does not touch `status`: the swap's own verdict is
+	// set by the caller, and a delivery that later succeeds must not silently rewrite it.
+	UpdateBridgeOutDelivery(ctx context.Context, swapID string, status domain.BridgeOutDeliveryStatus, attempts int, nextAttemptAt *time.Time) error
 }
 
 // BridgeLockMintServiceIface handles bridge Spoke-A → Hub (lock native, mint wrapped).
@@ -457,6 +461,43 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		}()
 	}
 
+	// Step 0: ask the beneficiary's central bank whether it can receive, BEFORE anything moves.
+	//
+	// The condition that rejects a delivery — the beneficiary must be ACTIVE — is known only to
+	// that central bank, and used to be consulted only at the delivery itself: after bridge-in
+	// and after the AMM swap, past the point of no return. The payer was debited and the swap
+	// executed before anyone found out, which is the partial settlement the constitution
+	// forbids. Asking here costs one round trip and moves nothing.
+	//
+	// It does NOT replace the bridge-out retry. Two reasons, and both matter:
+	//   - a beneficiary can be deactivated between this check and the delivery, so the window
+	//     is narrowed, not closed;
+	//   - the answer may not arrive at all, and this deliberately proceeds when it does not.
+	//
+	// FAIL-OPEN on an unanswered question, and that is a decision rather than an oversight. A
+	// refusal here would let the beneficiary CB's availability decide whether THIS central bank
+	// can start a payment — one peer down closes the corridor. The guarantee against a stranded
+	// delivery is the retry; this is an optimisation that avoids moving value pointlessly, and
+	// an optimisation must not become an outage. A definite "no", by contrast, is acted on:
+	// that answer is authoritative and the delivery would certainly fail.
+	if o.cactiRelay != nil {
+		if checker, ok := o.cactiRelay.(BeneficiaryPreflightChecker); ok {
+			spokeOut := "spoke-" + strings.ToLower(req.TargetCurrency)
+			pf := checker.CheckBeneficiary(ctx, spokeOut, req.BeneficiaryBankID)
+			switch {
+			case pf.Answered && !pf.Eligible:
+				reason := fmt.Sprintf("beneficiary %s cannot receive on %s (%s) — refused before any value moved",
+					req.BeneficiaryBankID, spokeOut, pf.Code)
+				log.Printf("[correlation_id=%s] pre-flight: %s", req.CorrelationID, reason)
+				_ = o.failSwap(ctx, req.SwapID, reason)
+				return nil, fmt.Errorf("%s", reason)
+			case !pf.Answered:
+				log.Printf("[correlation_id=%s] pre-flight: could not reach the beneficiary's central bank for %s — proceeding; a failed delivery will be retried",
+					req.CorrelationID, req.BeneficiaryBankID)
+			}
+		}
+	}
+
 	// Step 1: Bridge-In (Spoke-A → Hub)
 	log.Printf("[correlation_id=%s] Step 1: Bridge-In (lock %s on Spoke-A, mint W-%s on Hub)",
 		req.CorrelationID, req.SourceCurrency, req.SourceCurrency)
@@ -748,12 +789,34 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		correlationBack, relayErr := o.cactiRelay.NotifyBridgeOut(ctx, relayReq)
 		if relayErr != nil {
 			_ = o.failSwap(ctx, req.SwapID, fmt.Sprintf("cacti bridge-out relay failed (partial success): %v", relayErr))
-			log.Printf("[correlation_id=%s] CRITICAL: swap succeeded but Cacti relay failed (manual intervention required)", req.CorrelationID)
+			// Mark the delivery retryable and schedule the first attempt, so the sweeper picks
+			// it up. Without this the swapped value sits on the Hub with no beneficiary and
+			// nothing ever tries again: the relay forwards exactly once, and a rejected
+			// notification creates no position for the relayer queue to drive.
+			//
+			// It is safe to re-drive because nothing that authorizes the burn comes from the
+			// request — CB-B re-derives the amount, the burn-from address and the recipient
+			// from the on-chain receipt — and the endpoint is idempotent on swap_tx_hash, which
+			// a rejected notification never consumed.
+			next := time.Now().Add(bridgeOutBackoff(1))
+			if uerr := o.swapRepo.UpdateBridgeOutDelivery(ctx, req.SwapID, domain.BridgeOutDeliveryFailed, 1, &next); uerr != nil {
+				// Only now is intervention the sole remaining route: without the row the
+				// sweeper cannot find this swap, so say so instead of the generic line.
+				log.Printf("[correlation_id=%s] CRITICAL: bridge-out failed AND could not be marked retryable (%v) — the swapped value sits on the Hub with no beneficiary and no retry is scheduled; manual intervention required", req.CorrelationID, uerr)
+			} else {
+				log.Printf("[correlation_id=%s] bridge-out delivery failed; scheduled for retry at %s (attempt 1 of %d)", req.CorrelationID, next.Format(time.RFC3339), bridgeOutMaxAttempts)
+			}
 			// The delivery leg is what needs intervention; the unspent input does not.
 			returnResidueOnce()
-			return nil, fmt.Errorf("cacti bridge-out relay failed (swap succeeded, manual intervention required): %w", relayErr)
+			return nil, fmt.Errorf("cacti bridge-out relay failed (swap succeeded, delivery scheduled for retry): %w", relayErr)
 		}
 		bridgeOutPositionID = correlationBack // correlation_id echoed back by Cacti/CB-B
+		if uerr := o.swapRepo.UpdateBridgeOutDelivery(ctx, req.SwapID, domain.BridgeOutDeliveryNotified, 0, nil); uerr != nil {
+			// Not fatal: the notification was accepted, so the delivery is CB-B's concern from
+			// here. Losing the marker only means this row is not distinguishable from a legacy
+			// one, and the sweeper ignores anything that is not DELIVERY_FAILED.
+			log.Printf("[correlation_id=%s] could not record bridge-out delivery as notified: %v", req.CorrelationID, uerr)
+		}
 		log.Printf("[correlation_id=%s] Cacti relay accepted bridge-out → CB-B (echo=%s)", req.CorrelationID, bridgeOutPositionID)
 	} else {
 		// ── Path B: legacy local mode ────────────────────────────────────────
