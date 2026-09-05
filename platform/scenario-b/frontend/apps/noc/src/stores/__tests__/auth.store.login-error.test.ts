@@ -17,7 +17,7 @@ const me = vi.fn();
 // hoisted holder — vi.mock factories run before any top-level declaration in this file.
 const captured = vi.hoisted(() => ({ sessionExpired: null as (() => void) | null }));
 
-vi.mock("../../services/api/token", () => ({
+vi.mock("../../services/api/session", () => ({
   setSessionExpiredHandler: (h: () => void) => {
     captured.sessionExpired = h;
   },
