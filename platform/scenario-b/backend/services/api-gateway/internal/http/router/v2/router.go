@@ -625,6 +625,21 @@ func registerSovereignRoutes(app *fiber.App, deps Dependencies) {
 		)
 	}
 
+	// Pre-flight for the SAME condition the bridge-out above enforces, asked by another central
+	// bank before it moves any value. Registered next to it deliberately: the two answer from
+	// the same registry, and if they ever disagree the pre-flight would authorise a payment the
+	// delivery then refuses — which is worse than having no pre-flight at all.
+	//
+	// It reuses CrossCurrencyBeneficiaryResolver, so there is one implementation of "can this
+	// bank receive" rather than two that can drift.
+	if checker, ok := deps.CrossCurrencyBeneficiaryResolver.(handlers.BeneficiaryEligibilityCheckerIface); ok && checker != nil {
+		beh := handlers.NewBeneficiaryEligibilityHandler(checker)
+		app.Get("/internal/amm/beneficiary-eligibility",
+			middleware.RequireRelayAuthMigrating(deps.RelayAuth),
+			beh.HandleCheck,
+		)
+	}
+
 	// 009-commercial-cross-currency-swap: bridge-in receiver for the issuing CB (CB-A side).
 	// Called by a commercial bank's orchestrator (Step 1) to perform the sovereign W-<source>
 	// lock-mint that the commercial bank may not do itself.

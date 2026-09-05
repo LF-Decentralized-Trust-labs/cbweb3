@@ -461,6 +461,43 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		}()
 	}
 
+	// Step 0: ask the beneficiary's central bank whether it can receive, BEFORE anything moves.
+	//
+	// The condition that rejects a delivery — the beneficiary must be ACTIVE — is known only to
+	// that central bank, and used to be consulted only at the delivery itself: after bridge-in
+	// and after the AMM swap, past the point of no return. The payer was debited and the swap
+	// executed before anyone found out, which is the partial settlement the constitution
+	// forbids. Asking here costs one round trip and moves nothing.
+	//
+	// It does NOT replace the bridge-out retry. Two reasons, and both matter:
+	//   - a beneficiary can be deactivated between this check and the delivery, so the window
+	//     is narrowed, not closed;
+	//   - the answer may not arrive at all, and this deliberately proceeds when it does not.
+	//
+	// FAIL-OPEN on an unanswered question, and that is a decision rather than an oversight. A
+	// refusal here would let the beneficiary CB's availability decide whether THIS central bank
+	// can start a payment — one peer down closes the corridor. The guarantee against a stranded
+	// delivery is the retry; this is an optimisation that avoids moving value pointlessly, and
+	// an optimisation must not become an outage. A definite "no", by contrast, is acted on:
+	// that answer is authoritative and the delivery would certainly fail.
+	if o.cactiRelay != nil {
+		if checker, ok := o.cactiRelay.(BeneficiaryPreflightChecker); ok {
+			spokeOut := "spoke-" + strings.ToLower(req.TargetCurrency)
+			pf := checker.CheckBeneficiary(ctx, spokeOut, req.BeneficiaryBankID)
+			switch {
+			case pf.Answered && !pf.Eligible:
+				reason := fmt.Sprintf("beneficiary %s cannot receive on %s (%s) — refused before any value moved",
+					req.BeneficiaryBankID, spokeOut, pf.Code)
+				log.Printf("[correlation_id=%s] pre-flight: %s", req.CorrelationID, reason)
+				_ = o.failSwap(ctx, req.SwapID, reason)
+				return nil, fmt.Errorf("%s", reason)
+			case !pf.Answered:
+				log.Printf("[correlation_id=%s] pre-flight: could not reach the beneficiary's central bank for %s — proceeding; a failed delivery will be retried",
+					req.CorrelationID, req.BeneficiaryBankID)
+			}
+		}
+	}
+
 	// Step 1: Bridge-In (Spoke-A → Hub)
 	log.Printf("[correlation_id=%s] Step 1: Bridge-In (lock %s on Spoke-A, mint W-%s on Hub)",
 		req.CorrelationID, req.SourceCurrency, req.SourceCurrency)

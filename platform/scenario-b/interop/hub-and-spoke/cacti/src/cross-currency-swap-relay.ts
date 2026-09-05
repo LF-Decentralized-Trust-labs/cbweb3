@@ -71,6 +71,58 @@ export class CrossCurrencySwapRelay {
     return spoke.gatewayUrl.replace(/\/$/, "");
   }
 
+  /**
+   * Ask the beneficiary's central bank whether one of its member banks can receive a delivery,
+   * BEFORE the asking CB moves any value.
+   *
+   * It routes here rather than CB-to-CB directly for the same reason the delivery does: no
+   * central bank knows another's address. This registry does — it is the same `spoke_out`
+   * lookup the bridge-out uses — so adding the question here costs one route and no new
+   * coupling between sovereigns.
+   *
+   * Deliberately NOT gated on the circuit breaker. A paused pair must not move value, and this
+   * moves none; refusing to answer a question would only push the caller into starting a
+   * payment it could have known to skip.
+   */
+  handleBeneficiaryCheck = async (req: Request, res: Response): Promise<void> => {
+    const spokeOut = String(req.query["spoke_out"] ?? "");
+    const bankId = String(req.query["bank_id"] ?? "");
+    if (!spokeOut || !bankId) {
+      res.status(400).json({ error: "spoke_out and bank_id are required" });
+      return;
+    }
+
+    let gatewayUrl: string;
+    try {
+      gatewayUrl = this.resolveGateway(spokeOut);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+      return;
+    }
+
+    const path = `/internal/amm/beneficiary-eligibility?bank_id=${encodeURIComponent(bankId)}`;
+    const headers: Record<string, string> = { "X-Relay-Auth": this.relayAuthSecret };
+    if (this.signer) {
+      Object.assign(headers, this.signer.headersFor("GET", path, ""));
+    }
+
+    try {
+      const resp = await this.fetchFn(`${gatewayUrl}${path}`, { method: "GET", headers });
+      const body = await resp.text();
+      if (!resp.ok) {
+        // Pass the status through rather than flattening it: the caller must be able to tell a
+        // definite "not eligible" from a peer that could not answer, because only one of those
+        // is a safe reason to refuse a payment.
+        res.status(resp.status).send(body);
+        return;
+      }
+      res.type("application/json").send(body);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(502).json({ error: `failed to reach spoke gateway: ${msg}` });
+    }
+  };
+
   handleBridgeOut = async (req: Request, res: Response): Promise<void> => {
     // Constant-time comparison through the single audited guard: `!==` returned on the
     // first differing byte, which timed how much of a guess was right (finding R2-M-10).
