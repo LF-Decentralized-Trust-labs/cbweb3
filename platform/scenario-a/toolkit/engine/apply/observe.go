@@ -5,7 +5,9 @@ package apply
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/bundle"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/dockervolume"
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/manifest"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/orchestrator"
 )
 
@@ -38,6 +41,80 @@ const (
 	// Single source of truth lives in the dockervolume package.
 	nocAgentVolHelperImage = dockervolume.HelperImage
 )
+
+// nocKeycloakClientID is the realm client the NOC portal's operators authenticate with.
+// Scenario A names it cbweb3-noc (Scenario B calls its own noc-portal — a naming drift, not
+// a behavioural one).
+const nocKeycloakClientID = "cbweb3-noc"
+
+// nocPortalOrigins resolves the browser origins allowed to call this backend with
+// credentials.
+//
+// Behind the proxy the portal is same-origin with the backend, so there is exactly one.
+// Otherwise the manifest names them (spec.noc.portalOrigins), because this backend is
+// shared by every CB portal on the host and only the operator knows which are deployed.
+// Falls back to the founding CB's own portal convention when the manifest is silent, so an
+// existing single-CB manifest keeps working rather than failing to start.
+func nocPortalOrigins(m *manifest.Manifest, frontendHost string, proxyEnabled bool) string {
+	if proxyEnabled {
+		return orchestrator.ProxyOrigin(frontendHost)
+	}
+	// Nil-checked: spec.noc is optional, so a manifest without the block is normal and
+	// must fall through to the convention rather than crash the apply.
+	if m.Spec.NOC != nil && len(m.Spec.NOC.PortalOrigins) > 0 {
+		return strings.Join(m.Spec.NOC.PortalOrigins, ",")
+	}
+	// The single-CB local convention: the NOC portal published by the founding CB.
+	return fmt.Sprintf("http://%s:%d", frontendHostOrLocal(frontendHost), nocPortalPortLocal)
+}
+
+// nocPortalPortLocal is the NOC portal's published port under the single-host convention
+// (the founding CB's RPC port + the NOC frontend offset). Scenario A's samples fix the CB at
+// 8645, so the portal lands on 32645 — the value the observe manifest documents.
+const nocPortalPortLocal = 32645
+
+// containerReachableURL rewrites a host-facing "localhost" URL into one a CONTAINER can
+// reach.
+//
+// spec.noc.keycloakURL was written for the browser, which is where the password grant used
+// to run — and "localhost" is exactly right there. The grant now runs in the NOC backend,
+// inside a container, where "localhost" is the container itself. Left alone, every existing
+// manifest would break at login with a connection refused and nothing pointing at the cause.
+func containerReachableURL(u string) string {
+	for _, local := range []string{"//localhost:", "//127.0.0.1:"} {
+		if strings.Contains(u, local) {
+			return strings.Replace(u, local, "//host.docker.internal:", 1)
+		}
+	}
+	return u
+}
+
+// deriveNOCCSRFSecret produces a stable per-stack CSRF secret.
+//
+// Derived rather than random so it survives a restart: the secret keys the HMAC that binds
+// each CSRF token to its session, so a value that changes on boot refuses every token issued
+// before it — a browser holding a good session suddenly gets 403 on every action, with
+// nothing to suggest the cause. A production deployment supplies CSRF_SECRET itself.
+func deriveNOCCSRFSecret(prefix string) string {
+	sum := sha256.Sum256([]byte("cbweb3-noc-csrf:" + prefix))
+	return hex.EncodeToString(sum[:])
+}
+
+// nocKeycloakURL reads the optional realm URL, tolerating an absent spec.noc block.
+func nocKeycloakURL(m *manifest.Manifest) string {
+	if m == nil || m.Spec.NOC == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.Spec.NOC.KeycloakURL)
+}
+
+// frontendHostOrLocal mirrors the rest of the toolkit's default.
+func frontendHostOrLocal(h string) string {
+	if strings.TrimSpace(h) == "" {
+		return "localhost"
+	}
+	return h
+}
 
 // observeStepOrder is the linear step set reported for mode:observe.
 var observeStepOrder = []string{"build-noc-backend", "start-noc-stack", "wait-noc-backend", "register-noc-spoke", "provision-noc-key", "build-noc-agent", "start-noc-agent"}
@@ -101,10 +178,28 @@ func runObserveMode(ctx context.Context, in ApplyInput) (ApplyResult, error) {
 		"NOC_NET_NAME="+prefix+"-net",
 		"NOC_VOLUME_PREFIX="+prefix,
 	)
-	if proxyEnabled {
-		// Backend CORS collapses to the single proxy origin (vs the local "*" default).
-		env = append(env, "NOC_FRONTEND_ORIGIN="+orchestrator.ProxyOrigin(fHost))
+	// CORS origin(s). Mandatory, and never "*": the NOC session is a cookie now, and a
+	// browser refuses to send credentials to a wildcard origin — a wildcard would let the
+	// portal log in and then be anonymous on every request, with nothing to explain it.
+	//
+	// A LIST because one NOC backend is shared here: every CB on the host serves its own
+	// NOC portal and they all point at this same port. Scenario B differs — its NOC stack
+	// owns its portal — which is why this is a manifest field there and not here.
+	env = append(env, "NOC_FRONTEND_ORIGIN="+nocPortalOrigins(m, fHost, proxyEnabled))
+	// Realm for the backend's password grant. It moved here from the PORTAL's build args
+	// when the login moved to the server: a cookie the browser cannot read can only be set
+	// by a server, so the browser no longer talks to Keycloak.
+	if kcURL := nocKeycloakURL(m); kcURL != "" {
+		env = append(env,
+			// Translated for the container: the manifest's "localhost" is the BROWSER's
+			// view, and the grant now runs inside this backend.
+			"NOC_KEYCLOAK_URL="+containerReachableURL(kcURL),
+			"NOC_KEYCLOAK_CLIENT_ID="+nocKeycloakClientID,
+		)
 	}
+	// Stable per stack rather than random: a secret that changes on restart refuses every
+	// CSRF token issued before it, which looks like a browser fault, not a config one.
+	env = append(env, "NOC_CSRF_SECRET="+deriveNOCCSRFSecret(prefix))
 	if err := steps.run(ctx, "start-noc-stack", func(ctx context.Context) error {
 		return runDocker(ctx, env, "compose", "-p", prefix, "-f", in.NOCStackComposePath, "up", "-d")
 	}); err != nil {
