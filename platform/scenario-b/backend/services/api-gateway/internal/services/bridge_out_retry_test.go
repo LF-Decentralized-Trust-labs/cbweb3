@@ -373,3 +373,89 @@ func TestBridgeOutBackoff_DoublesAndIsCapped(t *testing.T) {
 		t.Error("the deferral bound is not above the longest retry delay — a normal pause would escalate")
 	}
 }
+
+// capturingSwapRepo records what the orchestrator wrote about the delivery leg. It exists
+// because the marking is the half the retry loop cannot test: the loop starts from a row that
+// is ALREADY DELIVERY_FAILED, so nothing above proves a real failure ever reaches that state.
+type capturingSwapRepo struct {
+	stubSwapRepo
+	status   domain.BridgeOutDeliveryStatus
+	attempts int
+	nextAt   *time.Time
+	calls    int
+}
+
+func (r *capturingSwapRepo) UpdateBridgeOutDelivery(_ context.Context, _ string, status domain.BridgeOutDeliveryStatus, attempts int, nextAttemptAt *time.Time) error {
+	r.calls++
+	r.status = status
+	r.attempts = attempts
+	r.nextAt = nextAttemptAt
+	return nil
+}
+
+// rejectingCactiRelay rejects the delivery the way CB-B did in the incident: the beneficiary bank
+// was KYC_APPROVED rather than ACTIVE, so the notification came back 422 through a relay 502.
+type rejectingCactiRelay struct{ calls int }
+
+func (f *rejectingCactiRelay) NotifyBridgeOut(_ context.Context, _ CactiCrossCurrencyBridgeOutRequest) (string, error) {
+	f.calls++
+	return "", errors.New(`cacti returned HTTP 502: HTTP 422 {"code":"BENEFICIARY_NOT_FOUND"}`)
+}
+
+// TestExecute_MarksAFailedDeliveryRetryable is the assertion the retry loop depends on and
+// cannot make for itself.
+//
+// Before this, a rejected delivery only set the swap to FAILED and logged that a human was
+// needed. The sweeper looks for DELIVERY_FAILED, so without this write it would never see the
+// row: the value would sit on the Hub with no beneficiary exactly as it did in the incident,
+// and every test above would still pass because they start from a row already in that state.
+func TestExecute_MarksAFailedDeliveryRetryable(t *testing.T) {
+	repo := &capturingSwapRepo{}
+	relay := &rejectingCactiRelay{}
+
+	orch := NewCrossCurrencySwapOrchestrator(
+		repo,
+		nil, // quoteRepo
+		&stubLockMint{},
+		stubBurnUnlock{},
+		&recordingSwapService{},
+		stubPoolActive{},
+		stubCBOK{},
+		nil, // rollbackCoordinator
+		nil, // bridgeAssets
+		nil, // bridgePoller
+	).WithBridgeInRelay(&stubBridgeInRelay{}).
+		WithHubSwapRelay(&stubHubSwapRelay{result: &SwapResult{
+			TxHash: "0xswap", AmountIn: "800", HubSenderAddress: "0xCBHUB",
+		}}).
+		WithCactiRelay(relay)
+
+	before := time.Now()
+	_, err := orch.Execute(context.Background(), hubSwapRequest())
+	if err == nil {
+		t.Fatal("a rejected delivery must still fail the caller's swap — the beneficiary got nothing")
+	}
+	if relay.calls != 1 {
+		t.Fatalf("relay calls = %d, want 1", relay.calls)
+	}
+
+	if repo.status != domain.BridgeOutDeliveryFailed {
+		t.Errorf("delivery status = %q, want %q — without it the sweeper never finds this row",
+			repo.status, domain.BridgeOutDeliveryFailed)
+	}
+	if repo.attempts != 1 {
+		t.Errorf("attempts = %d, want 1 — the first failure IS the first attempt", repo.attempts)
+	}
+	if repo.nextAt == nil {
+		t.Fatal("no next attempt scheduled — the row would sit DELIVERY_FAILED forever with nothing due")
+	}
+	if !repo.nextAt.After(before) {
+		t.Errorf("next attempt %s is not in the future", repo.nextAt)
+	}
+	// The first retry must not be immediate: the dominant cause is a person finishing an
+	// onboarding, and hammering the relay would spend the budget before that can happen.
+	if repo.nextAt.Sub(before) < bridgeOutBackoffBaseSeconds*time.Second/2 {
+		t.Errorf("first retry scheduled %s out, too soon for the human cause this recovers from",
+			repo.nextAt.Sub(before))
+	}
+}
