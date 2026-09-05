@@ -19,6 +19,19 @@ const (
 	SwapStatusBridgeOutProgress SwapOperationStatus = "BRIDGE_OUT_PROGRESS"
 	SwapStatusCompleted         SwapOperationStatus = "COMPLETED"
 	SwapStatusFailed            SwapOperationStatus = "FAILED"
+	// SwapStatusDeliveredAfterRetry is the terminal state of a swap whose synchronous call
+	// failed at the delivery leg and whose delivery a later retry completed.
+	//
+	// It exists because the verdict column is what an operator reads first, and leaving it at
+	// FAILED after the beneficiary had been paid told them the opposite of what happened — the
+	// recovery was legible only in bridge_out_status and failure_reason, two columns nobody
+	// consults on a row already marked failed.
+	//
+	// It is deliberately NOT COMPLETED. COMPLETED means the whole flow closed inside one call,
+	// and the paths that read it — the transfer-limit quota restore among them — are entitled
+	// to that meaning. This state says something narrower and true: the value reached the
+	// beneficiary, but not on the first attempt, and the caller was already shown a failure.
+	SwapStatusDeliveredAfterRetry SwapOperationStatus = "DELIVERED_AFTER_RETRY"
 )
 
 // ResidueReturnStatus records what happened to the unspent slippage buffer

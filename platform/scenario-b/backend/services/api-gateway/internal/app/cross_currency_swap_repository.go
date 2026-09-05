@@ -363,6 +363,22 @@ func (r *crossCurrencySwapRepository) DeferBridgeOut(ctx context.Context, swapID
 		}).Error
 }
 
+// MarkDeliveredAfterRetry records a recovered delivery: the reason a person reads and the
+// verdict they read first, in one statement so no window exists where the two contradict.
+//
+// Guarded on status = FAILED. The only row this may promote is one the synchronous call gave
+// up on; a COMPLETED row reaching here would mean the delivery succeeded twice, and rewriting
+// its verdict would be a regression, not a repair.
+func (r *crossCurrencySwapRepository) MarkDeliveredAfterRetry(ctx context.Context, swapID string, reason string) error {
+	return r.db.WithContext(ctx).
+		Model(&domain.CrossCurrencySwapOperation{}).
+		Where("swap_id = ? AND status = ?", swapID, domain.SwapStatusFailed).
+		Updates(map[string]interface{}{
+			"failure_reason": reason,
+			"status":         domain.SwapStatusDeliveredAfterRetry,
+		}).Error
+}
+
 // UpdateFailureReason sets the failure_reason field when status=FAILED.
 func (r *crossCurrencySwapRepository) UpdateFailureReason(ctx context.Context, swapID string, reason string) error {
 	return r.db.WithContext(ctx).

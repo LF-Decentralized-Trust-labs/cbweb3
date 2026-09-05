@@ -32,8 +32,10 @@ type fakeBridgeOutRetryRepo struct {
 
 	deferredSince map[string]time.Time
 	deferrals     map[string]int
-	// reasons captures what a person would read on the swap record after a recovery.
-	reasons map[string]string
+	// reasons captures what a person would read on the swap record after a recovery, and
+	// swapStatuses the verdict column they read FIRST — the two are written together.
+	reasons      map[string]string
+	swapStatuses map[string]domain.SwapOperationStatus
 }
 
 func newFakeBridgeOutRetryRepo(ops ...domain.CrossCurrencySwapOperation) *fakeBridgeOutRetryRepo {
@@ -46,6 +48,7 @@ func newFakeBridgeOutRetryRepo(ops ...domain.CrossCurrencySwapOperation) *fakeBr
 		deferredSince: map[string]time.Time{},
 		deferrals:     map[string]int{},
 		reasons:       map[string]string{},
+		swapStatuses:  map[string]domain.SwapOperationStatus{},
 	}
 	// These maps stand in for columns, so a seeded row's existing deferral window has to be
 	// visible here too — otherwise "first stamp wins" has nothing to compare against and the
@@ -93,8 +96,9 @@ func (f *fakeBridgeOutRetryRepo) DeferBridgeOut(_ context.Context, swapID string
 	return nil
 }
 
-func (f *fakeBridgeOutRetryRepo) UpdateFailureReason(_ context.Context, swapID string, reason string) error {
+func (f *fakeBridgeOutRetryRepo) MarkDeliveredAfterRetry(_ context.Context, swapID string, reason string) error {
 	f.reasons[swapID] = reason
+	f.swapStatuses[swapID] = domain.SwapStatusDeliveredAfterRetry
 	return nil
 }
 
@@ -172,9 +176,13 @@ func TestRetryFailedBridgeOuts_RecoversTheReportedCase(t *testing.T) {
 	if repo.posIDs["s1"] == "" {
 		t.Error("the correlation CB-B echoes back must be persisted, or the delivery cannot be traced")
 	}
-	// The swap's own status stays FAILED on purpose — the payer was already shown that
-	// verdict. So this field is the only place a person can see that the beneficiary was
-	// eventually paid, and it has to say so, with how many attempts it took.
+	// The verdict column is the one an operator reads first, and leaving it at FAILED after
+	// the beneficiary was paid told them the opposite of what happened. It must now name the
+	// recovery, and the reason must still say how many attempts it took.
+	if got := repo.swapStatuses["s1"]; got != domain.SwapStatusDeliveredAfterRetry {
+		t.Errorf("swap status = %q, want %q — an operator reading only this column would "+
+			"conclude the beneficiary was never paid", got, domain.SwapStatusDeliveredAfterRetry)
+	}
 	reason := repo.reasons["s1"]
 	if reason == "" {
 		t.Fatal("nothing recorded on the swap record: it would still read as a plain failure " +
@@ -185,6 +193,25 @@ func TestRetryFailedBridgeOuts_RecoversTheReportedCase(t *testing.T) {
 	}
 	if !strings.Contains(reason, "beneficiary has been paid") {
 		t.Errorf("the recovery must say the beneficiary was paid, got %q", reason)
+	}
+}
+
+// TestRetryFailedBridgeOuts_AFailedAttemptLeavesTheVerdictAlone is the other half of the
+// verdict rule. Only a delivery that actually reached the beneficiary may move the swap off
+// FAILED — an attempt that failed again, or one that exhausted the budget, has changed nothing
+// about what the payer was told, and promoting it would be the same lie in reverse.
+func TestRetryFailedBridgeOuts_AFailedAttemptLeavesTheVerdictAlone(t *testing.T) {
+	relay := &recordingRelay{failFirst: bridgeOutMaxAttempts + 1} // never succeeds
+	repo := newFakeBridgeOutRetryRepo(failedDelivery("s1", 1))
+
+	orchestratorForRetry(relay).RetryFailedBridgeOuts(context.Background(), repo, time.Now(), 10)
+
+	if got, ok := repo.swapStatuses["s1"]; ok {
+		t.Errorf("swap status was rewritten to %q on a failed attempt; it must stay as the "+
+			"payer was told", got)
+	}
+	if repo.reasons["s1"] != "" {
+		t.Error("a failed attempt must not overwrite the reason with a recovery message")
 	}
 }
 
