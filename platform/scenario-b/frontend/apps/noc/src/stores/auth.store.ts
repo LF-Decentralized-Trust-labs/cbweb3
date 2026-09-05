@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { NOC_UNAUTHORIZED_MESSAGE, hasNOCAccess } from "../auth/authorization";
 import { authApi } from "../services/api";
-import { setSessionExpiredHandler } from "../services/api/token";
+import { setSessionExpiredHandler } from "../services/api/session";
 import type { AsyncStatus, SysAdminUser } from "../types";
 import { LOGIN_ERROR_COPY, loginErrorMessage } from "@cbweb3/ui";
 
