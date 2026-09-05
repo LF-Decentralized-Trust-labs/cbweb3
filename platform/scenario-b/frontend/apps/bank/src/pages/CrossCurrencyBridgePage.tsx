@@ -26,6 +26,7 @@ import { usePaymentStore } from "../stores";
 import type { HubCurrency, HubPair } from "../types/amm-v2.types";
 import { CROSS_CURRENCY_SWAP_ERROR } from "../types/cross-currency-swap.types";
 import { displayToBase, formatAmountInput, parseAmountInput } from "../types";
+import { evaluateExecuteGating } from "../features/amm/execute-gating";
 
 const CROSS_CURRENCY_ERROR_MESSAGES: Record<string, string> = {
   [CROSS_CURRENCY_SWAP_ERROR.CIRCUIT_BREAKER_HALTED]:
@@ -207,14 +208,18 @@ export function CrossCurrencyBridgePage() {
   const isPoolActive = poolLifecycleStatus === "ACTIVE";
   const isQuoteExpired = quoteExpiresAt !== null && nowTimestamp > quoteExpiresAt;
 
-  const isExecuteDisabled =
-    step !== "idle"
-    || !isPoolActive
-    || quote === null
-    || !amountOut.trim()
-    || !amountInInput.trim()
-    || !beneficiaryBankId.trim()
-    || isQuoteExpired;
+  // Expiry is a notice, not a gate: the store refreshes an expired quote on submit and
+  // retries once, so disabling the button only kept the operator away from that recovery —
+  // and the reason lived in a hover tooltip nobody sees.
+  const { disabled: isExecuteDisabled, notice: executeNotice } = evaluateExecuteGating({
+    step,
+    isPoolActive,
+    hasQuote: quote !== null,
+    isQuoteExpired,
+    amountOut,
+    amountIn: amountInInput,
+    beneficiaryBankId,
+  });
 
   const handleGetQuote = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -457,11 +462,12 @@ export function CrossCurrencyBridgePage() {
                   required
                 />
               </div>
-              <Button
-                type="submit"
-                disabled={isExecuteDisabled}
-                title={isQuoteExpired ? "Quote expired - click Get Quote to refresh" : undefined}
-              >
+              {executeNotice ? (
+                <p className="text-sm text-muted-foreground" role="status">
+                  {executeNotice}
+                </p>
+              ) : null}
+              <Button type="submit" disabled={isExecuteDisabled}>
                 Execute Bridge
               </Button>
             </form>

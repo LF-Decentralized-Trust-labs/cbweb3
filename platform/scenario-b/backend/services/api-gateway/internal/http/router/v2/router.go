@@ -179,6 +179,7 @@ type bridgeBurnUnlockServiceIface interface {
 
 type bridgePositionReaderIface interface {
 	ListPositions(ctx context.Context, stateFilter string) ([]services.BridgePositionResult, error)
+	ListPositionsForOwner(ctx context.Context, ownerBankID, stateFilter string) ([]services.BridgePositionResult, error)
 }
 
 type liquidityServiceIface interface {

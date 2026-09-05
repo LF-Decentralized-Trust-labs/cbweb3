@@ -193,6 +193,20 @@ func Setup(app *fiber.App, deps Dependencies) {
 		payments.Get("/escrows", deps.PaymentProxyHandler.ListEscrows)
 		payments.Post("/redeems", deps.PaymentProxyHandler.RequestRedeem)
 		payments.Get("/redeems", deps.PaymentProxyHandler.ListRedeems)
+
+		// Bridge positions come from the central bank too, for the same reason the payment
+		// records do: this gateway holds none. An incoming cross-currency delivery is recorded
+		// where the burn and release happen, so a beneficiary bank asking its own gateway saw
+		// its balance change and no payment at all.
+		//
+		// Registered HERE, before v2router.Register below, on purpose: the v2 router also
+		// serves /api/v2/bridge/positions from this gateway's own (empty) table, and Fiber runs
+		// the first matching handler. A bank gateway is exactly the case where the local answer
+		// is wrong, and PaymentProxyHandler is non-nil only on a bank gateway.
+		app.Get("/api/v2/bridge/positions",
+			middleware.RequireCookieAuth(deps.AuthProvider),
+			deps.PaymentProxyHandler.ListBridgePositions,
+		)
 	}
 
 	// --- Payment Handler — Central Bank gateway routes (direct gRPC, no proxy) ---
@@ -258,6 +272,24 @@ func Setup(app *fiber.App, deps Dependencies) {
 		internalPayments.Get("/deposits", scopeToCaller, deps.PaymentHandler.ListDeposits)
 		internalPayments.Get("/escrows", scopeToCaller, deps.PaymentHandler.ListEscrows)
 		internalPayments.Get("/redeems", scopeToCaller, deps.PaymentHandler.ListRedeems)
+
+		// One bank's bridge positions, so a beneficiary can see the payment it received. The
+		// delivery position is created here, on the CB's gateway; the bank's own gateway holds
+		// none, so the receiving institution saw a balance change and no payment at all.
+		//
+		// Registered inside this group, and WITHOUT its own auth middleware, because the group
+		// already authenticates every /internal/v1 request. A second RequireRelayAuth here runs
+		// the replay guard twice over one request: the first pass records the signature, the
+		// second sees it recorded and rejects the call. Live, that made the route answer
+		// RELAY_SIGNATURE_REPLAYED to its very first caller.
+		//
+		// The owner is scoped inside the handler rather than by ScopeRequesterToCaller: that
+		// middleware binds requester_id, an ADDRESS, while positions are keyed by owner_bank_id
+		// — the entity id whose signature was verified. Same rule, different key.
+		if deps.V2Deps.BridgePositionReader != nil {
+			bridgePositions := handlers.NewBridgeHandler(nil, nil, deps.V2Deps.BridgePositionReader)
+			internal.Get("/bridge/positions", bridgePositions.ListPositionsForCaller)
+		}
 	}
 
 	// --- Internal spoke self-registration (hub only) ---
