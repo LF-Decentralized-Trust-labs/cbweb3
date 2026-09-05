@@ -5,6 +5,7 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,8 @@ type fakeBridgeOutRetryRepo struct {
 
 	deferredSince map[string]time.Time
 	deferrals     map[string]int
+	// reasons captures what a person would read on the swap record after a recovery.
+	reasons map[string]string
 }
 
 func newFakeBridgeOutRetryRepo(ops ...domain.CrossCurrencySwapOperation) *fakeBridgeOutRetryRepo {
@@ -42,6 +45,7 @@ func newFakeBridgeOutRetryRepo(ops ...domain.CrossCurrencySwapOperation) *fakeBr
 		posIDs:        map[string]string{},
 		deferredSince: map[string]time.Time{},
 		deferrals:     map[string]int{},
+		reasons:       map[string]string{},
 	}
 	// These maps stand in for columns, so a seeded row's existing deferral window has to be
 	// visible here too — otherwise "first stamp wins" has nothing to compare against and the
@@ -86,6 +90,11 @@ func (f *fakeBridgeOutRetryRepo) DeferBridgeOut(_ context.Context, swapID string
 	if _, open := f.deferredSince[swapID]; !open {
 		f.deferredSince[swapID] = deferredSince
 	}
+	return nil
+}
+
+func (f *fakeBridgeOutRetryRepo) UpdateFailureReason(_ context.Context, swapID string, reason string) error {
+	f.reasons[swapID] = reason
 	return nil
 }
 
@@ -162,6 +171,20 @@ func TestRetryFailedBridgeOuts_RecoversTheReportedCase(t *testing.T) {
 	}
 	if repo.posIDs["s1"] == "" {
 		t.Error("the correlation CB-B echoes back must be persisted, or the delivery cannot be traced")
+	}
+	// The swap's own status stays FAILED on purpose — the payer was already shown that
+	// verdict. So this field is the only place a person can see that the beneficiary was
+	// eventually paid, and it has to say so, with how many attempts it took.
+	reason := repo.reasons["s1"]
+	if reason == "" {
+		t.Fatal("nothing recorded on the swap record: it would still read as a plain failure " +
+			"after the beneficiary was paid")
+	}
+	if !strings.Contains(reason, "recovered on attempt 2") {
+		t.Errorf("the recovery must name the attempt it took, got %q", reason)
+	}
+	if !strings.Contains(reason, "beneficiary has been paid") {
+		t.Errorf("the recovery must say the beneficiary was paid, got %q", reason)
 	}
 }
 

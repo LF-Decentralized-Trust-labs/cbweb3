@@ -31,6 +31,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -117,6 +118,13 @@ type BridgeOutRetryRepository interface {
 	DeferBridgeOut(ctx context.Context, swapID string, nextAttemptAt, deferredSince time.Time) error
 	// UpdateBridgeOutPositionID stores the correlation CB-B echoes back once it accepts.
 	UpdateBridgeOutPositionID(ctx context.Context, swapID string, positionID string) error
+	// UpdateFailureReason rewrites the human-readable reason on the swap record.
+	//
+	// Needed because the swap's own status is deliberately NOT rewritten on recovery: the
+	// payer was already shown a verdict and moving it under them would be worse than leaving
+	// it. But a record that says only "failed" after the beneficiary has been paid is
+	// misleading in the other direction, so the reason carries the recovery instead.
+	UpdateFailureReason(ctx context.Context, swapID string, reason string) error
 }
 
 // RetryFailedBridgeOuts re-drives every delivery notification that failed and is due. Returns
@@ -250,11 +258,26 @@ func (o *CrossCurrencySwapOrchestrator) retryOneBridgeOut(
 		return false
 	}
 
-	log.Printf("[bridge-out-retry] swap %s: delivery accepted on attempt %d (echo=%s)", op.SwapID, attempts, correlationBack)
+	log.Printf("[bridge-out-retry] swap %s: delivery accepted on attempt %d of %d (echo=%s)", op.SwapID, attempts, bridgeOutMaxAttempts, correlationBack)
 	if correlationBack != "" {
 		if perr := repo.UpdateBridgeOutPositionID(ctx, op.SwapID, correlationBack); perr != nil {
 			log.Printf("[bridge-out-retry] swap %s: could not persist bridge-out position id: %v", op.SwapID, perr)
 		}
+	}
+	// Say what happened, in the field a person reads. Leaving the original "partial success"
+	// text behind would tell an operator the beneficiary was never paid, which stopped being
+	// true on this attempt — and the swap's own status stays FAILED on purpose, so this is the
+	// only place the recovery is legible.
+	//
+	// The original reason is kept after it: it is why the retry existed, and dropping it would
+	// erase the only record that the first delivery was rejected at all.
+	reason := fmt.Sprintf("delivery recovered on attempt %d of %d — the beneficiary has been paid",
+		attempts, bridgeOutMaxAttempts)
+	if op.FailureReason != nil && *op.FailureReason != "" {
+		reason += " (original failure: " + *op.FailureReason + ")"
+	}
+	if rerr := repo.UpdateFailureReason(ctx, op.SwapID, reason); rerr != nil {
+		log.Printf("[bridge-out-retry] swap %s: could not record the recovery on the swap record: %v", op.SwapID, rerr)
 	}
 	o.recordBridgeOutOutcome(ctx, repo, op.SwapID, domain.BridgeOutDeliveryNotified, attempts, nil)
 	return true
