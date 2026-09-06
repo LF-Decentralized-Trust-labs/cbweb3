@@ -119,4 +119,13 @@ func TestListPositionsForCaller_RefusesWithoutAVerifiedCaller(t *testing.T) {
 	if body["positions"] != nil {
 		t.Error("a refusal must not carry positions")
 	}
+	// The CODE, not just the status. The bank portal classifies a 401 by its code: a trust
+	// rejection becomes a notice, and anything unclassified is taken for an expired session —
+	// refresh, retry, fail again, log the operator out. This endpoint is called by the page
+	// login lands on, so a code-less refusal ejected every bank the central bank cannot yet
+	// verify, and the portal is the only intended route to onboarding. Asserting the status
+	// alone is what let that ship.
+	if got := body["code"]; got != "RELAY_CALLER_IDENTITY_REQUIRED" {
+		t.Errorf("code = %v, want RELAY_CALLER_IDENTITY_REQUIRED — an unclassified 401 logs the operator out instead of explaining itself", got)
+	}
 }
