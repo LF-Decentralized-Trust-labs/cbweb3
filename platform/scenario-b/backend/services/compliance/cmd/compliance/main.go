@@ -38,34 +38,9 @@ func main() {
 
 	bc := newBlockchainClient()
 
-	// PKI bootstrap runs BEFORE the CA is loaded, because it is what CREATES the CA.
-	// Loading first worked only while CA_CERT_FILE named a file some other step had already
-	// written; now that it names this bootstrap's own {bankCode}-ca.crt, a first boot would
-	// otherwise die reading a file it was about to generate.
-	if bankCode := os.Getenv("BANK_CODE"); bankCode != "" {
-		pkiDir := getEnv("PKI_DIR", "")
-		if pkiDir == "" {
-			if v := os.Getenv("CA_CERT_FILE"); v != "" {
-				pkiDir = filepath.Dir(v)
-			}
-		}
-		if pkiDir != "" {
-			if err := bootstrap.EnsurePKIFiles(pkiDir, bankCode, "", "", ""); err != nil {
-				log.Printf("WARN: PKI bootstrap failed: %v", err)
-			}
-		}
-	}
-
-	var ca *compliancepki.CA
-	if os.Getenv("CA_CERT_FILE") != "" {
-		var err error
-		ca, err = compliancepki.NewCAFromEnv()
-		if err != nil {
-			log.Fatalf("compliance: load CA: %v", err)
-		}
-		log.Println("compliance: CA loaded from disk")
-	} else {
-		log.Println("WARN: CA_CERT_FILE not set — certificate issuance disabled (dev mode)")
+	ca, err := bootstrapAndLoadCA()
+	if err != nil {
+		log.Fatalf("compliance: load CA: %v", err)
 	}
 
 	if ca != nil {
@@ -148,4 +123,42 @@ func firstNonEmptyEnv(names ...string) string {
 		}
 	}
 	return ""
+}
+
+// bootstrapAndLoadCA generates this entity's PKI material if it is missing, then loads the
+// CA the rest of the service issues with. Nil (with no error) when CA_CERT_FILE is unset,
+// which disables issuance.
+//
+// The ORDER is the point, and is why this is a function rather than a run of statements in
+// main: the bootstrap is what CREATES the CA that the load then reads. Loading first worked
+// only while CA_CERT_FILE happened to name a file another component had already written —
+// and once it named {bankCode}-ca.crt, that ordering was a fatal on every first boot.
+// TestBootstrapAndLoadCAOnAnEmptyDir fails if the two are ever swapped back.
+func bootstrapAndLoadCA() (*compliancepki.CA, error) {
+	if bankCode := os.Getenv("BANK_CODE"); bankCode != "" {
+		pkiDir := getEnv("PKI_DIR", "")
+		if pkiDir == "" {
+			if v := os.Getenv("CA_CERT_FILE"); v != "" {
+				pkiDir = filepath.Dir(v)
+			}
+		}
+		if pkiDir != "" {
+			if err := bootstrap.EnsurePKIFiles(pkiDir, bankCode, "", "", ""); err != nil {
+				// Not fatal on its own: an entity whose material was provisioned elsewhere
+				// still boots. The CA load below is what decides whether issuance works.
+				log.Printf("WARN: PKI bootstrap failed: %v", err)
+			}
+		}
+	}
+
+	if os.Getenv("CA_CERT_FILE") == "" {
+		log.Println("WARN: CA_CERT_FILE not set — certificate issuance disabled (dev mode)")
+		return nil, nil
+	}
+	ca, err := compliancepki.NewCAFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	log.Println("compliance: CA loaded from disk")
+	return ca, nil
 }

@@ -190,8 +190,10 @@ func writeFile(path, content string, mode os.FileMode) error {
 // pki.GenerateCSR produces so the two paths are indistinguishable downstream.
 //
 // It exists so ensureCSR can adopt a key rather than replace it. Written here with the
-// standard library rather than added to backend/shared/identity: that package is the
-// versioned library BOTH scenarios import, and this is a Scenario B defect.
+// standard library rather than added to backend/shared/identity: that package is imported
+// by five services in this scenario, and a new exported helper there is a wider surface
+// than one unexported function needs. (Each scenario carries its OWN copy of that package,
+// so adding to it would not have crossed the scenario boundary — that is not the reason.)
 func csrFromExistingKey(keyPath, bankCode, institutionName, country, role string) (string, error) {
 	keyPEM, err := os.ReadFile(keyPath)
 	if err != nil {
