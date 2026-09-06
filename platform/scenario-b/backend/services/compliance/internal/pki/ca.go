@@ -7,8 +7,10 @@ package pki
 
 import (
 	"crypto"
+	"crypto/ecdsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 
@@ -45,6 +47,12 @@ func NewCAFromEnv() (*CA, error) {
 	// only at the first bank's onboarding, weeks later, with an x509 error naming neither
 	// file. A CA that cannot sign is not a CA; say so here, where the operator is looking.
 	if err := assertKeyMatchesCert(string(certPEM), string(keyPEM)); err != nil {
+		// "are not a pair" only when they genuinely are not. A key this loader cannot READ
+		// is a different fault with a different remedy, and reporting it as a mismatch
+		// sends an operator to regenerate a key that may be the correct one.
+		if errors.Is(err, errUnreadableKey) {
+			return nil, fmt.Errorf("compliance/pki: CA_KEY_FILE %s could not be read as an EC private key: %w", keyFile, err)
+		}
 		return nil, fmt.Errorf("compliance/pki: CA_CERT_FILE %s and CA_KEY_FILE %s are not a pair: %w", certFile, keyFile, err)
 	}
 
@@ -66,11 +74,11 @@ func assertKeyMatchesCert(certPEM, keyPEM string) error {
 	}
 	keyBlock, _ := pem.Decode([]byte(keyPEM))
 	if keyBlock == nil {
-		return fmt.Errorf("no PEM block in the key")
+		return fmt.Errorf("%w: no PEM block in the key", errUnreadableKey)
 	}
-	key, err := x509.ParseECPrivateKey(keyBlock.Bytes)
+	key, err := parseECKey(keyBlock.Bytes)
 	if err != nil {
-		return fmt.Errorf("parse EC private key: %w", err)
+		return err
 	}
 	pub, ok := cert.PublicKey.(interface{ Equal(crypto.PublicKey) bool })
 	if !ok {
@@ -116,4 +124,32 @@ func (ca *CA) IssueParticipantCert(userID, institutionName, role string) (pki.Is
 		return pki.IssuedCert{}, fmt.Errorf("compliance/pki: issue cert for %s: %w", userID, err)
 	}
 	return issued, nil
+}
+
+// errUnreadableKey marks a key the loader cannot decode at all, as opposed to one that
+// decodes fine and simply belongs to a different certificate. The two have different
+// remedies, so NewCAFromEnv reports them differently.
+var errUnreadableKey = errors.New("unreadable private key")
+
+// parseECKey reads an EC private key in either encoding this deployment can hold.
+//
+// Everything in this repository writes SEC1 ("EC PRIVATE KEY", x509.MarshalECPrivateKey).
+// A key placed by hand very likely does not: `openssl genpkey` has defaulted to PKCS#8
+// ("PRIVATE KEY") since OpenSSL 3, and at least one central bank's material was repaired
+// by hand before this validation existed. Refusing PKCS#8 would fail the boot over an
+// encoding, not over anything about whether the key is the right one — and because this
+// check is fatal, that fault presents as a crash loop rather than as a warning.
+func parseECKey(der []byte) (*ecdsa.PrivateKey, error) {
+	if key, err := x509.ParseECPrivateKey(der); err == nil {
+		return key, nil
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(der)
+	if err != nil {
+		return nil, fmt.Errorf("%w: not SEC1 (\"EC PRIVATE KEY\") or PKCS#8 (\"PRIVATE KEY\"): %v", errUnreadableKey, err)
+	}
+	key, ok := parsed.(*ecdsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("%w: key is %T; this PKI is EC (prime256v1)", errUnreadableKey, parsed)
+	}
+	return key, nil
 }

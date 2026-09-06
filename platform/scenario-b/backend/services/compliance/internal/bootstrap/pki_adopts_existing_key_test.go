@@ -3,6 +3,8 @@
 package bootstrap
 
 import (
+	"crypto/x509"
+	"encoding/pem"
 	"os"
 	"path/filepath"
 	"testing"
@@ -102,4 +104,49 @@ func mustRead(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(b)
+}
+
+// TestEnsurePKIFilesAdoptsAPKCS8Key covers the key a human leaves, not the one gen-tls
+// leaves.
+//
+// Everything in this repository writes SEC1 ("EC PRIVATE KEY"), but `openssl genpkey` has
+// defaulted to PKCS#8 ("PRIVATE KEY") since OpenSSL 3, and hand repair is precisely the
+// situation in which this code meets a key it did not create. Refusing that encoding would
+// abandon the adoption path exactly where it is needed and fall back to replacing the key —
+// the behaviour this whole change exists to stop.
+func TestEnsurePKIFilesAdoptsAPKCS8Key(t *testing.T) {
+	dir := t.TempDir()
+	const bankCode = "central-bank"
+
+	certPEM, sec1PEM, err := pki.GenerateSelfSignedCA("repaired-by-hand", "org", 1)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	block, _ := pem.Decode([]byte(sec1PEM))
+	if block == nil {
+		t.Fatal("no PEM block in the seeded key")
+	}
+	key, err := x509.ParseECPrivateKey(block.Bytes)
+	if err != nil {
+		t.Fatalf("parse SEC1: %v", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal PKCS#8: %v", err)
+	}
+	pkcs8PEM := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+
+	keyPath := filepath.Join(dir, bankCode+".key")
+	mustWrite(t, keyPath, pkcs8PEM)
+	mustWrite(t, filepath.Join(dir, bankCode+".crt"), certPEM)
+
+	if err := EnsurePKIFiles(dir, bankCode, "", "", ""); err != nil {
+		t.Fatalf("EnsurePKIFiles: %v", err)
+	}
+	if got := mustRead(t, keyPath); got != pkcs8PEM {
+		t.Error("a PKCS#8 key was replaced instead of adopted; the certificate beside it is now unusable")
+	}
+	if _, err := os.Stat(filepath.Join(dir, bankCode+".csr")); err != nil {
+		t.Errorf("no CSR was derived from the adopted PKCS#8 key: %v", err)
+	}
 }

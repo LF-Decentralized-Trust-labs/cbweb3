@@ -3,6 +3,7 @@
 package bootstrap
 
 import (
+	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -191,9 +192,9 @@ func writeFile(path, content string, mode os.FileMode) error {
 //
 // It exists so ensureCSR can adopt a key rather than replace it. Written here with the
 // standard library rather than added to backend/shared/identity: that package is imported
-// by five services in this scenario, and a new exported helper there is a wider surface
-// than one unexported function needs. (Each scenario carries its OWN copy of that package,
-// so adding to it would not have crossed the scenario boundary — that is not the reason.)
+// by auth and compliance, and a new exported helper there is a wider surface than one
+// unexported function needs. (Each scenario carries its OWN copy of that package, so
+// adding to it would not have crossed the scenario boundary — that is not the reason.)
 func csrFromExistingKey(keyPath, bankCode, institutionName, country, role string) (string, error) {
 	keyPEM, err := os.ReadFile(keyPath)
 	if err != nil {
@@ -203,9 +204,9 @@ func csrFromExistingKey(keyPath, bankCode, institutionName, country, role string
 	if block == nil {
 		return "", fmt.Errorf("no PEM block in %s", keyPath)
 	}
-	key, err := x509.ParseECPrivateKey(block.Bytes)
+	key, err := parseECKey(block.Bytes)
 	if err != nil {
-		return "", fmt.Errorf("parse EC private key: %w", err)
+		return "", err
 	}
 
 	org := institutionName
@@ -231,4 +232,27 @@ func csrFromExistingKey(keyPath, bankCode, institutionName, country, role string
 		return "", fmt.Errorf("create CSR: %w", err)
 	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})), nil
+}
+
+// parseECKey reads an EC private key in either encoding the tooling around this service
+// produces.
+//
+// Everything in this repository writes SEC1 ("EC PRIVATE KEY", x509.MarshalECPrivateKey),
+// but a key placed by hand almost certainly is not: `openssl genpkey` has defaulted to
+// PKCS#8 ("PRIVATE KEY") since OpenSSL 3, and hand repair is exactly the situation this
+// code meets a key it did not create. Refusing the other encoding would reject the right
+// key for the wrong reason — the encoding says nothing about whether the key is correct.
+func parseECKey(der []byte) (*ecdsa.PrivateKey, error) {
+	if key, err := x509.ParseECPrivateKey(der); err == nil {
+		return key, nil
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(der)
+	if err != nil {
+		return nil, fmt.Errorf("parse private key: not SEC1 (\"EC PRIVATE KEY\") or PKCS#8 (\"PRIVATE KEY\"): %w", err)
+	}
+	key, ok := parsed.(*ecdsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("private key is %T; this PKI is EC (prime256v1)", parsed)
+	}
+	return key, nil
 }
