@@ -814,8 +814,8 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// already uses to sign that leaf. Pointing the issuer at the leaf was wrong even
 		// while the pair happened to agree, and once the two producers of those filenames
 		// disagreed it made every credential issuance fail.
-		"CA_CERT_FILE":   "/workspace/backend/config/pki/central-bank-ca.crt",
-		"CA_KEY_FILE":    "/workspace/backend/config/pki/central-bank-ca.key",
+		"CA_CERT_FILE": "/workspace/backend/config/pki/central-bank-ca.crt",
+		"CA_KEY_FILE":  "/workspace/backend/config/pki/central-bank-ca.key",
 		// Shared secret for the hub-mediated M2M endpoints + cross-currency bridge
 		// delegation (a bank delegates bridge-in lock-mint to its CB; bridge-out to CB-B).
 		"INTERNAL_RELAY_AUTH_SECRET": HubRelayAuthSecret,
