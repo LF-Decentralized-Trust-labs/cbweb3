@@ -36,21 +36,12 @@ func main() {
 		}
 	}
 
-	var ca *compliancepki.CA
-	if os.Getenv("CA_CERT_FILE") != "" {
-		var err error
-		ca, err = compliancepki.NewCAFromEnv()
-		if err != nil {
-			log.Fatalf("compliance: load CA: %v", err)
-		}
-		log.Println("compliance: CA loaded from disk")
-	} else {
-		log.Println("WARN: CA_CERT_FILE not set — certificate issuance disabled (dev mode)")
-	}
-
 	bc := newBlockchainClient()
 
-	// Bootstrap PKI files for commercial banks (idempotent).
+	// PKI bootstrap runs BEFORE the CA is loaded, because it is what CREATES the CA.
+	// Loading first worked only while CA_CERT_FILE named a file some other step had already
+	// written; now that it names this bootstrap's own {bankCode}-ca.crt, a first boot would
+	// otherwise die reading a file it was about to generate.
 	if bankCode := os.Getenv("BANK_CODE"); bankCode != "" {
 		pkiDir := getEnv("PKI_DIR", "")
 		if pkiDir == "" {
@@ -63,6 +54,18 @@ func main() {
 				log.Printf("WARN: PKI bootstrap failed: %v", err)
 			}
 		}
+	}
+
+	var ca *compliancepki.CA
+	if os.Getenv("CA_CERT_FILE") != "" {
+		var err error
+		ca, err = compliancepki.NewCAFromEnv()
+		if err != nil {
+			log.Fatalf("compliance: load CA: %v", err)
+		}
+		log.Println("compliance: CA loaded from disk")
+	} else {
+		log.Println("WARN: CA_CERT_FILE not set — certificate issuance disabled (dev mode)")
 	}
 
 	if ca != nil {

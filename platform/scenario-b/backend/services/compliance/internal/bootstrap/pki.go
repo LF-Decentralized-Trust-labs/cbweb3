@@ -3,6 +3,10 @@
 package bootstrap
 
 import (
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"log"
 	"os"
@@ -99,6 +103,27 @@ func ensureCSR(csrPath, keyPath, bankCode, institutionName, country, role string
 		return string(csrBytes), nil
 	}
 
+	// A key WITHOUT a CSR is not "nothing here": it is the state the toolkit's gen-tls step
+	// leaves behind, and generating a fresh pair over it silently replaced a private key this
+	// service did not create. Its certificate stayed — ensureCert skips an existing file — so
+	// {bankCode}.crt and {bankCode}.key ended up holding two different keys, and every
+	// issuance from that pair failed with "x509: provided PrivateKey doesn't match parent's
+	// PublicKey" weeks later, at the first bank's onboarding.
+	//
+	// Derive the CSR from the key that is already there instead. That honours what this
+	// function's own doc comment has always claimed — existing files are never overwritten.
+	if fileExists(keyPath) {
+		csrPEM, err := csrFromExistingKey(keyPath, bankCode, institutionName, country, role)
+		if err != nil {
+			return "", fmt.Errorf("bootstrap/pki: derive CSR from the existing key at %s: %w", keyPath, err)
+		}
+		if err := writeFile(csrPath, csrPEM, 0644); err != nil {
+			return "", err
+		}
+		log.Printf("bootstrap/pki: reused the existing key at %s and wrote its CSR to %s", keyPath, csrPath)
+		return csrPEM, nil
+	}
+
 	org := institutionName
 	if org == "" {
 		org = bankCode
@@ -159,4 +184,49 @@ func writeFile(path, content string, mode os.FileMode) error {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
 	return os.WriteFile(path, []byte(content), mode)
+}
+
+// csrFromExistingKey builds a CSR for a key already on disk, with the same subject shape
+// pki.GenerateCSR produces so the two paths are indistinguishable downstream.
+//
+// It exists so ensureCSR can adopt a key rather than replace it. Written here with the
+// standard library rather than added to backend/shared/identity: that package is the
+// versioned library BOTH scenarios import, and this is a Scenario B defect.
+func csrFromExistingKey(keyPath, bankCode, institutionName, country, role string) (string, error) {
+	keyPEM, err := os.ReadFile(keyPath)
+	if err != nil {
+		return "", err
+	}
+	block, _ := pem.Decode(keyPEM)
+	if block == nil {
+		return "", fmt.Errorf("no PEM block in %s", keyPath)
+	}
+	key, err := x509.ParseECPrivateKey(block.Bytes)
+	if err != nil {
+		return "", fmt.Errorf("parse EC private key: %w", err)
+	}
+
+	org := institutionName
+	if org == "" {
+		org = bankCode
+	}
+	if country == "" {
+		country = "BR"
+	}
+	if role == "" {
+		role = "ROLE_COMMERCIAL_BANK"
+	}
+
+	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		Subject: pkix.Name{
+			CommonName:         bankCode,
+			Organization:       []string{org},
+			OrganizationalUnit: []string{role},
+			Country:            []string{country},
+		},
+	}, key)
+	if err != nil {
+		return "", fmt.Errorf("create CSR: %w", err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})), nil
 }

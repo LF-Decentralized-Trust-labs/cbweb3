@@ -808,8 +808,14 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// mTLS activates only when GRPC_MTLS_ENABLE is exported (gated in the
 		// templates); default-off keeps the existing plaintext transport.
 		"SVC_TLS_VOLUME": c.svcTLSVolume(),
-		"CA_CERT_FILE":   "/workspace/backend/config/pki/central-bank.crt",
-		"CA_KEY_FILE":    "/workspace/backend/config/pki/central-bank.key",
+		// The CA, not the participant leaf. central-bank.crt/.key are this entity's OWN
+		// credential — one of the files gen-tls writes — while central-bank-ca.* is the
+		// self-signed authority the compliance bootstrap creates as a matched pair and
+		// already uses to sign that leaf. Pointing the issuer at the leaf was wrong even
+		// while the pair happened to agree, and once the two producers of those filenames
+		// disagreed it made every credential issuance fail.
+		"CA_CERT_FILE":   "/workspace/backend/config/pki/central-bank-ca.crt",
+		"CA_KEY_FILE":    "/workspace/backend/config/pki/central-bank-ca.key",
 		// Shared secret for the hub-mediated M2M endpoints + cross-currency bridge
 		// delegation (a bank delegates bridge-in lock-mint to its CB; bridge-out to CB-B).
 		"INTERNAL_RELAY_AUTH_SECRET": HubRelayAuthSecret,
