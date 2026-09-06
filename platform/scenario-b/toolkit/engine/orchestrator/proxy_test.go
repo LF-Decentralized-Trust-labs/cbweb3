@@ -151,11 +151,13 @@ func TestSpokeConfigProxyWiring(t *testing.T) {
 	if len(routes) != 4 {
 		t.Fatalf("want 4 routes, got %d", len(routes))
 	}
-	if routes[0].Upstream != "sc-b-cbweb3-central-bank-brazil-central-bank-governance-frontend:80" {
+	// The network ALIAS, not the container name: the container name repeats the role and
+	// overflows the 63-octet DNS label on a longer entity (see TestProxyUpstreamsFitDNSLabel).
+	if routes[0].Upstream != "central-bank-brazil-governance:80" {
 		t.Errorf("governance upstream = %q", routes[0].Upstream)
 	}
 	api := routes[3]
-	if !api.IsAPI || api.Upstream != "sc-b-cbweb3-central-bank-brazil-central-bank-api-gateway:8080" {
+	if !api.IsAPI || api.Upstream != "central-bank-brazil-api-gateway:8080" {
 		t.Errorf("api route = %+v", api)
 	}
 }
@@ -179,7 +181,7 @@ func TestJoinConfigProxyRoutes(t *testing.T) {
 		NetPrefix: "bank-itau", RPCPort: 10545, FrontendHost: "itau.example", ProxyEnabled: true}
 	routes := c.ProxyRoutes()
 	if len(routes) != 2 || routes[0].Segment != "bank" ||
-		routes[0].Upstream != "sc-b-cbweb3-bank-itau-bank-itau-frontend:80" {
+		routes[0].Upstream != "bank-itau-bank:80" {
 		t.Fatalf("bank routes = %+v", routes)
 	}
 	if c.corsOrigins() != "https://itau.example" {

@@ -28,7 +28,15 @@ services:
     ports:
       - "${FRONTEND_PORT:?}:80"
     networks:
-      - entity_net
+      entity_net:
+        # Short, entity-unique alias for the reverse proxy. The container_name is
+        # "${CONTAINER_PREFIX}-${ENTITY}-frontend" and a DNS label stops at 63 octets
+        # (RFC 1035), so a long enough bank id makes the full name unresolvable and every
+        # portal request answers 502. See cb-frontend.compose.yaml for the incident this
+        # comes from; ProxyRoutes() must point here, and TestProxyUpstreamsFitDNSLabel
+        # fails if it drifts back to the container name.
+        aliases:
+          - "${ENTITY_NET_PREFIX:?}-bank"
     restart: always
 
 networks:

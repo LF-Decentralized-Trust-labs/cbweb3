@@ -612,16 +612,22 @@ func (c SpokeConfig) corsOrigins() string {
 // NetName is this entity's external docker network (created by the infra step).
 func (c SpokeConfig) NetName() string { return c.NetPrefix + "_net" }
 
-// frontendContainer is the container name of a CB operator portal on the entity network
-// (must match cb-frontend.compose.yaml: <CONTAINER_PREFIX>-<ENTITY>-<role>-frontend).
-func (c SpokeConfig) frontendContainer(role string) string {
-	return fmt.Sprintf("%s-%s-%s-frontend", c.ContainerPrefix, c.Entity, role)
+// frontendAlias is the network alias the reverse proxy resolves a CB portal by
+// (must match the aliases in cb-frontend.compose.yaml).
+//
+// The container name cannot serve here. A DNS label stops at 63 octets (RFC 1035), and a
+// CB's container name repeats the role — "sc-b-cbweb3-central-bank-costa-rica-central-
+// bank-governance-frontend" is 68 — so Docker's embedded DNS refuses it and the portal
+// answers 502 through the proxy while the shorter api-gateway name keeps working. The
+// alias is built from the entity network prefix, which is unique per entity and short.
+func (c SpokeConfig) frontendAlias(role string) string {
+	return fmt.Sprintf("%s-%s", c.NetPrefix, role)
 }
 
-// apiGatewayContainer is the api-gateway container name on the entity network
-// (must match entity-backend.compose.yaml: <CONTAINER_PREFIX>-<ENTITY>-api-gateway).
-func (c SpokeConfig) apiGatewayContainer() string {
-	return fmt.Sprintf("%s-%s-api-gateway", c.ContainerPrefix, c.Entity)
+// apiGatewayAlias is the network alias the reverse proxy resolves the gateway by
+// (must match the alias in entity-backend.compose.yaml).
+func (c SpokeConfig) apiGatewayAlias() string {
+	return c.NetPrefix + "-api-gateway"
 }
 
 // ProxyRoutes are the path routes the reverse proxy exposes for this CB: its three
@@ -629,10 +635,10 @@ func (c SpokeConfig) apiGatewayContainer() string {
 // port-based); see proxy step docs.
 func (c SpokeConfig) ProxyRoutes() []ProxyRoute {
 	return []ProxyRoute{
-		{Segment: "governance", Upstream: c.frontendContainer("governance") + ":80"},
-		{Segment: "treasury", Upstream: c.frontendContainer("treasury") + ":80"},
-		{Segment: "supervisor", Upstream: c.frontendContainer("supervisor") + ":80"},
-		{Segment: "api", Upstream: c.apiGatewayContainer() + ":8080", IsAPI: true},
+		{Segment: "governance", Upstream: c.frontendAlias("governance") + ":80"},
+		{Segment: "treasury", Upstream: c.frontendAlias("treasury") + ":80"},
+		{Segment: "supervisor", Upstream: c.frontendAlias("supervisor") + ":80"},
+		{Segment: "api", Upstream: c.apiGatewayAlias() + ":8080", IsAPI: true},
 	}
 }
 

@@ -299,7 +299,14 @@ services:
     ports:
       - "${GATEWAY_PORT:?}:8080"
     networks:
-      - entity_net
+      entity_net:
+        # Short, entity-unique alias for the reverse proxy. The container_name is 60
+        # octets for a central bank named "costa-rica" — inside the 63-octet DNS label
+        # limit (RFC 1035), but only just, and the three portals beside it already
+        # overflowed it and answered 502. Routing through the alias makes the bound hold
+        # for any entity name rather than for the ones tried so far.
+        aliases:
+          - "${ENTITY_NET_PREFIX:?}-api-gateway"
     restart: always
 
 networks:
