@@ -28,7 +28,11 @@ import (
 func TestUnverifiedCallerRefusalsCarryACode(t *testing.T) {
 	t.Parallel()
 
-	// The api-gateway's HTTP layer, from this package's directory.
+	// The api-gateway's HTTP layer, from this package's directory. These two are the
+	// whole of it, not a sample: every VerifiedRelayCaller call site in the service lives
+	// in one of them (7 of 7 at the time of writing). A package that starts calling it —
+	// a router/v2 handler, say — has to be added here, and nothing will say so, which is
+	// why the reason is recorded rather than left to be re-derived.
 	roots := []string{".", "../middleware"}
 
 	for _, root := range roots {
@@ -54,27 +58,22 @@ func TestUnverifiedCallerRefusalsCarryACode(t *testing.T) {
 // checkUnverifiedCallerRefusals reports any StatusUnauthorized response that follows a
 // VerifiedRelayCaller check without naming a code.
 //
-// The refusal literal is read to its closing "})" in the full source rather than inside a
-// fixed line window: a window long enough for today's call sites silently stops covering one
-// that grows a comment, which is a guard that quietly reports success.
+// The span searched runs from the check to the end of its enclosing function, not to a
+// fixed number of lines ahead. A line count is the failure this guard was written about:
+// the first draft used one, and an explanatory comment growing between the check and the
+// refusal pushed the refusal out of the window — so the guard stopped seeing the very
+// call site it exists for and reported success in silence. Bounding by the function has
+// no number to outgrow.
 func checkUnverifiedCallerRefusals(t *testing.T, path, src string) {
 	t.Helper()
-	lines := strings.Split(src, "\n")
-	for i, line := range lines {
-		if !strings.Contains(line, "VerifiedRelayCaller(") {
-			continue
-		}
-		lookahead := i + 25
-		if lookahead > len(lines) {
-			lookahead = len(lines)
-		}
-		rel := strings.Index(strings.Join(lines[i:lookahead], "\n"), "StatusUnauthorized")
+	for _, span := range unverifiedCallerSpans(src) {
+		rel := strings.Index(span.body, "StatusUnauthorized")
 		if rel < 0 {
 			continue
 		}
-		// Re-anchor in the full source so the literal can be read past the lookahead.
-		abs := strings.Index(src, strings.Join(lines[i:lookahead], "\n")) + rel
-		refusal := src[abs:]
+		refusal := span.body[rel:]
+		// The response literal ends at its closing "})"; read only that far, so a coded
+		// refusal later in the same function cannot vouch for an uncoded one.
 		if closing := strings.Index(refusal, "})"); closing >= 0 {
 			refusal = refusal[:closing]
 		}
@@ -82,7 +81,47 @@ func checkUnverifiedCallerRefusals(t *testing.T, path, src string) {
 			t.Errorf("%s:%d: a 401 raised because there is no verified caller carries no \"code\".\n"+
 				"\tThe bank portal reads the code to tell a trust rejection from an expired session; without one it\n"+
 				"\trefreshes, retries and logs the operator out. Use RELAY_CALLER_IDENTITY_REQUIRED, as the middleware does.",
-				path, i+1)
+				path, span.line)
 		}
 	}
+}
+
+// callerSpan is one VerifiedRelayCaller check and the rest of the function holding it.
+type callerSpan struct {
+	line int    // 1-indexed line of the check, for the failure message
+	body string // source from the check to the end of its enclosing function
+}
+
+// unverifiedCallerSpans slices the file at every VerifiedRelayCaller call site.
+//
+// The end of a span is the next top-level declaration — a line beginning "func " at
+// column 0 — which is where the enclosing function must have closed. That is a cheap
+// stand-in for parsing, and it errs the safe way: if it ever over-reads it examines more
+// source than needed, never less.
+func unverifiedCallerSpans(src string) []callerSpan {
+	lines := strings.Split(src, "\n")
+
+	// Byte offset of the start of each line, so a span can be cut from the full source.
+	offsets := make([]int, len(lines))
+	at := 0
+	for i, l := range lines {
+		offsets[i] = at
+		at += len(l) + 1 // +1 for the newline consumed by Split
+	}
+
+	var spans []callerSpan
+	for i, line := range lines {
+		if !strings.Contains(line, "VerifiedRelayCaller(") {
+			continue
+		}
+		end := len(src)
+		for j := i + 1; j < len(lines); j++ {
+			if strings.HasPrefix(lines[j], "func ") {
+				end = offsets[j]
+				break
+			}
+		}
+		spans = append(spans, callerSpan{line: i + 1, body: src[offsets[i]:end]})
+	}
+	return spans
 }
