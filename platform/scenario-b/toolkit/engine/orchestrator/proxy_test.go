@@ -180,8 +180,10 @@ func TestJoinConfigProxyRoutes(t *testing.T) {
 	c := JoinConfig{ContainerPrefix: "sc-b-cbweb3-bank-itau", Entity: "bank-itau",
 		NetPrefix: "bank-itau", RPCPort: 10545, FrontendHost: "itau.example", ProxyEnabled: true}
 	routes := c.ProxyRoutes()
+	// "-frontend", not "-bank": entity-frontend.compose.yaml is rendered for a joining
+	// bank AND for the hub, and its single service is "frontend" in both.
 	if len(routes) != 2 || routes[0].Segment != "bank" ||
-		routes[0].Upstream != "bank-itau-bank:80" {
+		routes[0].Upstream != "bank-itau-frontend:80" {
 		t.Fatalf("bank routes = %+v", routes)
 	}
 	if c.corsOrigins() != "https://itau.example" {

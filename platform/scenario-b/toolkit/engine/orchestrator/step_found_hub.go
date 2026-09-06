@@ -221,14 +221,26 @@ func (c HubConfig) corsOrigins() string {
 // NetName is the hub's external docker network (created by the infra step).
 func (c HubConfig) NetName() string { return c.NetPrefix + "_net" }
 
+// frontendAlias / apiGatewayAlias are the network aliases the reverse proxy resolves the
+// hub's portal and gateway by (must match entity-frontend.compose.yaml and
+// entity-backend.compose.yaml, which the hub renders with ENTITY=hub).
+//
+// Container names cannot serve, for the reason the CB and bank paths already moved off
+// them: a DNS label stops at 63 octets (RFC 1035) and the container name carries the
+// container prefix and the entity role, so a long enough hub name makes it unresolvable
+// and every proxied request answers 502. The hub's own names are short today —
+// "sc-b-cbweb3-hub-hub-frontend" is 28 — but the bound has to hold for the name someone
+// chooses next, not for the one in the samples.
+func (c HubConfig) frontendAlias() string   { return c.NetPrefix + "-frontend" }
+func (c HubConfig) apiGatewayAlias() string { return c.NetPrefix + "-api-gateway" }
+
 // ProxyRoutes are the path routes the reverse proxy exposes for the hub: its governance
-// portal + the api-gateway (container names match entity-frontend/entity-backend with
-// ENTITY=hub). The hub has no launcher, so the proxy also root-redirects to governance.
+// portal + the api-gateway. The hub has no launcher, so the proxy also root-redirects to
+// governance.
 func (c HubConfig) ProxyRoutes() []ProxyRoute {
 	return []ProxyRoute{
-		// entity-frontend.compose.yaml has a single `frontend` service: <PREFIX>-hub-frontend.
-		{Segment: "governance", Upstream: fmt.Sprintf("%s-hub-frontend", c.ContainerPrefix) + ":80"},
-		{Segment: "api", Upstream: fmt.Sprintf("%s-hub-api-gateway", c.ContainerPrefix) + ":8080", IsAPI: true},
+		{Segment: "governance", Upstream: c.frontendAlias() + ":80"},
+		{Segment: "api", Upstream: c.apiGatewayAlias() + ":8080", IsAPI: true},
 	}
 }
 

@@ -46,6 +46,21 @@ func TestComposeAliasesMatchProxyRoutes(t *testing.T) {
 	if want := bank.bankFrontendAlias(); !bankAliases[want] {
 		t.Errorf("entity-frontend.compose.yaml declares no alias %q\n\tdeclared: %v", want, keysOf(bankAliases))
 	}
+
+	// The hub renders the SAME two templates with ENTITY=hub, so its routes are pinned
+	// against them as well. Leaving it out is how it stayed on container names while the
+	// CB and bank paths moved off: the guard covered the paths the outage touched, and
+	// the one it did not cover was the one still carrying the defect.
+	hubPrefix := "hub-cbweb3"
+	hub := HubConfig{NetPrefix: hubPrefix}
+	hubFrontend := templateAliases(t, "entity-frontend.compose.yaml", hubPrefix)
+	if want := hub.frontendAlias(); !hubFrontend[want] {
+		t.Errorf("entity-frontend.compose.yaml declares no alias %q for the hub\n\tdeclared: %v", want, keysOf(hubFrontend))
+	}
+	hubGateway := templateAliases(t, "entity-backend.compose.yaml", hubPrefix)
+	if want := hub.apiGatewayAlias(); !hubGateway[want] {
+		t.Errorf("entity-backend.compose.yaml declares no alias %q for the hub\n\tdeclared: %v", want, keysOf(hubGateway))
+	}
 }
 
 // templateAliases reads a template's declared aliases with ENTITY_NET_PREFIX resolved.

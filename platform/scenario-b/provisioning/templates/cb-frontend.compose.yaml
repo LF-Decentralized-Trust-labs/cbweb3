@@ -37,7 +37,7 @@ x-logging: &cbweb3_logging
 # resolves it (docker logs and the noc-agent address containers over the socket, not DNS).
 #
 # ProxyRoutes() in toolkit/engine/orchestrator must point at these aliases, not at
-# container_name. TestProxyUpstreamsFitDNSLabel and TestCBFrontendAliasesMatchProxyRoutes
+# container_name. TestProxyUpstreamsFitDNSLabel and TestComposeAliasesMatchProxyRoutes
 # fail if either half drifts.
 services:
   governance-frontend:

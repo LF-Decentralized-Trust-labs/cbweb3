@@ -31,12 +31,16 @@ services:
       entity_net:
         # Short, entity-unique alias for the reverse proxy. The container_name is
         # "${CONTAINER_PREFIX}-${ENTITY}-frontend" and a DNS label stops at 63 octets
-        # (RFC 1035), so a long enough bank id makes the full name unresolvable and every
-        # portal request answers 502. See cb-frontend.compose.yaml for the incident this
-        # comes from; ProxyRoutes() must point here, and TestProxyUpstreamsFitDNSLabel
+        # (RFC 1035), so a long enough entity id makes the full name unresolvable and
+        # every portal request answers 502. See cb-frontend.compose.yaml for the incident
+        # this comes from; ProxyRoutes() must point here, and TestProxyUpstreamsFitDNSLabel
         # fails if it drifts back to the container name.
+        #
+        # "-frontend", not "-bank": this template is rendered for a joining BANK and for
+        # the HUB (step_found_hub.go renders it with ENTITY=hub), and the service it names
+        # is "frontend" in both. ENTITY_NET_PREFIX keeps it unique per entity.
         aliases:
-          - "${ENTITY_NET_PREFIX:?}-bank"
+          - "${ENTITY_NET_PREFIX:?}-frontend"
     restart: always
 
 networks:

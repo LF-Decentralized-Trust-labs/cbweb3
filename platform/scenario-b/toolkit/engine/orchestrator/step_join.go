@@ -253,7 +253,7 @@ func (c JoinConfig) NetName() string { return c.NetPrefix + "_net" }
 // container name carries the full container prefix twice over, so a long enough entity id
 // makes it unresolvable and every proxied request answers 502. The alias is built from the
 // entity network prefix — unique per entity, and short.
-func (c JoinConfig) bankFrontendAlias() string { return c.NetPrefix + "-bank" }
+func (c JoinConfig) bankFrontendAlias() string { return c.NetPrefix + "-frontend" }
 
 func (c JoinConfig) apiGatewayAlias() string { return c.NetPrefix + "-api-gateway" }
 
