@@ -1,4 +1,4 @@
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27-alpine AS builder
 WORKDIR /workspace
 COPY shared/ shared/
 COPY services/api-gateway/ services/api-gateway/
@@ -15,7 +15,7 @@ RUN CGO_ENABLED=0 go build -o /app/service ./cmd/api-gateway
 # security fixes — the wrong pin for an image that ships. 3.23 is supported until
 # 2027-11-01. The other 3.20 references are throwaway `docker run --rm` helpers rather
 # than shipped images; bumping those is tracked separately.
-FROM alpine:3.23
+FROM alpine:3.24
 RUN apk --no-cache add ca-certificates
 COPY --from=builder /app/service /app/service
 # Non-root by default (finding R2-M-12). A fixed uid so a deployment can reason about
