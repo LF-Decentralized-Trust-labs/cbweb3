@@ -1,4 +1,4 @@
-FROM node:22-alpine AS builder
+FROM node:26-alpine AS builder
 
 WORKDIR /workspace/frontend
 
@@ -30,7 +30,7 @@ ENV VITE_LAUNCHER_URL=${VITE_LAUNCHER_URL}
 
 RUN npm run build --workspace=treasury
 
-FROM nginx:1.27-alpine
+FROM nginx:1.31-alpine
 
 COPY --from=builder /workspace/frontend/apps/treasury/dist /usr/share/nginx/html
 COPY nginx/spa.conf /etc/nginx/conf.d/default.conf
