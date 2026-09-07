@@ -597,6 +597,13 @@ the three contracts, and CI fails if one does not exist. That gate did not exist
 2026-08 realignment, which is exactly how seven fictional endpoints shipped green for four
 sessions.
 
+A vector writes the contract's templated path verbatim and puts the concrete values in
+`input.pathParams`, so the gate expands the one into the other before resolving. A
+`{{RUNTIME}}` value stands for a single opaque segment; a literal is percent-encoded, which
+is what keeps a slash-bearing `pair` identifier inside the one segment its template allows.
+An unanswered placeholder — or a parameter answering none — is reported as the copy-paste
+it is, not as a missing endpoint.
+
 ---
 
 ## How work is tracked

@@ -396,13 +396,14 @@
       "description": "Reads of an agreement that does not exist are translated from the downstream NotFound into 404 by grpcErrorToHTTP.",
       "category": "error",
       "preconditions": {
-        "session": "valid"
+        "session": "valid",
+        "tradeIdWellFormedButAbsent": "The id must parse as a trade id and simply not exist. A malformed id is a different test: it can be rejected before the lookup that produces this 404."
       },
       "input": {
         "method": "GET",
         "path": "/api/v1/payments/fx/agreements/{tradeId}",
         "pathParams": {
-          "tradeId": "trade-does-not-exist-0000"
+          "tradeId": "00000000-0000-0000-0000-000000000000"
         },
         "headers": {
           "Cookie": "access_token={{ACCESS_TOKEN}}"
