@@ -23,11 +23,36 @@ WHAT IT CHECKS
 2. Every vector in `Toolbox/test-vectors/*/*.json` has an `input.{method,path}` that
    resolves.
 3. The path resolves to a contract path *template*, and that template declares the method.
+4. Every `{placeholder}` a fixture path carries is answered by an `input.pathParams` entry,
+   and every `pathParams` entry answers a placeholder that is actually in the path.
 
 Concrete identifiers are matched against templated segments, so
 `/api/v1/payments/fx/agreements/aaeca49d-.../accept` resolves against
 `/api/v1/payments/fx/agreements/{tradeId}/accept`. Query strings are ignored: they are
 parameters, not paths.
+
+HOW A TEMPLATED FIXTURE PATH IS HANDLED
+---------------------------------------
+`Toolbox/test-vectors/README.md` fixes the convention: `input.path` is the contract's
+templated path *verbatim*, and the concrete values live in `input.pathParams`. So a vector
+legitimately reads
+
+    "path": "/api/v1/payments/fx/agreements/{tradeId}/accept",
+    "pathParams": {"tradeId": "{{TRADE_ID}}"}
+
+and this gate expands the one into the other before resolving. Three kinds of `pathParams`
+value are recognised:
+
+  * a `{{RUNTIME}}` substitution — an identifier the runner only learns at execution time,
+    such as the `trade_id` a previous vector returned. It stands for exactly one path
+    segment, so it is matched as one and its content is not inspected.
+  * a literal that contains `/` — `pair` identifiers really do look like
+    `W-tCeBM_BRL/W-tCeBM_ARS` (see the contract's own example). It is percent-encoded, as
+    a client must encode it, and therefore still occupies a single segment.
+  * any other literal — substituted as written.
+
+A placeholder with NO `pathParams` entry is the copy-paste this gate exists to catch, and
+is reported as exactly that rather than as a missing endpoint.
 
 A fixture may legitimately target any of the three contracts — a Scenario A mock resolves
 against `pvp`, a discovery mock against `amm`, a login mock against `auth`. The union is the
@@ -43,6 +68,7 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 
 try:
     import yaml
@@ -57,6 +83,14 @@ VECTOR_GLOB = os.path.join(REPO_ROOT, "Toolbox", "test-vectors", "*", "*.json")
 HTTP_METHODS = {
     "get", "put", "post", "delete", "options", "head", "patch", "trace",
 }
+
+# A single `{name}` placeholder in a path. It cannot span a `/`, so a contract template
+# never nests one, and `{{RUNTIME}}` markers only ever appear as pathParams *values*.
+PLACEHOLDER = re.compile(r"\{([^/{}]+)\}")
+
+# Stands in for a value the runner supplies at execution time. Any single non-empty
+# segment would do; this one cannot collide with a real identifier.
+RUNTIME_SEGMENT = "__runtime_substitution__"
 
 
 def rel(path: str) -> str:
@@ -105,9 +139,11 @@ class Surface:
     def resolve(self, path: str) -> list[str]:
         """Return every contract template the path resolves to, exact match first.
 
-        A fixture path still carrying `{placeholder}` is never a match, even though it
-        would compare equal to the contract template it was copied from. That equality is
-        what lets an unsubstituted copy-paste ship green, so it is rejected up front.
+        The path must already be concrete: `expand_path` has substituted `pathParams` and
+        rejected anything still templated. The brace guard below is the backstop for that,
+        because a path still carrying `{placeholder}` would compare equal to the contract
+        template it was copied from, and that equality is exactly what would let an
+        unsubstituted copy-paste ship green.
         """
         if "{" in path or "}" in path:
             return []
@@ -117,10 +153,56 @@ class Surface:
 
 
 # ---------------------------------------------------------------------------
+# Path expansion
+# ---------------------------------------------------------------------------
+def expand_path(path: str, path_params: dict[str, str]) -> tuple[str, list[str]]:
+    """Substitute `pathParams` into a templated fixture path.
+
+    Returns the concrete path and a list of problems. When there are problems the returned
+    path is not worth resolving, so the caller reports and stops.
+    """
+    problems: list[str] = []
+    used: set[str] = set()
+
+    def substitute(match: re.Match[str]) -> str:
+        name = match.group(1)
+        used.add(name)
+        if name not in path_params:
+            problems.append(
+                f"the path carries the placeholder {match.group(0)!r} but "
+                f"input.pathParams declares no value for {name!r}. A fixture path is the "
+                f"contract template verbatim; the concrete value belongs in pathParams."
+            )
+            return match.group(0)
+        value = path_params[name]
+        if not isinstance(value, str) or not value:
+            problems.append(
+                f"input.pathParams[{name!r}] is {value!r}; it must be a non-empty string."
+            )
+            return match.group(0)
+        if "{" in value or "}" in value:
+            # A {{RUNTIME}} substitution: one opaque segment, content not our business.
+            return RUNTIME_SEGMENT
+        # A literal. Percent-encode it exactly as a client must, so that a value which
+        # legitimately contains "/" still occupies the single segment the template allows.
+        return urllib.parse.quote(value, safe="")
+
+    expanded = PLACEHOLDER.sub(substitute, path)
+
+    for name in sorted(set(path_params) - used):
+        problems.append(
+            f"input.pathParams declares {name!r}, which the path does not contain. "
+            f"Either the path or the parameter was renamed and the other was not."
+        )
+
+    return expanded, problems
+
+
+# ---------------------------------------------------------------------------
 # Fixture checking
 # ---------------------------------------------------------------------------
 def check(surface: Surface, source: str, label: str, method: str, path: str,
-          failures: list[str]) -> None:
+          failures: list[str], path_params: dict[str, str] | None = None) -> None:
     if not method or not path:
         failures.append(f"{source}: {label} has no method or no path")
         return
@@ -132,11 +214,19 @@ def check(surface: Surface, source: str, label: str, method: str, path: str,
         failures.append(f"{source}: {label} path {path!r} is not absolute")
         return
 
-    matches = surface.resolve(bare)
+    concrete, problems = expand_path(bare, path_params or {})
+    if problems:
+        for problem in problems:
+            failures.append(f"{source}: {label} — {problem}\n        {method} {path}")
+        return
+
+    matches = surface.resolve(concrete)
     if not matches:
+        expansion = "" if concrete == bare else f"        Expanded to {concrete!r}.\n"
         failures.append(
             f"{source}: {label} — no contract declares the path {bare!r}.\n"
             f"        {method} {path}\n"
+            f"{expansion}"
             f"        Checked {len(surface.templates)} paths across "
             f"{', '.join(sorted(set(surface.contracts)))}."
         )
@@ -208,19 +298,22 @@ def main() -> int:
                 request.get("method", ""),
                 request.get("path", ""),
                 failures,
+                request.get("pathParams") or {},
             )
             vectors += 1
 
     print(f"Checked {mocks} mock fixture(s) and {vectors} test vector(s).")
 
     if failures:
-        print(f"\n{len(failures)} artifact path(s) do not resolve against any contract:\n")
+        print(f"\n{len(failures)} artifact path(s) did not check out:\n")
         for failure in failures:
             print(f"  - {failure}")
         print(
             "\nEvery mock and vector must target an endpoint that actually exists on a "
             "CBWeb3 gateway.\nIf the endpoint is real, publish it in the contract first. "
-            "Never invent one."
+            "Never invent one.\nIf the path is right but a placeholder went unanswered, "
+            "give it a value in input.pathParams\nrather than writing the concrete "
+            "identifier into input.path."
         )
         return 1
 

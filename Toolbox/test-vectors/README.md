@@ -46,7 +46,9 @@ done
 Two further CI gates apply to this directory:
 
 * **`tools/validate_artifact_paths.py`** — every `input.path` + `input.method` must resolve to a
-  real path and method in one of the three contracts. All 140 vectors pass this today.
+  real path and method in one of the three contracts. It expands `pathParams` into `path` first,
+  and enforces the convention in both directions: a `{placeholder}` with no `pathParams` entry
+  fails, and so does a `pathParams` entry naming no placeholder. All 140 vectors pass this today.
 * **`tools/verify_hashlocks.py`** — recomputes every documented secret/hash-lock pair. The only
   pair in this directory is the `syntheticSecrets` block of `pvp/pvp_htlc_vectors.json`; see
   [`pvp/README.md`](pvp/README.md) for its shape and its derivation rule.

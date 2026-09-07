@@ -73,7 +73,17 @@
             },
             "path": {
               "type": "string",
-              "pattern": "^/api/v\\d+/"
+              "pattern": "^/api/v\\d+/",
+              "description": "The contract's templated path, verbatim, so that CI can resolve it against the OpenAPI documents. Concrete values belong in pathParams, query parameters in query."
+            },
+            "pathParams": {
+              "type": "object",
+              "description": "One entry per {placeholder} in path. A {{RUNTIME}} value is substituted by the runner; a literal is sent as written, percent-encoded.",
+              "minProperties": 1,
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
             },
             "body": {
               "type": "object"
