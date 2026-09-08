@@ -715,6 +715,7 @@ verified identity to be the institution named in the request:
 | `/internal/v1/payments/{deposits,escrows,redeems}` (GET) | `requester_id` (derived, not read) | `401 RELAY_CALLER_IDENTITY_REQUIRED`, `403 REQUESTER_NOT_A_PARTICIPANT` |
 | `/internal/v1/payments/{deposits,escrows,redeems}` (POST) | `requester_besu_address` (derived, not read) | same |
 | `/internal/v1/payments/deposits/exchange` (POST) | `deposit_id` must belong to the caller | `403 REQUESTER_NOT_DEPOSIT_OWNER`, `503 DEPOSIT_OWNERSHIP_UNAVAILABLE` |
+| `/internal/v1/bridge/positions` (GET) | `owner_bank_id` (derived, not read) | `401 RELAY_CALLER_IDENTITY_REQUIRED` |
 
 **These routes deliberately ignore `RELAY_REQUIRE_SIGNATURE`, and that divergence must not be
 "fixed".** Everywhere else the flag decides whether the shared secret is still accepted; here it is

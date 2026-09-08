@@ -233,8 +233,17 @@ func (h *BridgeHandler) BurnUnlock(c *fiber.Ctx) error {
 func (h *BridgeHandler) ListPositionsForCaller(c *fiber.Ctx) error {
 	caller := strings.TrimSpace(middleware.VerifiedRelayCaller(c))
 	if caller == "" {
+		// CODED, and with the same code the middleware uses for this exact condition.
+		//
+		// The bank portal classifies a 401 by its code: a trust rejection is a notice, anything
+		// unclassified is an expired session, and the session branch refreshes, retries, fails
+		// again and logs the operator out. This refusal carried no code, so it took that branch —
+		// and because the dashboard is where login lands and it calls this endpoint, a bank whose
+		// identity the central bank cannot yet verify was ejected on arrival. The portal is the
+		// only intended route to onboarding, so that bank could never onboard through the product.
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "no verified caller: this listing is scoped to one institution and cannot be answered unscoped",
+			"code":  "RELAY_CALLER_IDENTITY_REQUIRED",
 		})
 	}
 	if supplied := strings.TrimSpace(c.Query("owner_bank_id")); supplied != "" && !strings.EqualFold(supplied, caller) {
