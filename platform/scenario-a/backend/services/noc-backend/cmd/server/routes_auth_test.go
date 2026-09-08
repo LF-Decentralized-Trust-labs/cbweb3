@@ -129,3 +129,75 @@ func TestGETIsNotCSRFGuarded(t *testing.T) {
 		t.Error("a GET with a session was refused by CSRF; reads must not require the header")
 	}
 }
+
+// postProbe mounts ONE POST route that answers 200 and counts the requests that reach it.
+// It stands in for the agent push handler, whose own Register attaches AgentAuth — the one
+// authentication that route is supposed to carry.
+type postProbe struct {
+	path  string
+	calls *int
+}
+
+func (p postProbe) Register(r fiber.Router) {
+	r.Post(p.path, func(c *fiber.Ctx) error {
+		*p.calls++
+		return c.SendStatus(fiber.StatusOK)
+	})
+}
+
+// TestInternalPushRouteCarriesExactlyOneAuthLayer is the mechanical guard for the agent
+// route, and it uses the REAL path and method — /internal/v1/push, POST.
+//
+// Two things can quietly break it, and neither shows up on a running stack (agents fail
+// silently and the dashboard just stops updating):
+//
+//   - sweeping it into a Keycloak group. Agents authenticate by API key and carry no JWT,
+//     so every push would become a 401.
+//   - mounting a second authentication in front of the handler's own AgentAuth. The route
+//     would then demand two credentials where the agent has one.
+//
+// The path assertion is what catches a move into ANY group, including one with no
+// middleware today: a group changes the route's prefix, so the agents' URL stops existing.
+func TestInternalPushRouteCarriesExactlyOneAuthLayer(t *testing.T) {
+	const pushPath = "/internal/v1/push"
+	calls := 0
+	app := fiber.New()
+	kc := fakeKeycloak{roles: map[string][]string{"noc-admin": {"ROLE_NOC_ADMIN"}}}
+	mountRoutes(app, kc, nocRoutes{
+		Push:   postProbe{path: pushPath, calls: &calls},
+		Admin:  []routeRegistrar{probeHandler{path: "/spokes"}},
+		Portal: []routeRegistrar{probeHandler{path: "/dashboard"}},
+		Auth:   api.NewAuthHandler(kc, false, []byte("test-secret")),
+	}, []byte("test-secret"))
+
+	// An agent's request: no session cookie, no CSRF header, no token Keycloak would accept.
+	resp := send(t, app, http.MethodPost, pushPath, nil, nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("POST %s = %d, want 200.\nThe agent push route is behind a credential agents "+
+			"do not carry — every agent would stop reporting, with no error in the portal.",
+			pushPath, resp.StatusCode)
+	}
+	if calls != 1 {
+		t.Errorf("the handler ran %d times, want 1", calls)
+	}
+
+	// Mechanical half: registered at exactly this path, with exactly the handler chain the
+	// registrar itself attached.
+	var found bool
+	for _, r := range app.GetRoutes() {
+		if r.Method != http.MethodPost || r.Path != pushPath {
+			continue
+		}
+		found = true
+		if len(r.Handlers) != 1 {
+			t.Errorf("%s carries %d handlers, want 1 (the registrar's own).\n"+
+				"An extra layer here is a second authentication on a route whose caller has "+
+				"one credential.", pushPath, len(r.Handlers))
+		}
+	}
+	if !found {
+		t.Errorf("no POST %s route exists.\nThe push registrar was mounted on a group, so the "+
+			"path the agents post to changed and their pushes now 404.", pushPath)
+	}
+}

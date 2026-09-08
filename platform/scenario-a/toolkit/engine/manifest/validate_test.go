@@ -602,3 +602,39 @@ func TestValidate_FiatTokenName_BlankRejected(t *testing.T) {
 		t.Errorf("blank fiatTokenName must be rejected, got: %v", err)
 	}
 }
+
+// ── spec.noc.portalOrigins ───────────────────────────────────────────────────
+
+// A portal origin is what the NOC backend answers CORS with, and the session is a cookie:
+// a wildcard cannot carry credentials, and Fiber panics on the combination. Rejecting it
+// here turns a stack that provisions and then crash-loops into a manifest error.
+func TestValidate_NOCPortalOrigins(t *testing.T) {
+	accepted := []string{
+		"http://localhost:32645",
+		"http://127.0.0.1:32745",
+		"https://cb-brazil.cbweb3.l-net.io",
+	}
+	for _, o := range accepted {
+		m := validManifest()
+		m.Spec.NOC = &manifest.NOC{PortalOrigins: []string{o}}
+		if err := manifest.Validate(m); err != nil {
+			t.Errorf("origin %q was rejected: %v", o, err)
+		}
+	}
+
+	rejected := []string{
+		"*",                               // cannot carry credentials
+		"http://*.example",                // ditto, less obviously
+		"http://localhost:32645/",         // trailing slash is not part of an origin
+		"http://localhost:32645/a/noc/",   // nor is a path
+		"localhost:32645",                 // no scheme
+		"http://localhost:32645 http://x", // two values in one entry
+	}
+	for _, o := range rejected {
+		m := validManifest()
+		m.Spec.NOC = &manifest.NOC{PortalOrigins: []string{o}}
+		if err := manifest.Validate(m); err == nil {
+			t.Errorf("origin %q was accepted; the backend would refuse it at runtime, or panic", o)
+		}
+	}
+}

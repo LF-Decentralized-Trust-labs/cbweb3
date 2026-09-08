@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -283,8 +284,24 @@ func validateNOC(m *Manifest) []error {
 			errs = append(errs, fmt.Errorf("spec.noc.components[%d]: invalid value %q; accepted values are: %s", i, c, strings.Join(nocComponentTypes, ", ")))
 		}
 	}
+	// Each portal origin has to be a plain scheme://host[:port]. Checked here because the
+	// only other thing that rejects a bad value is the backend itself: Fiber PANICS on
+	// AllowCredentials with a wildcard origin, so "*" written here presents as a container
+	// that crash-loops after the whole stack has been provisioned. A manifest error is the
+	// same refusal, before anything is deployed.
+	for i, o := range m.Spec.NOC.PortalOrigins {
+		if !browserOrigin.MatchString(o) {
+			errs = append(errs, fmt.Errorf("spec.noc.portalOrigins[%d]: invalid value %q; must be a plain "+
+				"scheme://host[:port] with no path, trailing slash or wildcard", i, o))
+		}
+	}
 	return errs
 }
+
+// browserOrigin is the only shape a browser origin may take: scheme, host, optional port,
+// nothing else. A wildcard cannot carry credentials and a path is not part of an origin, so
+// both are refused rather than passed to the backend to discover.
+var browserOrigin = regexp.MustCompile(`^https?://[A-Za-z0-9._-]+(:[0-9]{1,5})?$`)
 
 // requiredAdminRolesByEntity lists the Keycloak realm roles an entity must
 // provision an admin user for, keyed on spec.role. It mirrors the realms/clients

@@ -3,8 +3,15 @@
 package apply
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/dockervolume"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/manifest"
 )
@@ -28,18 +35,142 @@ func TestContainerReachableURL(t *testing.T) {
 	}
 }
 
-// TestDeriveNOCCSRFSecret: stable for one stack, distinct between stacks. A secret that
-// changed on restart would refuse every CSRF token issued before it, which presents as a
-// browser fault rather than a configuration one.
-func TestDeriveNOCCSRFSecret(t *testing.T) {
-	if a, b := deriveNOCCSRFSecret("cbweb3-noc-brazil"), deriveNOCCSRFSecret("cbweb3-noc-brazil"); a != b {
-		t.Error("the secret is not stable for the same stack")
+// fakeSecretStore stands in for the named volume: the resolution decides between the
+// operator's value, a persisted one and a fresh one, and that decision must be testable
+// without Docker.
+type fakeSecretStore struct {
+	files   map[string]string
+	writes  int
+	readErr error
+}
+
+func newFakeSecretStore() *fakeSecretStore {
+	return &fakeSecretStore{files: map[string]string{}}
+}
+
+func (f *fakeSecretStore) store() nocCSRFSecretStore {
+	return nocCSRFSecretStore{
+		read: func(_ context.Context, volume, filePath string) ([]byte, error) {
+			if f.readErr != nil {
+				return nil, f.readErr
+			}
+			v, ok := f.files[volume+"/"+filePath]
+			if !ok {
+				return nil, fmt.Errorf("%w: %s", dockervolume.ErrNotFound, filePath)
+			}
+			return []byte(v), nil
+		},
+		write: func(_ context.Context, volume, filePath string, content []byte, _ string) error {
+			f.files[volume+"/"+filePath] = string(content)
+			f.writes++
+			return nil
+		},
 	}
-	if a, b := deriveNOCCSRFSecret("cbweb3-noc-brazil"), deriveNOCCSRFSecret("cbweb3-noc-colombia"); a == b {
-		t.Error("two different stacks share a CSRF secret")
+}
+
+// TestNOCCSRFSecret_IsRandomAndNotDerivedFromThePrefix is the security property the review
+// asked for: the entity prefix is public (docker ps, the manifest, the volume names), so a
+// secret derived from it is a key anyone can recompute — and this secret is what makes a
+// CSRF token unforgeable.
+func TestNOCCSRFSecret_IsRandomAndNotDerivedFromThePrefix(t *testing.T) {
+	t.Setenv(nocCSRFSecretEnv, "")
+	prefix := "cbweb3-noc-brazil"
+
+	// The value the previous, derived implementation would have produced.
+	sum := sha256.Sum256([]byte("cbweb3-noc-csrf:" + prefix))
+	derived := hex.EncodeToString(sum[:])
+
+	got, err := resolveNOCCSRFSecret(context.Background(), prefix, newFakeSecretStore().store())
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
 	}
-	if deriveNOCCSRFSecret("x") == "" {
-		t.Error("empty secret")
+	if got == derived {
+		t.Error("the secret is still a pure function of the public prefix; anyone can compute the HMAC key")
+	}
+	if len(got) != 64 {
+		t.Errorf("secret = %q (%d chars), want 32 random bytes hex-encoded", got, len(got))
+	}
+
+	// Two stacks provisioned the same way must not share it either.
+	other, err := resolveNOCCSRFSecret(context.Background(), "cbweb3-noc-colombia", newFakeSecretStore().store())
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got == other {
+		t.Error("two stacks minted the same secret")
+	}
+}
+
+// TestNOCCSRFSecret_SurvivesARestart keeps the property derivation was chosen for: a secret
+// that changes between applies refuses every CSRF token issued before it, which presents as
+// a browser fault rather than a configuration one.
+func TestNOCCSRFSecret_SurvivesARestart(t *testing.T) {
+	t.Setenv(nocCSRFSecretEnv, "")
+	st := newFakeSecretStore()
+
+	first, err := resolveNOCCSRFSecret(context.Background(), "cbweb3-noc-brazil", st.store())
+	if err != nil {
+		t.Fatalf("first resolve: %v", err)
+	}
+	second, err := resolveNOCCSRFSecret(context.Background(), "cbweb3-noc-brazil", st.store())
+	if err != nil {
+		t.Fatalf("second resolve: %v", err)
+	}
+	if first != second {
+		t.Errorf("the secret changed between applies (%q → %q); every live session would start getting 403", first, second)
+	}
+	if st.writes != 1 {
+		t.Errorf("writes = %d, want 1: the persisted secret must be reused, not rewritten", st.writes)
+	}
+}
+
+// TestNOCCSRFSecret_HonoursTheOperator: the template says a deployment may supply its own
+// secret. It has to actually win — and without being appended a second time, which would put
+// two entries with the same key into one environment.
+func TestNOCCSRFSecret_HonoursTheOperator(t *testing.T) {
+	t.Setenv(nocCSRFSecretEnv, "operator-supplied-secret")
+	st := newFakeSecretStore()
+
+	got, err := resolveNOCCSRFSecret(context.Background(), "cbweb3-noc-brazil", st.store())
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != "operator-supplied-secret" {
+		t.Errorf("secret = %q, want the operator's", got)
+	}
+	if st.writes != 0 {
+		t.Error("the operator's secret was persisted; the toolkit must not take ownership of it")
+	}
+}
+
+// TestNOCCSRFSecret_EmptyPersistedValueIsMintedAgain: a blank file must not be handed to the
+// backend, which would fall back to a per-process random secret that dies on restart.
+func TestNOCCSRFSecret_EmptyPersistedValueIsMintedAgain(t *testing.T) {
+	t.Setenv(nocCSRFSecretEnv, "")
+	st := newFakeSecretStore()
+	st.files[nocCSRFSecretVolume("cbweb3-noc-brazil")+"/"+nocCSRFSecretFile] = "  \n"
+
+	got, err := resolveNOCCSRFSecret(context.Background(), "cbweb3-noc-brazil", st.store())
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if strings.TrimSpace(got) == "" {
+		t.Error("an empty persisted secret was handed through")
+	}
+	if st.writes != 1 {
+		t.Errorf("writes = %d, want the blank value replaced", st.writes)
+	}
+}
+
+// TestNOCCSRFSecret_ReadFailureIsReported: a store that cannot be read is a configuration
+// problem, and starting the stack anyway would silently drop the whole binding.
+func TestNOCCSRFSecret_ReadFailureIsReported(t *testing.T) {
+	t.Setenv(nocCSRFSecretEnv, "")
+	st := newFakeSecretStore()
+	st.readErr = errors.New("docker daemon is not running")
+
+	if _, err := resolveNOCCSRFSecret(context.Background(), "cbweb3-noc-brazil", st.store()); err == nil {
+		t.Error("a read failure was swallowed")
 	}
 }
 
