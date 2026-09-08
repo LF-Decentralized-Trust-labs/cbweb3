@@ -98,11 +98,14 @@ samples/
 Every host port stays below **32768**, the floor of the kernel's ephemeral range
 (`net.ipv4.ip_local_port_range`). A published port above it races every outbound
 connection on the machine, so a bring-up fails at a random step with
-`address already in use` against a port nothing holds. Scenario B bases live in the
-**x145-x557** lane and Scenario A's in **x645-x767**, which is what lets both scenarios
-run side by side: every derived port keeps the base's last three digits, so no B port can
-ever equal an A port. `ports_ephemeral_test.go` enforces both. See
-[`docs/scenario-drift.md`](../../docs/scenario-drift.md) §10.
+`address already in use` against a port nothing holds. On this single-host topology
+Scenario B bases live in the **x145-x557** lane and Scenario A's in **x645-x767**, which
+is what lets both scenarios run side by side: every derived port keeps the base's last
+three digits, so no B port can ever equal an A port. (`deploy-lnet` runs one entity per
+VM and separates them differently — A on suffix `645`, B on suffix `845` — so the lane
+split is a property of these samples, not of the platform; the ceiling applies to both.)
+`ports_ephemeral_test.go` enforces the ceiling on both trees and the lane on these
+samples. See [`docs/scenario-drift.md`](../../docs/scenario-drift.md) §10.
 
 The service host ports derive from each entity's RPC port by a fixed offset:
 

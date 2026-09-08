@@ -353,14 +353,21 @@ supervisor. Com a base em `33645`-`33947`, o teto real era `47947`, e o número 
 expostas passava de cem, não 33. É por isso que o guard confere as portas **derivadas**,
 não só as declaradas.
 
-### As duas faixas
+### As duas faixas — e o teto, que é a regra geral
 
-Os dois cenários **têm** de rodar lado a lado num host: o launcher pareia A e B por
-entidade (as duas árvores até compartilham `launcherPort` de propósito, `5190`-`5199`).
-Como os dois derivam por offsets múltiplos de 1000, bases separadas por um múltiplo de
-1000 colidem por construção. A separação é feita pelos três últimos dígitos:
+**Distinga as duas coisas**, porque só uma delas é universal:
 
-| | Faixa da base | Teto | Motivo do teto |
+- **O teto é da plataforma.** Vale para qualquer manifesto de qualquer árvore, porque
+  decorre dos offsets de cada toolkit: `8767` no A (o portal NOC é base `+24000`) e
+  `18767` no B (o portal supervisor é base `+14000`). Uma base acima do teto produz
+  derivadas dentro da faixa efêmera mesmo quando a base parece segura.
+- **A faixa é da topologia de host único dos samples.** Ali os dois cenários rodam lado a
+  lado e o launcher os pareia por entidade (as duas árvores compartilham `launcherPort` de
+  propósito, `5190`-`5199`). Como os dois derivam por offsets múltiplos de 1000, bases
+  separadas por um múltiplo de 1000 colidem por construção; a separação é feita pelos três
+  últimos dígitos.
+
+| | Faixa da base (samples) | Teto (plataforma) | Motivo do teto |
 | --- | --- | --- | --- |
 | Scenario A | `x645`-`x767` | `8767` | portal NOC = base `+24000` |
 | Scenario B | `x145`-`x557` | `18767` | portal supervisor = base `+14000` |
@@ -369,6 +376,15 @@ Como toda porta derivada preserva os três últimos dígitos da base, nenhuma po
 (terminada em `645`-`767`) pode igualar uma de B (terminada em `145`-`557`), em banda
 nenhuma. O p2p é declarado, não derivado, e tem banda própria: A em `31303`-`31605`, B em
 `30303`-`30605`.
+
+**O `deploy-lnet` separa de outra forma, e está correto.** Lá é uma entidade por VM, e
+quando A e B compartilham a VM a disjunção vem de outro arranjo: A no sufixo `645`
+(base `8645`), B no sufixo `845` (base `8845`) — documentado na tabela *Coexistence on a
+shared VM* do [`deploy-lnet/README.md`](../deploy-lnet/README.md). Verifiquei: 21 portas
+do A e 15 do B na mesma VM, interseção **vazia**, máximas `32645` e `30304`. Portanto
+**não** alinhe o `deploy-lnet` à faixa dos samples — o que se aplica aos dois é o teto,
+não a faixa. Foi por isso que o guard passou a ler as duas árvores, mas só aplica a
+verificação de faixa aos samples.
 
 ### O que mudou
 
@@ -388,11 +404,12 @@ operacional externa, para nenhum ganho em produção, já que o LNET não estava
 
 ### O guard
 
-`ports_ephemeral_test.go`, nos dois toolkits: percorre todo manifesto de sample, calcula
-cada porta derivada e falha se alguma alcançar `32768`. Confere também o teto da base
+`ports_ephemeral_test.go`, nos dois toolkits: percorre todo manifesto de sample **e do
+`deploy-lnet`** (os `.yaml.tmpl`, que são a fonte versionada; os `.yaml` renderizados são
+gitignored), calcula cada porta derivada e falha se alguma alcançar `32768`. Confere também o teto da base
 (uma base abaixo de `32768` cujas derivadas estouram é o caso que passaria batido) e a
-faixa dos três dígitos, para que uma renumeração futura não quebre a coexistência A/B em
-silêncio. No cenário B há ainda `TestDerivedOffsetsMatchTheEngineSources`, que lê as
+faixa dos três dígitos — esta só nos samples, pelo motivo acima — para que uma
+renumeração futura não quebre a coexistência A/B em silêncio. No cenário B há ainda `TestDerivedOffsetsMatchTheEngineSources`, que lê as
 fontes do engine e falha se aparecer um offset que `ports.go` não conhece — o teto vale
 o que vale o conjunto de offsets de que ele é calculado.
 

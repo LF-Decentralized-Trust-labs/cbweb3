@@ -93,10 +93,12 @@ base `+24000`, so any higher base pushes it into the kernel's ephemeral range
 every outbound connection on the machine and a bring-up fails at a random step with
 `address already in use`. That is why Argentina (`8665`) and Costa Rica (`8685`) sit
 below Colombia (`8745`) rather than above it — the numbering is not monotonic by country
-and does not need to be. Scenario A owns the `x645`-`x767` lane and Scenario B the
-`x145`-`x557` one, so both run side by side on one host.
-`ports_ephemeral_test.go` enforces the ceiling, the lane and every derived port; see
-[`docs/scenario-drift.md`](../../docs/scenario-drift.md) §10.
+and does not need to be. On this single-host topology Scenario A owns the `x645`-`x767`
+lane and Scenario B the `x145`-`x557` one, so both run side by side. (`deploy-lnet` runs
+one entity per VM and separates them differently — A on suffix `645`, B on suffix `845` —
+so the lane split is a property of these samples, not of the platform; the ceiling applies
+to both.) `ports_ephemeral_test.go` enforces the ceiling on both trees, and the lane on
+these samples; see [`docs/scenario-drift.md`](../../docs/scenario-drift.md) §10.
 
 ### Per-entity launcher (distributed A/B entry point)
 

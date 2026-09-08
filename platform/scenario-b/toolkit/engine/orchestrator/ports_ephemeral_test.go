@@ -73,8 +73,12 @@ func sampleManifests(t *testing.T) map[string]*manifest.ParticipantDeployment {
 	return out
 }
 
-func TestNoSampleHostPortReachesTheEphemeralRange(t *testing.T) {
-	manifests := sampleManifests(t)
+// assertPortsBelowFloor checks every host port a set of manifests declares and
+// every port the toolkit derives from them. Shared by the samples and the
+// deploy-lnet guards: the ceiling is a property of the offsets, not of the tree
+// the manifest happens to live in.
+func assertPortsBelowFloor(t *testing.T, manifests map[string]*manifest.ParticipantDeployment) {
+	t.Helper()
 	withNode := 0
 	for name, pd := range manifests {
 		// spec.node is absent on an observe (NOC) manifest: it runs no on-chain node.
@@ -114,8 +118,52 @@ func TestNoSampleHostPortReachesTheEphemeralRange(t *testing.T) {
 		}
 	}
 	if withNode == 0 {
-		t.Fatal("no sample manifest declares spec.node.rpc — the derived-port half of the guard checked nothing")
+		t.Fatal("no manifest declares spec.node.rpc — the derived-port half of the guard checked nothing")
 	}
+}
+
+func TestNoSampleHostPortReachesTheEphemeralRange(t *testing.T) {
+	assertPortsBelowFloor(t, sampleManifests(t))
+}
+
+// deploy-lnet carries its own manifests, one entity per VM, and they are subject
+// to the same ceiling — more so, since a production host carries more outbound
+// traffic than a development one, not less. Only the .yaml.tmpl files are read:
+// the rendered .yaml are gitignored build output.
+//
+// The lane check does NOT apply here. On a shared LNET VM the scenarios are kept
+// disjoint by a different arrangement (Scenario A on suffix 645, Scenario B on
+// suffix 845 — see deploy-lnet/README.md), which is equally collision-free and is
+// not the single-host sample split.
+func TestNoDeployLNETHostPortReachesTheEphemeralRange(t *testing.T) {
+	lnet := filepath.Join("..", "..", "..", "..", "deploy-lnet")
+	for _, dir := range []string{
+		filepath.Join(lnet, "scenario-b", "manifests"),
+		filepath.Join(lnet, "hub", "manifests"),
+	} {
+		assertPortsBelowFloor(t, deployLNETManifests(t, dir))
+	}
+}
+
+// deployLNETManifests loads the templated manifests in dir, keyed by file name.
+func deployLNETManifests(t *testing.T, dir string) map[string]*manifest.ParticipantDeployment {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(dir, "*.yaml.tmpl"))
+	if err != nil {
+		t.Fatalf("glob %s: %v", dir, err)
+	}
+	out := map[string]*manifest.ParticipantDeployment{}
+	for _, f := range files {
+		pd, err := manifest.Load(f)
+		if err != nil {
+			t.Fatalf("load deploy-lnet manifest %s: %v", f, err)
+		}
+		out[filepath.Base(f)] = pd
+	}
+	if len(out) == 0 {
+		t.Fatalf("no manifests found under %s — the guard would pass vacuously", dir)
+	}
+	return out
 }
 
 // The NOC control plane publishes fixed ports (one NOC per host), so the scan

@@ -1300,9 +1300,13 @@ another socket before Docker binds it, and the bind fails with `address already 
 against a port nothing appears to hold — at a random step of a random entity. Because the
 supervisor portal carries the largest offset, the ceiling on a declared RPC port is
 **18767**; a base above it produces derived ports in the range even though the base itself
-looks safe. Scenario B bases live in the `x145`-`x557` lane and Scenario A's in
-`x645`-`x767`, so the two scenarios never collide on a shared host.
-`ports_ephemeral_test.go` enforces all of it; see
+looks safe. On the single-host sample topology, Scenario B bases live in the
+`x145`-`x557` lane and Scenario A's in `x645`-`x767`, so the two scenarios never
+collide there. `deploy-lnet` runs one entity per VM and keeps them disjoint by a
+different arrangement (Scenario A on suffix `645`, Scenario B on suffix `845`; see
+[`deploy-lnet/README.md`](../../../deploy-lnet/README.md)) — the ceiling applies to
+both trees, the lane split only to the samples. `ports_ephemeral_test.go` enforces
+the ceiling on both; see
 [`docs/scenario-drift.md`](../../../docs/scenario-drift.md) §10.
 
 **Per-entity step state** lives in `<dataDir>/.provisioning-state.yaml` — that is what makes a
