@@ -21,6 +21,24 @@ x-logging: &cbweb3_logging
     max-size: "50m"
     max-file: "5"
 
+# Why these services carry an explicit network alias
+#
+# The reverse proxy reaches each portal BY NAME over this network, and a DNS label
+# cannot exceed 63 octets (RFC 1035). The container_name below is
+# "${CONTAINER_PREFIX}-${ENTITY}-<role>-frontend", which for a central bank repeats the
+# role twice — "sc-b-cbweb3-central-bank-costa-rica-central-bank-governance-frontend" is
+# 68 octets. Docker's embedded DNS then refuses the name outright ("bad address") and
+# every portal answers 502 through the proxy, while the api-gateway (60 octets) keeps
+# working — which is what made this look like a routing fault rather than a naming one.
+#
+# The alias is short and unique per entity network, so the proxy resolves it whatever the
+# entity is called. It is the same remedy already applied to PAYMENT_GRPC_ADDR in
+# entity-backend.compose.yaml; the container_name is left alone because nothing else
+# resolves it (docker logs and the noc-agent address containers over the socket, not DNS).
+#
+# ProxyRoutes() in toolkit/engine/orchestrator must point at these aliases, not at
+# container_name. TestProxyUpstreamsFitDNSLabel and TestComposeAliasesMatchProxyRoutes
+# fail if either half drifts.
 services:
   governance-frontend:
     logging: *cbweb3_logging
@@ -29,7 +47,9 @@ services:
     ports:
       - "${GOVERNANCE_FRONTEND_PORT:?}:80"
     networks:
-      - entity_net
+      entity_net:
+        aliases:
+          - "${ENTITY_NET_PREFIX:?}-governance"
     restart: always
 
   treasury-frontend:
@@ -39,7 +59,9 @@ services:
     ports:
       - "${TREASURY_FRONTEND_PORT:?}:80"
     networks:
-      - entity_net
+      entity_net:
+        aliases:
+          - "${ENTITY_NET_PREFIX:?}-treasury"
     restart: always
 
   supervisor-frontend:
@@ -49,7 +71,9 @@ services:
     ports:
       - "${SUPERVISOR_FRONTEND_PORT:?}:80"
     networks:
-      - entity_net
+      entity_net:
+        aliases:
+          - "${ENTITY_NET_PREFIX:?}-supervisor"
     restart: always
 
 networks:

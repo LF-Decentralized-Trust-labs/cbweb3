@@ -245,23 +245,24 @@ func (c JoinConfig) corsOrigins() string {
 // NetName is this bank's external docker network (created by the infra step).
 func (c JoinConfig) NetName() string { return c.NetPrefix + "_net" }
 
-// bankFrontendContainer is the bank portal container name on the entity network
-// (must match entity-frontend.compose.yaml: <CONTAINER_PREFIX>-<ENTITY>-frontend).
-func (c JoinConfig) bankFrontendContainer() string {
-	return fmt.Sprintf("%s-%s-frontend", c.ContainerPrefix, c.Entity)
-}
+// bankFrontendAlias / apiGatewayAlias are the network aliases the reverse proxy resolves
+// this bank's portal and gateway by (must match entity-frontend.compose.yaml and
+// entity-backend.compose.yaml).
+//
+// Container names cannot serve: a DNS label stops at 63 octets (RFC 1035) and the
+// container name carries the full container prefix twice over, so a long enough entity id
+// makes it unresolvable and every proxied request answers 502. The alias is built from the
+// entity network prefix — unique per entity, and short.
+func (c JoinConfig) bankFrontendAlias() string { return c.NetPrefix + "-frontend" }
 
-// apiGatewayContainer is the api-gateway container name on the entity network.
-func (c JoinConfig) apiGatewayContainer() string {
-	return fmt.Sprintf("%s-%s-api-gateway", c.ContainerPrefix, c.Entity)
-}
+func (c JoinConfig) apiGatewayAlias() string { return c.NetPrefix + "-api-gateway" }
 
 // ProxyRoutes are the path routes the reverse proxy exposes for this bank: its portal +
 // the api-gateway.
 func (c JoinConfig) ProxyRoutes() []ProxyRoute {
 	return []ProxyRoute{
-		{Segment: "bank", Upstream: c.bankFrontendContainer() + ":80"},
-		{Segment: "api", Upstream: c.apiGatewayContainer() + ":8080", IsAPI: true},
+		{Segment: "bank", Upstream: c.bankFrontendAlias() + ":80"},
+		{Segment: "api", Upstream: c.apiGatewayAlias() + ":8080", IsAPI: true},
 	}
 }
 
