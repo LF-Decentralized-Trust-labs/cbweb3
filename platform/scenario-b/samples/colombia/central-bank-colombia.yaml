@@ -27,16 +27,20 @@ spec:
   # CB's governance portal), not a provisioning step — there is no manifest field for it.
   node:
     advertisedHost: host.docker.internal
-    rpc:  { port: 33945 }
-    ws:   { port: 33955 }
-    p2p:  { port: 56603 }
+    rpc:  { port: 9445 }
+    ws:   { port: 9455 }
+    p2p:  { port: 30603 }
     dataDir: cbweb3-data/central-bank-colombia
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed
   relay:
     endpoint: http://localhost:7000
-  cbEndpoint: http://host.docker.internal:18945
+  # This CB's own api-gateway, host-mapped (RPC 9445 + 8000). Declared for the
+  # credential-request hook the toolkit roadmap describes; NOTHING in the engine
+  # reads it yet, which is how it went unnoticed that the old value (18945) carried
+  # Scenario A's base AND Scenario A's +10000 gateway offset.
+  cbEndpoint: http://host.docker.internal:17445
   frontendHost: localhost
   launcher: enable
   launcherPort: 5197

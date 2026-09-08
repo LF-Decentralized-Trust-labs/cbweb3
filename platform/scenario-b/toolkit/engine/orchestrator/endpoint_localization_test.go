@@ -34,11 +34,11 @@ func TestContainerReachable(t *testing.T) {
 // unchanged.
 func TestHostReachable(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"http://host.docker.internal:41845", "http://localhost:41845"},
-		{"http://host.docker.internal:33845", "http://localhost:33845"},
-		{"http://13.59.73.155:41845", "http://13.59.73.155:41845"},                           // routable → unchanged
-		{"http://localhost:41845", "http://localhost:41845"},                                 // already host-reachable
-		{"http://cb-brazil.cbweb3.l-net.io:41845", "http://cb-brazil.cbweb3.l-net.io:41845"}, // routable DNS → unchanged
+		{"http://host.docker.internal:17345", "http://localhost:17345"},
+		{"http://host.docker.internal:9345", "http://localhost:9345"},
+		{"http://13.59.73.155:17345", "http://13.59.73.155:17345"},                           // routable → unchanged
+		{"http://localhost:17345", "http://localhost:17345"},                                 // already host-reachable
+		{"http://cb-brazil.cbweb3.l-net.io:17345", "http://cb-brazil.cbweb3.l-net.io:17345"}, // routable DNS → unchanged
 		{"", ""},
 	}
 	for _, c := range cases {

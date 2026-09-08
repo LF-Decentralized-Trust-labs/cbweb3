@@ -80,7 +80,7 @@ bash "${SCENARIO_DIR}/provisioning/scripts/start-cacti.sh"
 # --- hub then CB (proxy enabled on the CB) ------------------------------------
 apply "Hub — found-hub hub-cbweb3" "${SCENARIO_DIR}/samples/hub/hub-cbweb3.yaml"
 apply "Brazil — found-spoke central-bank-brazil behind the proxy" \
-  "${SCRIPT_DIR}/central-bank-brazil.yaml" --spoke-rpc http://localhost:33645
+  "${SCRIPT_DIR}/central-bank-brazil.yaml" --spoke-rpc http://localhost:9145
 
 # --- summary ------------------------------------------------------------------
 scheme="https"; [[ "${PROXY_TLS_MODE}" == "off" ]] && scheme="http"
@@ -94,7 +94,7 @@ cat <<EOF
   ${scheme}://${HOST}/b/api/v1/     -> api-gateway
 
   '${HOST}' resolves to 127.0.0.1, so open these in a browser ON THIS MACHINE.
-  The hub stays port-based (it is infra, not proxied): api http://localhost:41845.
+  The hub stays port-based (it is infra, not proxied): api http://localhost:17345.
 EOF
 if [[ "${PROXY_TLS_MODE}" != "off" ]]; then
   cat <<'EOF'

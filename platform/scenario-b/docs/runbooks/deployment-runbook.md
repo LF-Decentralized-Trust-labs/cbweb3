@@ -1277,21 +1277,33 @@ docker ps --format '{{.Names}}' | grep '^sc-b-cbweb3-'
 **Ports on the toolkit path** are all offsets from the entity's `spec.node.rpc.port` in its
 manifest, so each entity gets its own set and nothing collides:
 
-| Service | Offset | Example (bank-itau, RPC `33646`) |
+| Service | Offset | Example (bank-itau, RPC `9146`) |
 | --- | --- | --- |
-| Besu JSON-RPC | `+0` | `33646` |
-| Postgres | `+5000` | `38646` |
-| Redis | `+6000` | `39646` |
+| Besu JSON-RPC | `+0` | `9146` |
+| Postgres | `+5000` | `14146` |
+| Redis | `+6000` | `15146` |
 | Keycloak (CB/hub only) | `+7000` | — |
-| API gateway | `+8000` | `41646` |
-| Portal (bank) / governance portal (CB) | `+9000` | `42646` |
+| API gateway | `+8000` | `17146` |
+| Portal (bank) / governance portal (CB) | `+9000` | `18146` |
 | NOC backend (CB/hub only) | `+11000` | — |
 | NOC portal (CB/hub only) | `+12000` | — |
 | Treasury portal (CB only) | `+13000` | — |
 | Supervisor portal (CB only) | `+14000` | — |
 
-The sample topology therefore exposes the hub gateway on `41845` (RPC `33845`), Brazil's central
-bank on `41645` and bank-itau on `41646`.
+The sample topology therefore exposes the hub gateway on `17345` (RPC `9345`), Brazil's central
+bank on `17145` and bank-itau on `17146`.
+
+Every one of these must stay below **32768**, the floor of the kernel's ephemeral range
+(`net.ipv4.ip_local_port_range`, default `32768-60999`). A published host port at or above
+it races every outbound connection on the machine: the kernel may hand that number to
+another socket before Docker binds it, and the bind fails with `address already in use`
+against a port nothing appears to hold — at a random step of a random entity. Because the
+supervisor portal carries the largest offset, the ceiling on a declared RPC port is
+**18767**; a base above it produces derived ports in the range even though the base itself
+looks safe. Scenario B bases live in the `x145`-`x557` lane and Scenario A's in
+`x645`-`x767`, so the two scenarios never collide on a shared host.
+`ports_ephemeral_test.go` enforces all of it; see
+[`docs/scenario-drift.md`](../../../docs/scenario-drift.md) §10.
 
 **Per-entity step state** lives in `<dataDir>/.provisioning-state.yaml` — that is what makes a
 re-run resume instead of restarting. `apply` prints a per-step report; read it before reading logs.
@@ -1323,7 +1335,7 @@ docker exec <portal-container> grep -c 'a distinctive string from your change' \
   /usr/share/nginx/html/assets/*.js
 
 # Force a rebuild
-docker rmi -f cbweb3b/bank-frontend:gw41646
+docker rmi -f cbweb3b/bank-frontend:gw17146
 ```
 
 Then re-run the deploy (or the single `start-bank-frontend` step). The same applies to the CB

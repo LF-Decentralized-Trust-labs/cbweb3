@@ -29,12 +29,12 @@
 //
 // Example (matches the toolkit's brazil/argentina sample topology):
 //
-//	E2E_PAYER_GW_URL=http://localhost:41646 \
-//	E2E_CB_GW_URL=http://localhost:41645 \
-//	E2E_KEYCLOAK_URL=http://localhost:40646 \
+//	E2E_PAYER_GW_URL=http://localhost:17146 \
+//	E2E_CB_GW_URL=http://localhost:17145 \
+//	E2E_KEYCLOAK_URL=http://localhost:16146 \
 //	E2E_OIDC_CLIENT=bank-backend E2E_OIDC_SECRET=bank-backend-local-secret \
 //	E2E_USERNAME=admin@itau.brasil.com E2E_PASSWORD=itau-bank-local \
-//	E2E_HUB_RPC_URL=http://localhost:33845 E2E_SPOKE_RPC_URL=http://localhost:33646 \
+//	E2E_HUB_RPC_URL=http://localhost:9345 E2E_SPOKE_RPC_URL=http://localhost:9146 \
 //	E2E_W_SOURCE_TOKEN=0xde87af9156a223404885002669d3be239313ae33 \
 //	E2E_SPOKE_TOKEN=0xa50a51c09a5c451c52bb714527e1974b686d8e77 \
 //	E2E_HUB_SIGNER=0xFE3B557E8Fb62b89F4916B721be55cEb828dBd73 \

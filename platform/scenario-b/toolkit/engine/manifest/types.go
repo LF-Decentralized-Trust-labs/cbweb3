@@ -168,7 +168,7 @@ type NOC struct {
 	// AMMGatewayURL is the api-gateway the NOC backend reads AMM pool status from,
 	// as reachable FROM THE NOC CONTAINER (the NOC runs on its own docker network,
 	// so a compose service name of another stack does not resolve — use the host
-	// and published port, e.g. http://host.docker.internal:41645). Empty leaves the
+	// and published port, e.g. http://host.docker.internal:17145). Empty leaves the
 	// backend default, and Pool Stability stays empty while reporting why.
 	AMMGatewayURL string `yaml:"ammGatewayURL,omitempty" json:"ammGatewayURL,omitempty"`
 }

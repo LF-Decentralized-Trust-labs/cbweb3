@@ -17,9 +17,9 @@ spec:
     currency: [BRL, ARS, COP]
   node:
     advertisedHost: host.docker.internal
-    rpc:  { port: 33845 }
-    ws:   { port: 33855 }
-    p2p:  { port: 56503 }
+    rpc:  { port: 9345 }
+    ws:   { port: 9355 }
+    p2p:  { port: 30503 }
     dataDir: cbweb3-data/hub
   image: build
   keyProvider: kms://local-emulator

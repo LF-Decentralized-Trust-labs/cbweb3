@@ -21,11 +21,11 @@
 set -uo pipefail
 
 # ── entity api-gateways (host port = besu RPC port + 8000) ──────────────────────
-HUB="http://localhost:41845"          # hub-cbweb3
-BR_CB="http://localhost:41645"        # central-bank-brazil   (issues W-tCeBM_BRL)
-AR_CB="http://localhost:41745"        # central-bank-argentina (issues W-tCeBM_ARS)
-ITAU="http://localhost:41646"         # bank-itau (Brazil) — the swapping bank
-MACRO="http://localhost:41747"        # bank-macro (Argentina) — the beneficiary bank
+HUB="http://localhost:17345"          # hub-cbweb3
+BR_CB="http://localhost:17145"        # central-bank-brazil   (issues W-tCeBM_BRL)
+AR_CB="http://localhost:17245"        # central-bank-argentina (issues W-tCeBM_ARS)
+ITAU="http://localhost:17146"         # bank-itau (Brazil) — the swapping bank
+MACRO="http://localhost:17247"        # bank-macro (Argentina) — the beneficiary bank
 
 # ── seeded login credentials (username / password) — per-entity, from each
 # manifest's spec.adminUsers (scenario-a naming). The CB governance operator carries

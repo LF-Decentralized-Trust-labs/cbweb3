@@ -7,7 +7,7 @@
 # :3030) in its own docker network. It runs NO on-chain node.
 #
 # Login: the portal password-grants against central-bank-brazil's spoke Keycloak
-# realm (http://localhost:40645 = spoke RPC 33645 + 7000) with the noc-portal
+# realm (http://localhost:16145 = spoke RPC 9145 + 7000) with the noc-portal
 # client and the NOC_ADMIN user provisioned by that CB's found-spoke
 # (admin@brasil.noc.gov — added to central-bank-brazil.yaml for this reason).
 #
@@ -32,15 +32,15 @@ spec:
     pushIntervalSeconds: 15
     components: [BESU, CACTI_RELAY]
     # Portal auth (baked into the SPA): central-bank-brazil's Keycloak realm
-    # (RPC 33645 + 7000 = 40645) and the CB's launcher (back-to-launcher target).
-    keycloakURL: http://localhost:40645
+    # (RPC 9145 + 7000 = 16145) and the CB's launcher (back-to-launcher target).
+    keycloakURL: http://localhost:16145
     launcherURL: http://localhost:5191
-    # Pool Stability data source: central-bank-brazil's api-gateway (RPC 33645 + 8000
-    # = 41645). Reached over the host's published port because the NOC stack owns its
+    # Pool Stability data source: central-bank-brazil's api-gateway (RPC 9145 + 8000
+    # = 17145). Reached over the host's published port because the NOC stack owns its
     # own docker network — the CB's compose service name does not resolve from here.
     # The backend discovers the active pairs from this gateway, so no pair list is
     # configured; until a sovereign corridor is opened the page reports it is empty.
-    ammGatewayURL: http://host.docker.internal:41645
+    ammGatewayURL: http://host.docker.internal:17145
   frontendHost: localhost
   # Schema requires at least one operator account. The working login is actually
   # provisioned by central-bank-brazil's found-spoke (this observe run does not

@@ -54,9 +54,9 @@ services:
       RELAY_SIGNING_KEY_FILE: "${RELAY_SIGNING_KEY_FILE:-/data/cacti-relay.key}"
       # Hub Besu RPC — the LiquidityCommitWatcher and the cross-currency bridge-out
       # circuit-breaker gate (isPaused() on the pair's AMM) read the HUB, not a spoke.
-      # The sample hub listens on 33845 (Scenario B host ports shifted +25000
+      # The sample hub listens on 9345 (Scenario B host ports shifted +500
       # so both scenarios coexist on one host).
-      HUB_BESU_RPC: "${HUB_BESU_RPC:-http://host.docker.internal:33845}"
+      HUB_BESU_RPC: "${HUB_BESU_RPC:-http://host.docker.internal:9345}"
       LCR_WATCHER_START_BLOCK: "${LCR_WATCHER_START_BLOCK:-0}"
       # Durable path for the watcher's block watermark + delivered-event set. MUST live on the
       # /data volume: on the ephemeral default (/tmp) a rebuild recreates the container, the
