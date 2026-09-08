@@ -3,7 +3,6 @@
 package bootstrap
 
 import (
-	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -13,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
+	compliancepki "github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/pki"
 	pki "github.com/LACNetNetworks/cbweb3-platform/backend/shared/identity"
 )
 
@@ -195,6 +195,11 @@ func writeFile(path, content string, mode os.FileMode) error {
 // by auth and compliance, and a new exported helper there is a wider surface than one
 // unexported function needs. (Each scenario carries its OWN copy of that package, so
 // adding to it would not have crossed the scenario boundary — that is not the reason.)
+//
+// The key parse is NOT local, though: it comes from internal/pki, which is where the same
+// decision is made at boot. A key this bootstrap adopts but NewCAFromEnv would refuse to
+// read is a stack that provisions cleanly and then crash-loops, so the two must accept
+// exactly the same set — which two copies of the logic do not guarantee.
 func csrFromExistingKey(keyPath, bankCode, institutionName, country, role string) (string, error) {
 	keyPEM, err := os.ReadFile(keyPath)
 	if err != nil {
@@ -204,7 +209,7 @@ func csrFromExistingKey(keyPath, bankCode, institutionName, country, role string
 	if block == nil {
 		return "", fmt.Errorf("no PEM block in %s", keyPath)
 	}
-	key, err := parseECKey(block.Bytes)
+	key, err := compliancepki.ParseECPrivateKey(block.Bytes)
 	if err != nil {
 		return "", err
 	}
@@ -232,27 +237,4 @@ func csrFromExistingKey(keyPath, bankCode, institutionName, country, role string
 		return "", fmt.Errorf("create CSR: %w", err)
 	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})), nil
-}
-
-// parseECKey reads an EC private key in either encoding the tooling around this service
-// produces.
-//
-// Everything in this repository writes SEC1 ("EC PRIVATE KEY", x509.MarshalECPrivateKey),
-// but a key placed by hand almost certainly is not: `openssl genpkey` has defaulted to
-// PKCS#8 ("PRIVATE KEY") since OpenSSL 3, and hand repair is exactly the situation this
-// code meets a key it did not create. Refusing the other encoding would reject the right
-// key for the wrong reason — the encoding says nothing about whether the key is correct.
-func parseECKey(der []byte) (*ecdsa.PrivateKey, error) {
-	if key, err := x509.ParseECPrivateKey(der); err == nil {
-		return key, nil
-	}
-	parsed, err := x509.ParsePKCS8PrivateKey(der)
-	if err != nil {
-		return nil, fmt.Errorf("parse private key: not SEC1 (\"EC PRIVATE KEY\") or PKCS#8 (\"PRIVATE KEY\"): %w", err)
-	}
-	key, ok := parsed.(*ecdsa.PrivateKey)
-	if !ok {
-		return nil, fmt.Errorf("private key is %T; this PKI is EC (prime256v1)", parsed)
-	}
-	return key, nil
 }
