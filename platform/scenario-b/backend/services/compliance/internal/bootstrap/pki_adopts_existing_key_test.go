@@ -52,6 +52,11 @@ func TestEnsurePKIFilesAdoptsAKeyItDidNotCreate(t *testing.T) {
 
 // TestEnsurePKIFilesProducesAUsableCA is the property the outage needed: whatever the
 // starting state, the CA this bootstrap leaves behind can actually sign.
+//
+// It is NOT a guard against the clobbering — it passes against the pre-fix code, because the
+// {bankCode}-ca pair it exercises was never the pair that broke. The tests above are the ones
+// that fail without the fix; this one keeps them from being satisfied by a bootstrap that
+// preserves the key and leaves no working issuer.
 func TestEnsurePKIFilesProducesAUsableCA(t *testing.T) {
 	for _, tc := range []struct {
 		name string
