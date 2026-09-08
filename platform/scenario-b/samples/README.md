@@ -84,27 +84,46 @@ samples/
 
 | Participant             | Spoke     | Mode        | RPC  | WS   | P2P   | chainId |
 |-------------------------|-----------|-------------|------|------|-------|---------|
-| hub-cbweb3              | (hub)     | found-hub   | 8845 | 8855 | 31503 | 1337    |
-| central-bank-brazil     | spoke-brl | found-spoke | 8645 | 8655 | 31303 | 1338    |
-| bank-itau               | spoke-brl | join        | 8646 | 8656 | 31304 | 1338    |
-| bank-bradesco           | spoke-brl | join        | 8647 | 8657 | 31305 | 1338    |
-| central-bank-argentina  | spoke-ars | found-spoke | 8745 | 8755 | 31403 | 1339    |
-| bank-galicia            | spoke-ars | join        | 8746 | 8756 | 31404 | 1339    |
-| bank-macro              | spoke-ars | join        | 8747 | 8757 | 31405 | 1339    |
-| central-bank-colombia   | spoke-cop | found-spoke | 8945 | 8955 | 31603 | 1340    |
-| bank-bancolombia        | spoke-cop | join        | 8946 | 8956 | 31604 | 1340    |
-| bank-davivienda         | spoke-cop | join        | 8947 | 8957 | 31605 | 1340    |
+| hub-cbweb3              | (hub)     | found-hub   | 9345 | 9355 | 30503 | 1337    |
+| central-bank-brazil     | spoke-brl | found-spoke | 9145 | 9155 | 30303 | 1338    |
+| bank-itau               | spoke-brl | join        | 9146 | 9156 | 30304 | 1338    |
+| bank-bradesco           | spoke-brl | join        | 9147 | 9157 | 30305 | 1338    |
+| central-bank-argentina  | spoke-ars | found-spoke | 9245 | 9255 | 30403 | 1339    |
+| bank-galicia            | spoke-ars | join        | 9246 | 9256 | 30404 | 1339    |
+| bank-macro              | spoke-ars | join        | 9247 | 9257 | 30405 | 1339    |
+| central-bank-colombia   | spoke-cop | found-spoke | 9445 | 9455 | 30603 | 1340    |
+| bank-bancolombia        | spoke-cop | join        | 9446 | 9456 | 30604 | 1340    |
+| bank-davivienda         | spoke-cop | join        | 9447 | 9457 | 30605 | 1340    |
+
+Every host port stays below **32768**, the floor of the kernel's ephemeral range
+(`net.ipv4.ip_local_port_range`). A published port above it races every outbound
+connection on the machine, so a bring-up fails at a random step with
+`address already in use` against a port nothing holds. On this single-host topology
+Scenario B bases live in the **x145-x557** lane and Scenario A's in **x645-x767**, which
+is what lets both scenarios run side by side: every derived port keeps the base's last
+three digits, so no B port can ever equal an A port. (`deploy-lnet` runs one entity per
+VM and separates them differently — A on suffix `645`, B on suffix `845` — so the lane
+split is a property of these samples, not of the platform; the ceiling applies to both.)
+`ports_ephemeral_test.go` enforces the ceiling on both trees and the lane on these
+samples. See [`docs/scenario-drift.md`](../../docs/scenario-drift.md) §10.
 
 The service host ports derive from each entity's RPC port by a fixed offset:
 
-| Service           | Offset  | Example (central-bank-brazil, RPC 8645) |
+| Service           | Offset  | Example (central-bank-brazil, RPC 9145) |
 |-------------------|---------|-----------------------------------------|
-| api-gateway       | +8000   | 16645                                   |
-| Keycloak          | +7000   | 15645                                   |
-| governance / bank portal | +9000 | 17645 (bank apps also use +9000)   |
-| NOC portal        | +12000  | 20645                                   |
-| treasury portal   | +13000  | 21645  (CB only)                        |
-| supervisor portal | +14000  | 22645  (CB only)                        |
+| Postgres          | +5000   | 14145                                   |
+| Redis             | +6000   | 15145                                   |
+| Keycloak          | +7000   | 16145                                   |
+| api-gateway       | +8000   | 17145                                   |
+| governance / bank portal | +9000 | 18145 (bank apps also use +9000)   |
+| noc-backend       | +11000  | 20145                                   |
+| NOC portal        | +12000  | 21145                                   |
+| treasury portal   | +13000  | 22145  (CB only)                        |
+| supervisor portal | +14000  | 23145  (CB only)                        |
+
+The supervisor portal carries the largest offset, so it sets the ceiling on a declared
+RPC port: **18767**. A base above it produces derived ports inside the ephemeral range
+even though the base itself looks safe — the case the guard exists to catch.
 
 A Central Bank brings up governance + treasury + supervisor operator portals (plus
 the NOC portal); a commercial bank brings up the bank portal; the hub the governance
@@ -269,7 +288,7 @@ the banks consume.
 
 > The toolkit reaches the spoke's own Besu node (readiness/enode/contract gates) at
 > `http://localhost:<node.rpc.port>`, taken from the manifest — for
-> `central-bank-brazil`, `8645`. Override it only for a non-default host/port with
+> `central-bank-brazil`, `9145`. Override it only for a non-default host/port with
 > `--spoke-rpc <url>`.
 
 ### Step 6 — Join the Brazilian banks (`mode: join`)
@@ -474,7 +493,7 @@ route touches it and takes a live route down when enforcement is switched on.
 Block height on each node (RPC ports from the matrix):
 
 ```bash
-for p in 8845 8645 8646 8647 8745 8746 8747; do
+for p in 9345 9145 9146 9147 9245 9246 9247; do
   echo -n "port $p: "
   curl -s -X POST "http://localhost:$p" -H 'Content-Type: application/json' \
     -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' | jq -r .result

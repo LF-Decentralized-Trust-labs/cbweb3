@@ -29,9 +29,9 @@ spec:
   # since the toolkit holds no sovereign signing keys.
   node:
     advertisedHost: host.docker.internal
-    rpc:  { port: 33645 }
-    ws:   { port: 33655 }
-    p2p:  { port: 56303 }
+    rpc:  { port: 9145 }
+    ws:   { port: 9155 }
+    p2p:  { port: 30303 }
     dataDir: cbweb3-data/central-bank-brazil
   image: build
   keyProvider: kms://local-emulator
@@ -41,7 +41,11 @@ spec:
     # Relay container on this host. Only used so this CB's noc-agent can collect the
     # relay's container logs (the NOC's Log Viewer); the relay itself is untouched.
     containerName: cbweb3-cacti-liquidity-relay
-  cbEndpoint: http://host.docker.internal:18645
+  # This CB's own api-gateway, host-mapped (RPC 9145 + 8000). Declared for the
+  # credential-request hook the toolkit roadmap describes; NOTHING in the engine
+  # reads it yet, which is how it went unnoticed that the old value (18645) carried
+  # Scenario A's base AND Scenario A's +10000 gateway offset.
+  cbEndpoint: http://host.docker.internal:17145
   # The standalone NOC (brazil/noc-brazil.yaml, via deploy-all-with-noc.sh) serves its
   # portal on the fixed :3030, on its own docker network — an origin this CB does not
   # serve and cannot infer. The NOC portal password-grants against THIS realm from the

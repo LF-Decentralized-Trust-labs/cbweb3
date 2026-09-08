@@ -175,8 +175,8 @@ func TestObserveComposeEnv_Keycloak(t *testing.T) {
 // The backend runs in a container, where it is not.
 func TestContainerReachableURL(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"http://localhost:40645", "http://host.docker.internal:40645"},
-		{"http://127.0.0.1:40645", "http://host.docker.internal:40645"},
+		{"http://localhost:16145", "http://host.docker.internal:16145"},
+		{"http://127.0.0.1:16145", "http://host.docker.internal:16145"},
 		// Already routable: left exactly as the operator wrote it.
 		{"https://kc.example/auth", "https://kc.example/auth"},
 		{"http://keycloak.internal:8080", "http://keycloak.internal:8080"},
@@ -196,7 +196,7 @@ func TestContainerReachableURL(t *testing.T) {
 func TestNOCAdminCredential(t *testing.T) {
 	c := ObserveConfig{
 		FrontendHost: "localhost",
-		KeycloakURL:  "http://localhost:40645",
+		KeycloakURL:  "http://localhost:16145",
 		AdminUsers: []AdminUser{
 			{Role: "TREASURY", Username: "treasury@x", Password: "t"},
 			{Role: "NOC_ADMIN", Username: "admin@brasil.noc.gov", Password: "brasil-noc-local"},
