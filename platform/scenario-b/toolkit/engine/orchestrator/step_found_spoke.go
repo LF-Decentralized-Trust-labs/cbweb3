@@ -814,8 +814,20 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// mTLS activates only when GRPC_MTLS_ENABLE is exported (gated in the
 		// templates); default-off keeps the existing plaintext transport.
 		"SVC_TLS_VOLUME": c.svcTLSVolume(),
-		"CA_CERT_FILE":   "/workspace/backend/config/pki/central-bank.crt",
-		"CA_KEY_FILE":    "/workspace/backend/config/pki/central-bank.key",
+		// The pair with ONE producer. central-bank.crt/.key has two, and they disagree about
+		// what those names even mean: gen-tls (genCBCA) writes a self-signed CA there, while
+		// the compliance bootstrap's ensureCert wants to write this entity's participant leaf
+		// there. Whoever runs second loses, so those two filenames can never be a stable
+		// issuer — and in the state that shipped, gen-tls's CA certificate sat next to a
+		// participant key the bootstrap had written over it, which made every credential
+		// issuance fail with "provided PrivateKey doesn't match parent's PublicKey".
+		//
+		// central-bank-ca.* is created by the compliance bootstrap alone, as a matched pair,
+		// and is the CA it already signs that leaf with. Note the toolkit's own CA in
+		// central-bank.crt is then no longer an issuer: relayauth rejects it as a peer
+		// identity (it is a CA), and gen-relay-identity prefers central-bank-ca.* already.
+		"CA_CERT_FILE": "/workspace/backend/config/pki/central-bank-ca.crt",
+		"CA_KEY_FILE":  "/workspace/backend/config/pki/central-bank-ca.key",
 		// Shared secret for the hub-mediated M2M endpoints + cross-currency bridge
 		// delegation (a bank delegates bridge-in lock-mint to its CB; bridge-out to CB-B).
 		"INTERNAL_RELAY_AUTH_SECRET": HubRelayAuthSecret,

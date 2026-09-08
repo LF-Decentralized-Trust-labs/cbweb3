@@ -1410,47 +1410,64 @@ It should not be: an unknown key-id triggers one registry reload before rejectio
 once every 5s. If it persists, the bank has no issued certificate stored — check that onboarding
 completed (`certificate_data` on its `participants` row), since that is the pin source.
 
-### A central bank's CA material on disk is misleading (open, low severity)
+### `sign CSR: x509: provided PrivateKey doesn't match parent's PublicKey` (fixed)
 
-**Reproduced on a clean deploy**, so this is systematic, not the residue of repeated re-applies. A
-CB's PKI volume holds three distinct keys where the filenames suggest two pairs:
+A commercial bank's onboarding fails at **Complete** with that message. KYC approval succeeded,
+because that step signs nothing — the failure waits for the first credential actually issued, which
+can be weeks after the deploy that caused it.
 
-| File | State |
+**Cause.** `central-bank.crt` and `central-bank.key` had two producers with conflicting intent:
+
+| Producer | What it writes there |
 |---|---|
-| `central-bank-ca.crt` + `central-bank-ca.key` | a matched pair, but NOT the issuer in use |
-| `central-bank.crt` | the certificate that actually signs participant credentials |
-| `central-bank.key` | matches no certificate present |
+| toolkit `gen-tls-spoke` (`genCBCA`) | a **self-signed CA** (`IsCA`, CN `central-bank-ca`) and its key |
+| compliance `EnsurePKIFiles` | this entity's **participant** key/CSR, and a leaf signed by `central-bank-ca.*` |
 
-Compliance is configured with `CA_CERT_FILE=central-bank.crt` and `CA_KEY_FILE=central-bank.key` — a
-pair that does not match.
+`ensureCSR`'s guard was `fileExists(csr) && fileExists(key)`, so a key with no CSR beside it — exactly
+what `gen-tls` leaves — read as "nothing here": the bootstrap generated a fresh pair over a private key
+it did not create, while `ensureCert` left the certificate alone. The volume was then left holding
+`central-bank.crt` (gen-tls's CA) next to `central-bank.key` (a participant key), and
+`CA_CERT_FILE`/`CA_KEY_FILE` named that mismatched pair.
 
-**Credential issuance nevertheless works, and this was verified.** On a freshly deployed stack two
-banks were onboarded end to end (credential request → KYC approval → COMPLETE), and the issued
-certificate verifies against `central-bank.crt`. The consistent explanation is that compliance
-generates and keeps its CA in memory during bootstrap, writes the certificate to `central-bank.crt`,
-and never reads `CA_KEY_FILE` back; the `.key` files in the volume are residue from another generator.
+**Why it appeared to work at first.** Onboarding two banks end to end on a fresh stack succeeded and
+was verified. That is not a contradiction: `main` loaded the CA *before* running the bootstrap, so the
+in-memory CA held the pair as it was — still matched. The clobbered key on disk only bites the next
+time the container reads it, i.e. after a restart or redeploy.
 
-**So the risk is not what it looks like.** Onboarding is not blocked. What is broken is the *disk
-representation*: any component that treats `central-bank.crt` + `central-bank.key` as a CA pair fails
-with `x509: provided PrivateKey doesn't match parent's PublicKey`. That is a trap for future work, not
-an outage — the toolkit's `gen-relay-identity` hit exactly it and now falls back to a self-signed
-identity, which is equivalent under pinning since the issuer is never consulted.
+**Fixed** by three changes that must stay together:
 
-Note also that `genCBCA`'s idempotency check is `volumeHasFile(central-bank.crt)`, so it will never
-repair the pairing on an existing volume.
+- `CA_CERT_FILE`/`CA_KEY_FILE` name `central-bank-ca.*`, the pair the compliance bootstrap creates on
+  its own (pinned by `TestCAEnvNamesTheBootstrapCAPair`);
+- `ensureCSR` adopts an existing key and derives its CSR instead of replacing it;
+- `NewCAFromEnv` refuses a cert and key that are not each other's, naming both files, and the
+  bootstrap now runs *before* the CA load — with `CA_CERT_FILE` naming a file the bootstrap creates,
+  the old order would be fatal on every first boot.
 
-Verify before building anything that signs with the CB's CA:
+Expect `compliance: CA loaded from disk` and no `not a pair`; where the bootstrap adopts a key it logs
+`reused the existing key at …`. An affected stack repairs itself on `apply --rebuild` as long as
+`central-bank-ca.*` is already a coherent pair there; check with the fingerprints below.
 
 ```bash
-docker cp <cb-gateway>:/workspace/backend/config/pki/central-bank.crt /tmp/ca.crt
-docker cp <cb-gateway>:/workspace/backend/config/pki/central-bank.key /tmp/ca.key
-# These two hashes are currently DIFFERENT; treat the pair as unusable until that is fixed.
+docker cp <cb-compliance>:/workspace/backend/config/pki/central-bank-ca.crt /tmp/ca.crt
+docker cp <cb-compliance>:/workspace/backend/config/pki/central-bank-ca.key /tmp/ca.key
+# These two hashes MUST be identical.
 openssl x509 -in /tmp/ca.crt -pubkey -noout | openssl dgst -sha256
 openssl ec   -in /tmp/ca.key -pubout      | openssl dgst -sha256
 ```
 
-The CA design is deferred to a later phase of the project; this entry exists so the disk state is not
-mistaken for a usable CA in the meantime.
+**Still open, and it belongs to the CA card, not here.**
+
+- `ensureCert` skips a certificate that does not match its key, so an *existing* mismatch is not
+  repaired — only new ones are prevented. `genCBCA`'s idempotency check is
+  `volumeHasFile(central-bank.crt)`, so it will not repair a volume either.
+- The issuer moved, so a stack upgraded across this fix has **two trust anchors**: credentials issued
+  before it chain to gen-tls's CA in `central-bank.crt`, and new ones to `central-bank-ca.*`. Nothing
+  verifies chains today — `VerifyChain` is gated on `CA_CERT_PEM`, which no template or toolkit step
+  sets, and `relayauth` pins per certificate — so nothing fails. When chain verification is wired,
+  every credential issued before the fix has to be re-issued, not just the hand-repaired ones.
+- `EnsureGovernanceParticipant` stores the CA certificate as the governance row's `certificate_data`
+  and returns early when the row exists, so an upgraded stack keeps the old anchor in its database
+  while a fresh deploy stores the new one.
 
 ### Keycloak does not initialize
 
