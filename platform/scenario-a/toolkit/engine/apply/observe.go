@@ -5,8 +5,11 @@ package apply
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +21,7 @@ import (
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/bundle"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/dockervolume"
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/manifest"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/orchestrator"
 )
 
@@ -38,6 +42,140 @@ const (
 	// Single source of truth lives in the dockervolume package.
 	nocAgentVolHelperImage = dockervolume.HelperImage
 )
+
+// nocKeycloakClientID is the realm client the NOC portal's operators authenticate with.
+// Scenario A names it cbweb3-noc (Scenario B calls its own noc-portal — a naming drift, not
+// a behavioural one).
+const nocKeycloakClientID = "cbweb3-noc"
+
+// nocPortalOrigins resolves the browser origins allowed to call this backend with
+// credentials.
+//
+// Behind the proxy the portal is same-origin with the backend, so there is exactly one.
+// Otherwise the manifest names them (spec.noc.portalOrigins), because this backend is
+// shared by every CB portal on the host and only the operator knows which are deployed.
+// Falls back to the founding CB's own portal convention when the manifest is silent, so an
+// existing single-CB manifest keeps working rather than failing to start.
+func nocPortalOrigins(m *manifest.Manifest, frontendHost string, proxyEnabled bool) string {
+	if proxyEnabled {
+		return orchestrator.ProxyOrigin(frontendHost)
+	}
+	// Nil-checked: spec.noc is optional, so a manifest without the block is normal and
+	// must fall through to the convention rather than crash the apply.
+	if m.Spec.NOC != nil && len(m.Spec.NOC.PortalOrigins) > 0 {
+		return strings.Join(m.Spec.NOC.PortalOrigins, ",")
+	}
+	// The single-CB local convention: the NOC portal published by the founding CB.
+	return fmt.Sprintf("http://%s:%d", frontendHostOrLocal(frontendHost), nocPortalPortLocal)
+}
+
+// nocPortalPortLocal is the NOC portal's published port under the single-host convention
+// (the founding CB's RPC port + the NOC frontend offset). Scenario A's samples fix the CB at
+// 8645, so the portal lands on 32645 — the value the observe manifest documents.
+const nocPortalPortLocal = 32645
+
+// containerReachableURL rewrites a host-facing "localhost" URL into one a CONTAINER can
+// reach.
+//
+// spec.noc.keycloakURL was written for the browser, which is where the password grant used
+// to run — and "localhost" is exactly right there. The grant now runs in the NOC backend,
+// inside a container, where "localhost" is the container itself. Left alone, every existing
+// manifest would break at login with a connection refused and nothing pointing at the cause.
+func containerReachableURL(u string) string {
+	for _, local := range []string{"//localhost:", "//127.0.0.1:"} {
+		if strings.Contains(u, local) {
+			return strings.Replace(u, local, "//host.docker.internal:", 1)
+		}
+	}
+	return u
+}
+
+// nocCSRFSecretEnv is the variable the noc-stack template reads the secret from, and the
+// one an operator sets to supply their own.
+const nocCSRFSecretEnv = "NOC_CSRF_SECRET"
+
+// nocCSRFSecretFile / nocCSRFSecretVolume locate the CSRF secret persisted for one NOC
+// stack.
+//
+// A named volume, not a host file: this toolkit keeps secret material in volumes on purpose
+// (package dockervolume pipes content straight from memory, so it never lands on the host
+// disk even transiently). observe provisions no chain node and therefore has no dataDir of
+// its own, so the volume IS this stack's persistent store — the role .deployed-addrs.env
+// plays for a founding CB.
+const nocCSRFSecretFile = "csrf-secret"
+
+func nocCSRFSecretVolume(prefix string) string { return prefix + "_noc_secrets" }
+
+// nocCSRFSecretStore is the persistence resolveNOCCSRFSecret needs, injected so the
+// decision logic is testable without Docker.
+type nocCSRFSecretStore struct {
+	read  func(ctx context.Context, volume, filePath string) ([]byte, error)
+	write func(ctx context.Context, volume, filePath string, content []byte, mode string) error
+}
+
+func defaultNOCCSRFSecretStore() nocCSRFSecretStore {
+	return nocCSRFSecretStore{read: dockervolume.ReadFile, write: dockervolume.WriteFile}
+}
+
+// resolveNOCCSRFSecret returns the CSRF secret for this stack: the operator's if they set
+// one, otherwise the value persisted for this stack, otherwise a fresh random value it
+// persists before returning.
+//
+// RANDOM AND PERSISTED, not derived from the stack prefix. Derivation gave the property
+// that matters — the same value after a restart, so a browser holding a good session does
+// not start getting 403 on every action — but it bought it with a key anyone can recompute:
+// the prefix is public (docker ps, the manifest, the volume names). The secret keys the HMAC
+// that makes a CSRF token unforgeable, and that HMAC is the net for the case where CORS and
+// the custom header have already failed (a sibling subdomain, a MITM on plain HTTP — and
+// COOKIE_SECURE defaults to false locally). A computable key makes the net decoration, while
+// the guard's own comment claims a token the server never issued cannot validate.
+//
+// The operator's value wins and is returned unchanged, so a deployment that manages its own
+// secret is honoured rather than silently overridden.
+func resolveNOCCSRFSecret(ctx context.Context, prefix string, st nocCSRFSecretStore) (string, error) {
+	if v := strings.TrimSpace(os.Getenv(nocCSRFSecretEnv)); v != "" {
+		return v, nil
+	}
+	vol := nocCSRFSecretVolume(prefix)
+	b, err := st.read(ctx, vol, nocCSRFSecretFile)
+	switch {
+	case err == nil:
+		if s := strings.TrimSpace(string(b)); s != "" {
+			return s, nil
+		}
+		// Present but empty: mint one rather than start the backend with a blank secret,
+		// which it would replace with a per-process random value that dies on restart.
+	case errors.Is(err, dockervolume.ErrNotFound):
+		// First apply for this stack.
+	default:
+		return "", fmt.Errorf("read the NOC CSRF secret: %w", err)
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generate a NOC CSRF secret: %w", err)
+	}
+	secret := hex.EncodeToString(raw)
+	if err := st.write(ctx, vol, nocCSRFSecretFile, []byte(secret), "0600"); err != nil {
+		return "", fmt.Errorf("persist the NOC CSRF secret: %w", err)
+	}
+	return secret, nil
+}
+
+// nocKeycloakURL reads the optional realm URL, tolerating an absent spec.noc block.
+func nocKeycloakURL(m *manifest.Manifest) string {
+	if m == nil || m.Spec.NOC == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.Spec.NOC.KeycloakURL)
+}
+
+// frontendHostOrLocal mirrors the rest of the toolkit's default.
+func frontendHostOrLocal(h string) string {
+	if strings.TrimSpace(h) == "" {
+		return "localhost"
+	}
+	return h
+}
 
 // observeStepOrder is the linear step set reported for mode:observe.
 var observeStepOrder = []string{"build-noc-backend", "start-noc-stack", "wait-noc-backend", "register-noc-spoke", "provision-noc-key", "build-noc-agent", "start-noc-agent"}
@@ -101,12 +239,44 @@ func runObserveMode(ctx context.Context, in ApplyInput) (ApplyResult, error) {
 		"NOC_NET_NAME="+prefix+"-net",
 		"NOC_VOLUME_PREFIX="+prefix,
 	)
-	if proxyEnabled {
-		// Backend CORS collapses to the single proxy origin (vs the local "*" default).
-		env = append(env, "NOC_FRONTEND_ORIGIN="+orchestrator.ProxyOrigin(fHost))
+	// CORS origin(s). Mandatory, and never "*": the NOC session is a cookie now, and a
+	// browser refuses to send credentials to a wildcard origin — a wildcard would let the
+	// portal log in and then be anonymous on every request, with nothing to explain it.
+	//
+	// A LIST because one NOC backend is shared here: every CB on the host serves its own
+	// NOC portal and they all point at this same port. Scenario B differs — its NOC stack
+	// owns its portal — which is why this is a manifest field there and not here.
+	env = append(env, "NOC_FRONTEND_ORIGIN="+nocPortalOrigins(m, fHost, proxyEnabled))
+	// Realm for the backend's password grant. It moved here from the PORTAL's build args
+	// when the login moved to the server: a cookie the browser cannot read can only be set
+	// by a server, so the browser no longer talks to Keycloak.
+	//
+	// The client id goes out UNCONDITIONALLY. It is a constant of this scenario, not a
+	// manifest value, and gating it on spec.noc.keycloakURL left the backend falling back to
+	// the template's default — so NOC_SKIP_AUTH=false, which the template invites, would
+	// have authenticated against the wrong client on every manifest that names no realm.
+	env = append(env, "NOC_KEYCLOAK_CLIENT_ID="+nocKeycloakClientID)
+	if kcURL := nocKeycloakURL(m); kcURL != "" {
+		// Translated for the container: the manifest's "localhost" is the BROWSER's view,
+		// and the grant now runs inside this backend.
+		env = append(env, "NOC_KEYCLOAK_URL="+containerReachableURL(kcURL))
 	}
+	// The CSRF secret is resolved INSIDE the step so a failure to read or mint it is
+	// reported as start-noc-stack's, next to the compose call it is configuration for.
 	if err := steps.run(ctx, "start-noc-stack", func(ctx context.Context) error {
-		return runDocker(ctx, env, "compose", "-p", prefix, "-f", in.NOCStackComposePath, "up", "-d")
+		secret, err := resolveNOCCSRFSecret(ctx, prefix, defaultNOCCSRFSecretStore())
+		if err != nil {
+			return err
+		}
+		// Appended only when the operator did NOT export their own. Appending
+		// unconditionally would put two entries with the same key into one environment and
+		// leave which one wins to the C library — with the operator's value the one at risk
+		// of losing, which is the opposite of what the template promises.
+		stackEnv := env
+		if os.Getenv(nocCSRFSecretEnv) == "" {
+			stackEnv = append(append([]string{}, env...), nocCSRFSecretEnv+"="+secret)
+		}
+		return runDocker(ctx, stackEnv, "compose", "-p", prefix, "-f", in.NOCStackComposePath, "up", "-d")
 	}); err != nil {
 		return result, err
 	}

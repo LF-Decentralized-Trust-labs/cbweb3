@@ -321,10 +321,11 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			APIBase:     cbAPIBase,
 			BasePaths:   cbBasePaths,
 			PortalOwner: entity + "-operator", FiatSymbol: m.Spec.Spoke.Currency, Institution: m.DisplayNameOr(entity),
-			// The NOC portal password-grants directly against Keycloak in the browser, so its
-			// Keycloak URL stays the operator-provided host-port origin even behind the proxy
-			// (Keycloak is not proxied; under TLS the operator supplies an https realm URL).
-			KeycloakURL: frontendAPIBase(frontendAdvertisedHost(m), ports.Keycloak), KeycloakRealm: "cbweb3", KeycloakClient: "cbweb3-noc",
+			// The NOC portal used to password-grant directly against Keycloak in the browser,
+			// which is why its realm URL was passed here. It no longer does: the login goes
+			// to the NOC backend, which performs the grant and sets an HttpOnly cookie the
+			// page cannot read. The realm now reaches that BACKEND through the observe
+			// step's environment instead.
 			LauncherURL: launcherURLForManifest(m),
 			// The NOC portal (co-located, built here) talks to the observe-deployed NOC
 			// backend on the fixed host port (path suffix /api/v1 matches the backend routes),

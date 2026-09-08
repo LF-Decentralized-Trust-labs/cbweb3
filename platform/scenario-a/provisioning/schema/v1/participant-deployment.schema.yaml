@@ -151,6 +151,20 @@ definitions:
           backendURL: { type: string }
           keycloakURL: { type: string }
           launcherURL: { type: string }
+          # Browser origins allowed to call this NOC backend with credentials.
+          #
+          # A list, not a single value, because one NOC backend is shared: every CB on the
+          # host serves its own NOC portal and they all point at the same :28645. The
+          # session is a cookie now, and a browser refuses to send credentials to a
+          # wildcard origin — so each portal that may log in has to be named.
+          # The pattern mirrors the Go validation (engine/manifest/validate.go): scheme, host,
+          # optional port, nothing else. It is here as well so an editor refuses a wildcard
+          # or a path before an apply does.
+          portalOrigins:
+            type: array
+            items:
+              type: string
+              pattern: "^https?://[A-Za-z0-9._-]+(:[0-9]{1,5})?$"
           pushIntervalSeconds: { type: integer, minimum: 0 }
           components:
             type: array
