@@ -27,9 +27,9 @@ spec:
   node:
     advertisedHost: cbweb3-spoke-ars-besu.central-bank-argentina
     rpc:
-      port: 8845
+      port: 8665
     ws:
-      port: 8855
+      port: 8675
     p2p:
       port: 31503
     dataDir: cbweb3-data/central-bank-argentina

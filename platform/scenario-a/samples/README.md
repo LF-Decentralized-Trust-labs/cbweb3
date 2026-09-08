@@ -79,13 +79,24 @@ Each Besu node needs distinct host ports. This is the allocation used by the man
 | central-bank-colombia   | spoke-cop  | found | 8745 | 8755 | 31403 | 1338    |
 | bank-bancolombia        | spoke-cop  | join  | 8746 | 8756 | 31404 | 1338    |
 | bank-davivienda         | spoke-cop  | join  | 8747 | 8757 | 31405 | 1338    |
-| central-bank-argentina  | spoke-ars  | found | 8845 | 8855 | 31503 | 1339    |
-| bank-galicia            | spoke-ars  | join  | 8846 | 8856 | 31504 | 1339    |
-| bank-macro              | spoke-ars  | join  | 8847 | 8857 | 31505 | 1339    |
+| central-bank-argentina  | spoke-ars  | found | 8665 | 8675 | 31503 | 1339    |
+| bank-galicia            | spoke-ars  | join  | 8666 | 8676 | 31504 | 1339    |
+| bank-macro              | spoke-ars  | join  | 8667 | 8677 | 31505 | 1339    |
 
 Each entity's operator portals derive from its RPC port by a fixed offset:
 governance/bank `+17000`, treasury `+18000`, supervisor `+22000`, NOC `+24000` (e.g.
 central-bank-brazil governance `25645`, bank-itau portal `25646`).
+
+Bases sit on the `8645 + 20k` track, and the ceiling is **8767**: the NOC portal is
+base `+24000`, so any higher base pushes it into the kernel's ephemeral range
+(`net.ipv4.ip_local_port_range`, default `32768-60999`), where a published port races
+every outbound connection on the machine and a bring-up fails at a random step with
+`address already in use`. That is why Argentina (`8665`) and Costa Rica (`8685`) sit
+below Colombia (`8745`) rather than above it — the numbering is not monotonic by country
+and does not need to be. Scenario A owns the `x645`-`x767` lane and Scenario B the
+`x145`-`x557` one, so both run side by side on one host.
+`ports_ephemeral_test.go` enforces the ceiling, the lane and every derived port; see
+[`docs/scenario-drift.md`](../../docs/scenario-drift.md) §10.
 
 ### Per-entity launcher (distributed A/B entry point)
 
@@ -387,7 +398,7 @@ export CBWEB3_PALADIN_CB_URL="http://localhost:31848"
 Query the block number on each node by its RPC port (matrix above):
 
 ```bash
-for p in 8645 8646 8647 8745 8746 8747 8845 8846 8847; do
+for p in 8645 8646 8647 8665 8666 8667 8745 8746 8747; do
   echo -n "port $p: "
   curl -s -X POST "http://localhost:$p" \
     -H 'Content-Type: application/json' \

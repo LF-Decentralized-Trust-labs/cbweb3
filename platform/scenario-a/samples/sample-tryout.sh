@@ -30,9 +30,9 @@ BRADESCO="http://localhost:18647"       # bank-bradesco
 # command plus an argument, so the script breaks only at runtime. Anchored regexes
 # do not save you either: "_" is a word character, so \bNAME\b misses NAME_TOK and
 # \bNAME misses ID_NAME.
-CR_CB="http://localhost:18945"          # central-bank-costa-rica
-CB1="http://localhost:18946"    # cb1 (Costa Rica, bankId nu)
-CB2="http://localhost:18947"     # cb2 (Costa Rica, bankId nu)
+CR_CB="http://localhost:18685"          # central-bank-costa-rica
+CB1="http://localhost:18686"    # cb1 (Costa Rica, bankId nu)
+CB2="http://localhost:18687"     # cb2 (Costa Rica, bankId nu)
 
 # ── login credentials (username / password; passed to /auth/login) ─────────────
 # Brazil CB

@@ -21,9 +21,9 @@ spec:
   node:
     advertisedHost: cbweb3-spoke-ars-besu.bank-galicia
     rpc:
-      port: 8846
+      port: 8666
     ws:
-      port: 8856
+      port: 8676
     p2p:
       port: 31504
     dataDir: cbweb3-data/bank-galicia

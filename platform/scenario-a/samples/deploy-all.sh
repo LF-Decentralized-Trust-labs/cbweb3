@@ -162,14 +162,14 @@ cat <<'EOF'
                                                  launcher   http://localhost:5193
 
   Costa Rica (spoke-costa-rica) — LNET convention: hyphenated spoke id, bare bank ids
-    central-bank   api http://localhost:18945   governance http://localhost:25945
-                                                 treasury   http://localhost:26945
-                                                 supervisor http://localhost:30945
-                                                 noc        http://localhost:32945
+    central-bank   api http://localhost:18685   governance http://localhost:25685
+                                                 treasury   http://localhost:26685
+                                                 supervisor http://localhost:30685
+                                                 noc        http://localhost:32685
                                                  launcher   http://localhost:5200
-    cb1            api http://localhost:18946   portal     http://localhost:25946
+    cb1            api http://localhost:18686   portal     http://localhost:25686
                                                  launcher   http://localhost:5201
-    cb2            api http://localhost:18947   portal     http://localhost:25947
+    cb2            api http://localhost:18687   portal     http://localhost:25687
                                                  launcher   http://localhost:5202
 
   The identities below are the ones a positional split gets wrong — use them when

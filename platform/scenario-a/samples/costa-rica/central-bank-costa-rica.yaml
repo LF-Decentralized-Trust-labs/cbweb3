@@ -39,9 +39,9 @@ spec:
   node:
     advertisedHost: cbweb3-spoke-costa-rica-besu.central-bank-costa-rica
     rpc:
-      port: 8945
+      port: 8685
     ws:
-      port: 8955
+      port: 8695
     p2p:
       port: 31603
     dataDir: cbweb3-data/central-bank-costa-rica

@@ -27,9 +27,9 @@ spec:
   node:
     advertisedHost: cbweb3-spoke-costa-rica-besu.cb1
     rpc:
-      port: 8946
+      port: 8686
     ws:
-      port: 8956
+      port: 8696
     p2p:
       port: 31604
     dataDir: cbweb3-data/cb1

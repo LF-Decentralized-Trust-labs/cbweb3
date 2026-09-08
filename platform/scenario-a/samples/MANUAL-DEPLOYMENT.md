@@ -38,9 +38,9 @@ sample manifests.
 | `central-bank-colombia` | spoke-cop  | found | 8745     | 8755 | 31403 | 1338    |
 | `bank-bancolombia`      | spoke-cop  | join  | 8746     | 8756 | 31404 | 1338    |
 | `bank-davivienda`       | spoke-cop  | join  | 8747     | 8757 | 31405 | 1338    |
-| `central-bank-argentina`| spoke-ars  | found | 8845     | 8855 | 31503 | 1339    |
-| `bank-galicia`          | spoke-ars  | join  | 8846     | 8856 | 31504 | 1339    |
-| `bank-macro`            | spoke-ars  | join  | 8847     | 8857 | 31505 | 1339    |
+| `central-bank-argentina`| spoke-ars  | found | 8665     | 8675 | 31503 | 1339    |
+| `bank-galicia`          | spoke-ars  | join  | 8666     | 8676 | 31504 | 1339    |
+| `bank-macro`            | spoke-ars  | join  | 8667     | 8677 | 31505 | 1339    |
 
 ---
 
@@ -253,7 +253,7 @@ The full sample environment is now deployed.
 Query the block number on each Besu node by its RPC port:
 
 ```bash
-for p in 8645 8646 8647 8745 8746 8747 8845 8846 8847; do
+for p in 8645 8646 8647 8665 8666 8667 8745 8746 8747; do
   echo -n "port $p: "
   curl -s -X POST "http://localhost:$p" \
     -H 'Content-Type: application/json' \
@@ -304,9 +304,9 @@ Every api-gateway exposes `/healthz`; every portal is served on `/`.
 
 | Entity          | API (gateway)              | Portals                                                                                                                              |
 |-----------------|----------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| central bank    | `http://localhost:18845`   | governance `http://localhost:25845` · treasury `http://localhost:26845` · supervisor `http://localhost:30845` · noc `http://localhost:32845` |
-| `bank-galicia`  | `http://localhost:18846`   | bank portal `http://localhost:25846`                                                                                                 |
-| `bank-macro`    | `http://localhost:18847`   | bank portal `http://localhost:25847`                                                                                                 |
+| central bank    | `http://localhost:18665`   | governance `http://localhost:25665` · treasury `http://localhost:26665` · supervisor `http://localhost:30665` · noc `http://localhost:32665` |
+| `bank-galicia`  | `http://localhost:18666`   | bank portal `http://localhost:25666`                                                                                                 |
+| `bank-macro`    | `http://localhost:18667`   | bank portal `http://localhost:25667`                                                                                                 |
 
 ### Operator credentials (local only)
 
