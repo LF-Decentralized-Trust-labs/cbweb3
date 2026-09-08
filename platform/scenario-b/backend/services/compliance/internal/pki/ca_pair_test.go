@@ -197,3 +197,77 @@ func TestNewCAFromEnvSeparatesUnreadableFromMismatched(t *testing.T) {
 		t.Errorf("the error does not name the key file: %v", err)
 	}
 }
+
+// TestNewCAFromEnvRefusesALeafAsTheIssuer closes the case the toolkit's filename assertion
+// only names.
+//
+// A matched pair passes every other check here and still cannot be an issuer: a certificate
+// with CA:FALSE signs nothing a verifier will accept. Nothing catches that at runtime today
+// — CA_CERT_PEM is unset, so auth skips VerifyChain — so certificates issued from a leaf
+// would be accepted at login and rejected the day that gate is turned on, retroactively,
+// for every credential issued in between.
+func TestNewCAFromEnvRefusesALeafAsTheIssuer(t *testing.T) {
+	dir := t.TempDir()
+
+	caCertPEM, caKeyPEM, err := sharedpki.GenerateSelfSignedCA("cb", "org", 1)
+	if err != nil {
+		t.Fatalf("ca: %v", err)
+	}
+	csrPEM, leafKeyPEM, err := sharedpki.GenerateCSR("central-bank", "org", "ROLE_CENTRAL_BANK", "BR")
+	if err != nil {
+		t.Fatalf("csr: %v", err)
+	}
+	issued, err := sharedpki.SignCSR(caCertPEM, caKeyPEM, csrPEM, 1)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+
+	// A leaf and ITS OWN key: the pair check has nothing to object to.
+	certPath := filepath.Join(dir, "central-bank.crt")
+	keyPath := filepath.Join(dir, "central-bank.key")
+	write(t, certPath, issued.CertPEM)
+	write(t, keyPath, leafKeyPEM)
+
+	t.Setenv("CA_CERT_FILE", certPath)
+	t.Setenv("CA_KEY_FILE", keyPath)
+
+	ca, err := NewCAFromEnv()
+	if err == nil {
+		t.Fatal("a participant certificate loaded as the CA; this service would issue " +
+			"credentials from it that no verifier can chain")
+	}
+	if ca != nil {
+		t.Error("a CA was returned alongside the error")
+	}
+	if !strings.Contains(err.Error(), certPath) {
+		t.Errorf("the error does not name the offending file: %v", err)
+	}
+	if strings.Contains(err.Error(), "not a pair") {
+		t.Errorf("a leaf is not a pairing fault; reporting it as one points at the wrong fix: %v", err)
+	}
+}
+
+// TestNewCAFromEnvAcceptsTheBootstrapCA keeps the check above from being satisfied by
+// refusing everything: the pair EnsurePKIFiles actually creates must load.
+func TestNewCAFromEnvAcceptsTheBootstrapCA(t *testing.T) {
+	dir := t.TempDir()
+	certPEM, keyPEM, err := sharedpki.GenerateSelfSignedCA("central-bank-CA", "org", 10)
+	if err != nil {
+		t.Fatalf("ca: %v", err)
+	}
+	certPath := filepath.Join(dir, "central-bank-ca.crt")
+	keyPath := filepath.Join(dir, "central-bank-ca.key")
+	write(t, certPath, certPEM)
+	write(t, keyPath, keyPEM)
+
+	t.Setenv("CA_CERT_FILE", certPath)
+	t.Setenv("CA_KEY_FILE", keyPath)
+
+	ca, err := NewCAFromEnv()
+	if err != nil {
+		t.Fatalf("the pair the compliance bootstrap creates was refused: %v", err)
+	}
+	if _, err := ca.IssueParticipantCert("someone", "org", "ROLE_COMMERCIAL_BANK"); err != nil {
+		t.Fatalf("the loaded CA cannot issue: %v", err)
+	}
+}

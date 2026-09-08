@@ -19,13 +19,18 @@ import (
 
 // genCBCA generates the central bank's self-signed CA (ECDSA P-256) and seeds
 // central-bank.crt + central-bank.key into the given named volume, from memory
-// (writeVolumeFile — no host file). The compliance service mounts this volume
-// and signs participant CSRs with it (CA_CERT_FILE/CA_KEY_FILE); auth may read
-// the cert for PKI validation. Mirrors scenario-a's gen-tls standard.
-//
-// The CA key IS persisted (unlike the no-secrets certsource) because the
-// compliance signer needs it at runtime; this is local-dev CA material only.
+// (writeVolumeFile — no host file). Mirrors scenario-a's gen-tls standard.
 // Non-destructive: an existing central-bank.crt in the volume is preserved.
+//
+// It is NOT the credential issuer. CA_CERT_FILE/CA_KEY_FILE name central-bank-ca.*,
+// which the compliance PKI bootstrap creates on its own; these two filenames are
+// written by that bootstrap as well (ensureCSR/ensureCert, as this entity's
+// participant material), so pointing the issuer here made the pair diverge and took
+// credential issuance down. Its remaining consumer is gen-relay-identity, which reads
+// central-bank-ca.* first and treats this as a legacy fallback.
+//
+// The key IS persisted (unlike the no-secrets certsource) because that fallback signs
+// with it; this is local-dev CA material only.
 func genCBCA(ctx context.Context, r exec.CommandRunner, volume string) error {
 	if volumeHasFile(ctx, r, volume, "central-bank.crt") {
 		return nil // preserve an existing CA

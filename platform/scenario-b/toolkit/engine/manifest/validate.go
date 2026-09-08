@@ -28,6 +28,21 @@ var Modes = []string{ModeFoundHub, ModeFoundSpoke, ModeJoin, ModeObserve}
 // Roles lists the recognized spec.topology.role values.
 var Roles = []string{"hub", "central-bank", "commercial-bank", "noc"}
 
+// RoleByMode is the role each mode provisions. The pairing is not a convention: mode picks
+// the orchestration path and role becomes ENTITY, which the compose templates use to name
+// containers, volumes and PKI files — and several of those names are written on the
+// assumption of a specific role. CA_CERT_FILE is the sharp one: it names central-bank-ca.*
+// while the compliance bootstrap derives its filenames from BANK_CODE (= ENTITY), so a
+// found-spoke manifest carrying any other role would have the service look for a CA under a
+// name nothing creates, and the load is fatal. Nothing else relates the two fields, so
+// reject the mismatch at the manifest instead of at a container's third restart.
+var RoleByMode = map[string]string{
+	ModeFoundHub:   "hub",
+	ModeFoundSpoke: "central-bank",
+	ModeJoin:       "commercial-bank",
+	ModeObserve:    "noc",
+}
+
 // RequiredByMode is the per-mode set of spec fields that MUST be present.
 // It is the source of truth for the required half of the per-mode matrix and is
 // compared against the published JSON-Schema by the parity test (SC-004).
@@ -117,6 +132,10 @@ func Validate(pd *ParticipantDeployment) Result {
 		r.AddError("spec.topology.role", "required field is missing")
 	} else if !contains(Roles, spec.Topology.Role) {
 		r.AddError("spec.topology.role", fmt.Sprintf("invalid value %q; accepted values are: %s", spec.Topology.Role, strings.Join(Roles, ", ")))
+	} else if want, ok := RoleByMode[spec.Mode]; ok && spec.Topology.Role != want {
+		r.AddError("spec.topology.role", fmt.Sprintf(
+			"invalid value %q for mode %q; that mode provisions a %s and the two cannot differ",
+			spec.Topology.Role, spec.Mode, want))
 	}
 
 	// FR-005: environment must be local in this phase.

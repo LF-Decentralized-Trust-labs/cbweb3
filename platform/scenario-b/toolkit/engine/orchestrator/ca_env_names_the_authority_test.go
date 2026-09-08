@@ -8,18 +8,20 @@ import (
 	"testing"
 )
 
-// TestCAEnvNamesTheAuthorityNotTheLeaf pins the one line whose reversal reopens the outage.
+// TestCAEnvNamesTheBootstrapCAPair pins the one line whose reversal reopens the outage.
 //
-// CA_CERT_FILE/CA_KEY_FILE tell the compliance service what to ISSUE with. They used to
-// name central-bank.crt/.key, which is this entity's own participant leaf and one of the
-// files the gen-tls step writes — so a second producer of those filenames was enough to
-// leave the two holding different keys, and every credential issuance failed weeks later
+// CA_CERT_FILE/CA_KEY_FILE tell the compliance service what to ISSUE with, so they must
+// name a pair with a single producer. They used to name central-bank.crt/.key, which has
+// two, disagreeing about what the names mean: gen-tls (genCBCA) writes a self-signed CA
+// there, and the compliance bootstrap's ensureCert writes this entity's participant leaf
+// there. In the state that shipped, gen-tls's CA certificate was left beside a participant
+// key the bootstrap had written over it, and every credential issuance failed weeks later
 // with an x509 error that named neither file.
 //
-// The authority is {bankCode}-ca.*, which the compliance bootstrap creates as a matched
-// pair. Nothing at runtime relates that fact to these two variables, so without this test
-// the line can be reverted with every suite still green.
-func TestCAEnvNamesTheAuthorityNotTheLeaf(t *testing.T) {
+// {bankCode}-ca.* is created by the compliance bootstrap alone, as a matched pair. Nothing
+// at runtime relates that fact to these two variables, so without this test the line can be
+// reverted with every suite still green.
+func TestCAEnvNamesTheBootstrapCAPair(t *testing.T) {
 	cfg := SpokeConfig{
 		ContainerPrefix: "sc-b-cbweb3-central-bank-chile",
 		Entity:          "central-bank",
@@ -42,9 +44,10 @@ func TestCAEnvNamesTheAuthorityNotTheLeaf(t *testing.T) {
 	keyBase := strings.TrimSuffix(path.Base(keyFile), ".key")
 
 	if !strings.HasSuffix(certBase, "-ca") {
-		t.Errorf("CA_CERT_FILE is %q, which is the participant LEAF, not the authority.\n"+
-			"\tThe issuer must be the {bankCode}-ca pair the compliance bootstrap creates together;\n"+
-			"\tthe leaf shares its filenames with the toolkit's gen-tls step and the two have already diverged once.",
+		t.Errorf("CA_CERT_FILE is %q, which is not the {bankCode}-ca pair.\n"+
+			"\tThe issuer must be the pair the compliance bootstrap creates on its own;\n"+
+			"\tcentral-bank.crt/.key is written by BOTH gen-tls and that bootstrap, with\n"+
+			"\tconflicting intent, and the two have already diverged once in production.",
 			certFile)
 	}
 	if certBase != keyBase {
