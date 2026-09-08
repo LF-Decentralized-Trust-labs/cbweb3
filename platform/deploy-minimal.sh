@@ -18,7 +18,7 @@
 #     http://localhost:5192  → bank-itau launcher (lists BOTH A and B portals)
 #
 # Coexistence is collision-free by construction:
-#     • Besu/derived host ports: Scenario A ≤ 32847, Scenario B ≥ 33645 (+25000 shift)
+#     • Besu/derived host ports: Scenario A ≤ 32767, Scenario B ≥ 9145 (+500 shift)
 #     • Cacti relay: Scenario A on 4000, Scenario B on 7000
 #     • Containers: cbweb3-* / spoke-brl-* (A) vs sc-b-cbweb3-* (B)
 #     • Scenario B deploys no Paladin, so A's Paladin (31648) never clashes
@@ -51,6 +51,14 @@ if [[ "${1:-}" == "--clean" ]]; then
   rm -rf "${A_SAMPLES}/cbweb3-data" "${A_SAMPLES}/bundles" \
          "${B_SAMPLES}/cbweb3-data" "${B_SAMPLES}/bundles" 2>/dev/null || true
 fi
+
+# Both entities of both scenarios share ONE Docker host here, so their per-entity
+# container-alias advertisedHosts are not externally routable: force the
+# container-name Paladin transport + derived gRPC ports so the CB and the bank do
+# not collide on the fixed peer port 9000. The scenario-a deploy-all/deploy-three
+# scripts set this for the same reason; without it this script fails at
+# start-paladin-join with "Bind for 0.0.0.0:9000 failed: port is already allocated".
+export CBWEB3_SINGLE_HOST=1
 
 # --- shared launcher image (built once; both scenarios' launcher steps reuse it) --
 if ! docker image inspect cbweb3/launcher:local >/dev/null 2>&1; then
@@ -111,11 +119,11 @@ log "B: found-hub (hub-cbweb3)"
 
 log "B: found central-bank-brazil (spoke-brl)"
 "${B_BIN}" apply -f "${B_SAMPLES}/brazil/central-bank-brazil.yaml" "${B_FLAGS[@]}" \
-  --spoke-rpc http://localhost:33645
+  --spoke-rpc http://localhost:9145
 
 log "B: join bank-itau"
 "${B_BIN}" apply -f "${B_SAMPLES}/brazil/bank-itau.yaml" "${B_FLAGS[@]}" \
-  --spoke-rpc http://localhost:33646
+  --spoke-rpc http://localhost:9146
 
 # --- summary --------------------------------------------------------------------
 log "minimal A+B deployed. Shared launcher per entity (lists both scenarios' portals):"
@@ -124,12 +132,12 @@ cat <<'EOF'
   Brazil Central Bank
     LAUNCHER (A/B)   http://localhost:5191
     Scenario A       api http://localhost:18645   governance http://localhost:25645
-    Scenario B       api http://localhost:41645   governance http://localhost:42645
+    Scenario B       api http://localhost:17145   governance http://localhost:18145
 
   bank-itau (Brazil)
     LAUNCHER (A/B)   http://localhost:5192
     Scenario A       api http://localhost:18646   portal http://localhost:25646
-    Scenario B       api http://localhost:41646   portal http://localhost:42646
+    Scenario B       api http://localhost:17146   portal http://localhost:18146
 
   Open a launcher URL: it shows a "Scenario A" and a "Scenario B" group of portal
   buttons for that entity, served by ONE launcher container per host.
