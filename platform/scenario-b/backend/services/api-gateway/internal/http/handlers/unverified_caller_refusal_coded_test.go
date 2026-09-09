@@ -31,10 +31,11 @@ import (
 //
 // What it does NOT cover, so that nobody reads more assurance into a green run than is here:
 //
-//   - The relay-authentication 401s in middleware/relay_signature.go ("relay authentication
-//     required", "invalid relay auth secret"). They eject the operator the same way, but they
-//     are a different condition — the request never authenticated at all — and coding them is
-//     its own change, not a consequence of this one.
+//   - The relay-authentication refusals in middleware/relay_signature.go and
+//     middleware/internal_relay_auth.go. They are a different condition — the request never
+//     authenticated at all — so there is no caller-absence branch to anchor on. They are now
+//     covered by TestRelayAuthRefusalsCarryACode, which states the invariant over the middleware
+//     instead; this guard still does not reach them.
 //   - A refusal whose fiber.Map is built somewhere other than the c.JSON(...) call, or whose
 //     status is a variable rather than fiber.StatusUnauthorized. decideRelayCaller in
 //     relay_caller.go is that shape today, and it does carry a code.
