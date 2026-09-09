@@ -11,7 +11,7 @@ import {
   CardTitle,
   Input,
   Label,
-  parseBaseUnits,
+  parseAmount,
   Table,
   TableBody,
   TableCell,
@@ -24,6 +24,7 @@ import { useEffect, useMemo, useState } from "react";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import { usePaymentStore } from "../stores";
 import {
+  displayToBase,
   fiatUnitLabel,
   formatFiatDisplayUnits,
   formatFiatUnits,
@@ -53,7 +54,10 @@ export function DepositsPage() {
   // HTLC leg and the FX proposal, so the rule lives in @cbweb3/ui (lib/amount.ts)
   // rather than in an inline regex — and the field is plain text, because
   // <input type="number"> reads keystrokes through the browser locale.
-  const parsedAmount = useMemo(() => parseBaseUnits(amount), [amount]);
+  // Parsed under the ISO 20022 rule, then scaled by the token's own decimals before
+  // it leaves the form. Until ADR-009 this was a whole count of raw base units, so
+  // a fiat amount of 100.20 could not be expressed at all.
+  const parsedAmount = useMemo(() => parseAmount(amount), [amount]);
   const [confirmRequest, setConfirmRequest] = useState(false);
 
   useEffect(() => {
@@ -72,7 +76,7 @@ export function DepositsPage() {
     }
 
     try {
-      const depositId = await registerDeposit(amount);
+      const depositId = await registerDeposit(displayToBase(parsedAmount.canonical, fiatDecimals));
       toast.success(`Issuance request submitted: ${depositId}`);
       setAmount("0");
       setConfirmRequest(false);
@@ -121,7 +125,7 @@ export function DepositsPage() {
             <Input
               id="deposit-amount"
               type="text"
-              inputMode="numeric"
+              inputMode="decimal"
               autoComplete="off"
               value={amount}
               onChange={(event) => setAmount(event.target.value)}

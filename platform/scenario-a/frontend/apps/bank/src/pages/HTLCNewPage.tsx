@@ -10,7 +10,7 @@ import {
   CardTitle,
   Input,
   Label,
-  parseBaseUnits,
+  parseAmount,
   Select,
   SelectContent,
   SelectItem,
@@ -22,6 +22,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
+import { displayToBase } from "../types";
 import { useHtlcStore, usePaymentStore } from "../stores";
 
 type DurationOption = "none" | "1h" | "6h" | "24h" | "custom";
@@ -62,7 +63,7 @@ export function HTLCNewPage() {
   // Parsed once. Whole base units, the same unit as the FX proposal leg this
   // lock settles — see @cbweb3/ui (lib/amount.ts). Plain text, because
   // <input type="number"> reads keystrokes through the browser locale.
-  const parsedLockAmount = useMemo(() => parseBaseUnits(lockAmount), [lockAmount]);
+  const parsedLockAmount = useMemo(() => parseAmount(lockAmount), [lockAmount]);
   const [duration, setDuration] = useState<DurationOption>("none");
   const [customDateTime, setCustomDateTime] = useState("");
   const [showLockConfirm, setShowLockConfirm] = useState(false);
@@ -74,7 +75,7 @@ export function HTLCNewPage() {
   // Parsed once. Whole base units, the same unit as the FX proposal leg this
   // lock settles — see @cbweb3/ui (lib/amount.ts). Plain text, because
   // <input type="number"> reads keystrokes through the browser locale.
-  const parsedHashAmount = useMemo(() => parseBaseUnits(hashAmount), [hashAmount]);
+  const parsedHashAmount = useMemo(() => parseAmount(hashAmount), [hashAmount]);
   const [hashAgreementId, setHashAgreementId] = useState("");
   const [showLockWithHashConfirm, setShowLockWithHashConfirm] = useState(false);
 
@@ -197,10 +198,17 @@ export function HTLCNewPage() {
   };
 
   const onConfirmLock = async () => {
+    // Unreachable through the UI: the confirmation only renders after validate()
+    // accepted the amount. Kept because it is what narrows the union, and because the
+    // operator can still edit the field while the card is open.
+    if (!parsedLockAmount.ok) {
+      setShowLockConfirm(false);
+      return;
+    }
     try {
       const result = await lock({
         receiver: lockReceiver,
-        amount: lockAmount,
+        amount: displayToBase(parsedLockAmount.canonical, tCeBMDecimals),
         ...(agreementId.trim() ? { agreement_id: agreementId.trim() } : {}),
         ...(timeLock !== undefined ? { time_lock: timeLock } : {}),
       });
@@ -212,11 +220,18 @@ export function HTLCNewPage() {
   };
 
   const onConfirmLockWithHash = async () => {
+    // Unreachable through the UI: the confirmation only renders after validate()
+    // accepted the amount. Kept because it is what narrows the union, and because the
+    // operator can still edit the field while the card is open.
+    if (!parsedHashAmount.ok) {
+      setShowLockWithHashConfirm(false);
+      return;
+    }
     try {
       const result = await lockWithHash({
         hash_lock: hashLock.trim(),
         receiver: hashReceiver,
-        amount: hashAmount,
+        amount: displayToBase(parsedHashAmount.canonical, tCeBMDecimals),
         ...(hashAgreementId.trim() ? { agreement_id: hashAgreementId.trim() } : {}),
       });
       toast.success("PvP transfer continuation submitted successfully.");
@@ -352,7 +367,7 @@ export function HTLCNewPage() {
               <Input
                 id="lock-amount"
                 type="text"
-                inputMode="numeric"
+                inputMode="decimal"
                 autoComplete="off"
                 value={lockAmount}
                 onChange={(event) => setLockAmount(event.target.value)}
@@ -440,7 +455,7 @@ export function HTLCNewPage() {
               <Input
                 id="hash-amount"
                 type="text"
-                inputMode="numeric"
+                inputMode="decimal"
                 autoComplete="off"
                 value={hashAmount}
                 onChange={(event) => setHashAmount(event.target.value)}

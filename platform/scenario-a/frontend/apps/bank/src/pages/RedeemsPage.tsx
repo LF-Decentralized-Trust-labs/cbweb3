@@ -11,7 +11,7 @@ import {
   CardTitle,
   Input,
   Label,
-  parseBaseUnits,
+  parseAmount,
   Table,
   TableBody,
   TableCell,
@@ -24,6 +24,7 @@ import { useEffect, useMemo, useState } from "react";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import { usePaymentStore } from "../stores";
 import {
+  displayToBase,
   fiatUnitLabel,
   formatCeBM,
   formatCeBMDisplay,
@@ -55,7 +56,10 @@ export function RedeemsPage() {
   // HTLC leg and the FX proposal, so the rule lives in @cbweb3/ui (lib/amount.ts)
   // rather than in an inline regex — and the field is plain text, because
   // <input type="number"> reads keystrokes through the browser locale.
-  const parsedAmount = useMemo(() => parseBaseUnits(amount), [amount]);
+  // Parsed under the ISO 20022 rule, then scaled by the token's own decimals before
+  // it leaves the form. Until ADR-009 this was a whole count of raw base units, so
+  // a tCeBM amount of 100.20 could not be expressed at all.
+  const parsedAmount = useMemo(() => parseAmount(amount), [amount]);
   const [confirmRequest, setConfirmRequest] = useState(false);
 
   useEffect(() => {
@@ -77,7 +81,7 @@ export function RedeemsPage() {
     }
 
     try {
-      const redeemId = await requestRedeem(amount);
+      const redeemId = await requestRedeem(displayToBase(parsedAmount.canonical, tCeBMDecimals));
       toast.success(`Redeem request submitted: ${redeemId}`);
       setAmount("0");
       setConfirmRequest(false);
@@ -138,7 +142,7 @@ export function RedeemsPage() {
             <Input
               id="redeem-amount"
               type="text"
-              inputMode="numeric"
+              inputMode="decimal"
               autoComplete="off"
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
