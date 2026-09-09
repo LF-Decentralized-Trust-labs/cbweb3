@@ -1013,13 +1013,31 @@ func (s *paymentOrchestratorService) TransferToken(ctx context.Context, req *pb.
 	return &pb.TransferTokenResponse{TxHash: txHash}, nil
 }
 
+// tCeBM is a Zeto privacy note rather than an ERC-20, so its scale is a convention
+// rather than a contract read. ADR-009 fixes it at 10^-18 per note unit, the same scale
+// as fCeBM, so that tokenisation is 1:1 across the two and an FX leg keeps matching the
+// HTLC leg that settles it.
+const (
+	tCeBMDecimals = 18
+	tCeBMSymbol   = "tCeBM"
+)
+
 func (s *paymentOrchestratorService) GetBalance(ctx context.Context, _ *pb.GetBalanceRequest) (*pb.GetBalanceResponse, error) {
 	balance, err := s.zeto.Balance(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "zeto balance: %v", err)
 	}
 
-	return &pb.GetBalanceResponse{Balance: balance}, nil
+	// tCeBM is a Zeto note, not an ERC-20: a note holds a bare integer and there is no
+	// decimals() to read. The scale is the convention fixed in ADR-009 — one note unit
+	// is 10^-18 tCeBM, matching fCeBM so tokenisation stays 1:1 and an HTLC leg keeps
+	// matching its FX leg. Measured ceiling for a note is 2^100-1, which leaves about
+	// 1.27 trillion tCeBM in a single note at this scale.
+	return &pb.GetBalanceResponse{
+		Balance:  balance,
+		Decimals: tCeBMDecimals,
+		Symbol:   tCeBMSymbol,
+	}, nil
 }
 
 func (s *paymentOrchestratorService) GetFiatBalance(ctx context.Context, _ *pb.GetFiatBalanceRequest) (*pb.GetFiatBalanceResponse, error) {
@@ -1032,7 +1050,26 @@ func (s *paymentOrchestratorService) GetFiatBalance(ctx context.Context, _ *pb.G
 		return nil, status.Errorf(codes.Internal, "fiat balance: %v", err)
 	}
 
-	return &pb.GetFiatBalanceResponse{Balance: balance}, nil
+	decimals, err := s.fiat.Decimals(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "fiat decimals: %v", err)
+	}
+
+	// The symbol names the currency in the UI but is not needed to read the balance
+	// correctly, so a failure here must not fail the call — clients fall back to their
+	// configured fiat symbol. The decimals above are different: without them the client
+	// cannot render the number at all, so that error does propagate.
+	symbol, err := s.fiat.Symbol(ctx)
+	if err != nil {
+		s.logger.Warn("fCeBM symbol read failed; returning balance without symbol", "error", err)
+		symbol = ""
+	}
+
+	return &pb.GetFiatBalanceResponse{
+		Balance:  balance,
+		Decimals: uint32(decimals),
+		Symbol:   symbol,
+	}, nil
 }
 
 // --- FX Agreement Operations ---
