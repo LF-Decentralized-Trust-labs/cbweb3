@@ -3,6 +3,9 @@
 import { AxiosError, AxiosHeaders } from "axios";
 import { describe, expect, it } from "vitest";
 import {
+  RELAY_AUTH_INVALID,
+  RELAY_AUTH_NOT_CONFIGURED,
+  RELAY_AUTH_REQUIRED,
   RELAY_CALLER_BANK_MISMATCH,
   RELAY_CALLER_IDENTITY_REQUIRED,
   RELAY_SIGNATURE_INVALID,
@@ -10,7 +13,9 @@ import {
   RELAY_SIGNATURE_REQUIRED,
   REQUESTER_NOT_A_PARTICIPANT,
   classifyTrustBlock,
+  isRelayConfigurationFault,
   isTrustRejection,
+  relayConfigurationBlock,
 } from "../trust-errors";
 
 const axiosErrorWith = (status: number, data: unknown) => {
@@ -101,5 +106,66 @@ describe("classifyTrustBlock", () => {
     expect(block.kind).toBe("unknown");
     // Neither cause is asserted, so the link is offered as a possibility rather than a diagnosis.
     expect(block.showOnboardingLink).toBe(true);
+  });
+});
+
+describe("isRelayConfigurationFault", () => {
+  // The third class. The relay credential that authenticates this gateway to the central bank is
+  // absent, divergent or unconfigured: the request never authenticated at all, so it is neither the
+  // central bank refusing a known identity nor a session that expired.
+  it.each([RELAY_AUTH_REQUIRED, RELAY_AUTH_INVALID, RELAY_AUTH_NOT_CONFIGURED])(
+    "recognizes %s as a configuration fault",
+    (code) => {
+      expect(isRelayConfigurationFault(axiosErrorWith(401, { code }))).toBe(true);
+    },
+  );
+
+  // RELAY_AUTH_NOT_CONFIGURED arrives as a 503, not a 401, and must still raise the notice rather
+  // than surfacing as a raw error — the same reason the trust classifier matches on the code alone.
+  it("matches on the code rather than the status", () => {
+    expect(isRelayConfigurationFault(axiosErrorWith(503, { code: RELAY_AUTH_NOT_CONFIGURED }))).toBe(true);
+  });
+
+  // The load-bearing separation. Presenting a configuration fault as a trust rejection would tell an
+  // operator whose institution is perfectly registered to go and finish onboarding.
+  it.each([RELAY_AUTH_REQUIRED, RELAY_AUTH_INVALID, RELAY_AUTH_NOT_CONFIGURED])(
+    "does not classify %s as a trust rejection",
+    (code) => {
+      expect(isTrustRejection(axiosErrorWith(401, { code }))).toBe(false);
+    },
+  );
+
+  it.each([RELAY_SIGNATURE_INVALID, RELAY_CALLER_IDENTITY_REQUIRED, REQUESTER_NOT_A_PARTICIPANT])(
+    "does not claim %s, which is a trust rejection",
+    (code) => {
+      expect(isRelayConfigurationFault(axiosErrorWith(401, { code }))).toBe(false);
+    },
+  );
+
+  it("ignores an ordinary expired session", () => {
+    expect(isRelayConfigurationFault(axiosErrorWith(401, { error: "invalid or expired token" }))).toBe(false);
+  });
+
+  it("ignores non-axios values and bodyless responses", () => {
+    expect(isRelayConfigurationFault(new Error("boom"))).toBe(false);
+    expect(isRelayConfigurationFault(null)).toBe(false);
+    expect(isRelayConfigurationFault(axiosErrorWith(401, undefined))).toBe(false);
+  });
+});
+
+describe("relayConfigurationBlock", () => {
+  it("names a configuration fault and does not send the operator to onboarding", () => {
+    const block = relayConfigurationBlock();
+
+    expect(block.kind).toBe("relay-misconfigured");
+    // Onboarding is not the remedy and may well be complete; offering it would be a dead end.
+    expect(block.showOnboardingLink).toBe(false);
+    expect(block.description.toLowerCase()).not.toContain("onboarding");
+  });
+
+  it("does not depend on the onboarding status", () => {
+    // Unlike classifyTrustBlock, the cause is known from the code alone: the reason is on the wire,
+    // not in this institution's registration, so there is nothing to look up and nothing to guess.
+    expect(relayConfigurationBlock()).toEqual(relayConfigurationBlock());
   });
 });

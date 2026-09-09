@@ -159,17 +159,20 @@ func RequireRelayAuthMigrating(cfg RelayAuthConfig) fiber.Handler {
 			// Neither signatures nor a secret configured — fail closed.
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 				"error": "relay auth not configured on server",
+				"code":  "RELAY_AUTH_NOT_CONFIGURED",
 			})
 		}
 		provided := c.Get("X-Relay-Auth")
 		if provided == "" {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": "relay authentication required (signature or X-Relay-Auth)",
+				"code":  "RELAY_AUTH_REQUIRED",
 			})
 		}
 		if subtle.ConstantTimeCompare([]byte(provided), []byte(cfg.LegacySecret)) != 1 {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": "invalid relay auth secret",
+				"code":  "RELAY_AUTH_INVALID",
 			})
 		}
 		return c.Next()

@@ -177,6 +177,142 @@ describe("useTrustStore", () => {
     expect(useTrustStore.getState().block).not.toBeNull();
   });
 
+  // --- the relay credential is a different explanation, and it must not be reclassified ---
+  //
+  // classifyTrustBlock reads this institution's onboarding status, which is the right question when
+  // the central bank refuses a known identity and the wrong one here: the request never
+  // authenticated, so the cause is a credential on the wire, not a registration. An ACTIVE bank
+  // would be told its institution is "not recognized"; a bank mid-onboarding would be told to go and
+  // finish it. Both are dead ends, and the second is a dead end the operator would actually walk.
+
+  it("explains a configuration fault without asking about onboarding", async () => {
+    await useTrustStore.getState().reportConfigurationFault("/payments/deposits");
+
+    expect(useTrustStore.getState().block?.kind).toBe("relay-misconfigured");
+    expect(getMyStatus).not.toHaveBeenCalled();
+  });
+
+  it("retires the notice when a previously refused path answers again", async () => {
+    const trust = useTrustStore.getState();
+
+    await trust.reportConfigurationFault("/payments/deposits");
+    trust.noteSuccess("/payments/deposits");
+
+    expect(useTrustStore.getState().block).toBeNull();
+  });
+
+  it("recheck keeps the configuration explanation when the read is refused again", async () => {
+    // The regression this guards: recheck's failure path re-reads the onboarding status, which would
+    // silently swap the configuration notice for an onboarding one and send the operator to a wizard
+    // that cannot fix a shared secret.
+    getMyStatus.mockResolvedValue(myStatus("ACTIVE"));
+    const probe = vi.fn().mockRejectedValue(new Error("still refused"));
+
+    await useTrustStore.getState().reportConfigurationFault("/payments/deposits", "get", probe);
+    await useTrustStore.getState().recheck();
+
+    expect(probe).toHaveBeenCalledOnce();
+    expect(useTrustStore.getState().block?.kind).toBe("relay-misconfigured");
+    expect(getMyStatus).not.toHaveBeenCalled();
+    expect(useTrustStore.getState().checking).toBe(false);
+  });
+
+  it("recheck retires the configuration notice when the channel answers", async () => {
+    const probe = vi.fn().mockResolvedValue({ status: 200 });
+
+    await useTrustStore.getState().reportConfigurationFault("/payments/deposits", "get", probe);
+    await useTrustStore.getState().recheck();
+
+    expect(useTrustStore.getState().block).toBeNull();
+  });
+
+  it("recheck never replays a write refused for a configuration fault", async () => {
+    getMyStatus.mockResolvedValue(myStatus("ACTIVE"));
+    const replayPayment = vi.fn().mockResolvedValue({ status: 200 });
+
+    await useTrustStore.getState().reportConfigurationFault("/payments/deposits", "post", replayPayment);
+    await useTrustStore.getState().recheck();
+
+    expect(replayPayment).not.toHaveBeenCalled();
+    // Nothing safe to repeat, and the reason is already known from the code — so the notice stands
+    // as it is, without a status call that could only replace it with a wrong explanation.
+    expect(getMyStatus).not.toHaveBeenCalled();
+    expect(useTrustStore.getState().block?.kind).toBe("relay-misconfigured");
+  });
+
+  // Review finding: the notice was pinned by a module-level flag that only clear() reset, so a
+  // classification arriving from an in-flight status call could contradict it — the flag said
+  // "configuration fault" while the screen said "finish your onboarding", and the next recheck
+  // flipped it back. The state is now derived from the notice itself, so the two cannot disagree.
+  it("does not let an in-flight onboarding read overwrite a configuration notice", async () => {
+    let resolveStatus: (value: OnboardingMyStatusResponse) => void = () => {};
+    getMyStatus.mockReturnValue(
+      new Promise<OnboardingMyStatusResponse>((resolve) => {
+        resolveStatus = resolve;
+      }),
+    );
+
+    // A trust rejection starts reading the status; the relay fault lands before it answers.
+    const pending = useTrustStore.getState().reportRejection("/payments/escrows");
+    await useTrustStore.getState().reportConfigurationFault("/payments/deposits");
+    expect(useTrustStore.getState().block?.kind).toBe("relay-misconfigured");
+
+    resolveStatus(myStatus("NONE"));
+    await pending;
+
+    expect(useTrustStore.getState().block?.kind).toBe("relay-misconfigured");
+  });
+
+  // Review finding: with only a write refused there is nothing safe to replay, so "Check again" made
+  // no request and changed nothing on screen — a button that cannot work. The store says so instead,
+  // and the notice stops offering it.
+  it("cannot recheck a configuration fault seen only on a write", async () => {
+    const replayPayment = vi.fn().mockResolvedValue({ status: 200 });
+
+    await useTrustStore.getState().reportConfigurationFault("/payments/deposits", "post", replayPayment);
+
+    expect(useTrustStore.getState().canRecheck).toBe(false);
+  });
+
+  it("can recheck a configuration fault once a read was refused too", async () => {
+    const probe = vi.fn().mockResolvedValue({ status: 200 });
+
+    await useTrustStore.getState().reportConfigurationFault("/payments/deposits", "post", vi.fn());
+    await useTrustStore.getState().reportConfigurationFault("/payments/escrows", "get", probe);
+
+    expect(useTrustStore.getState().canRecheck).toBe(true);
+  });
+
+  // The button stays for a trust rejection with nothing to replay: there, re-reading the reason is
+  // something — onboarding may have advanced, a credential may have been frozen. Only the
+  // configuration fault has a reason that cannot change.
+  it("can still recheck a trust rejection that has no read to replay", async () => {
+    getMyStatus.mockResolvedValue(myStatus("NONE"));
+
+    await useTrustStore.getState().reportRejection("/payments/deposits", "post", vi.fn());
+
+    expect(useTrustStore.getState().canRecheck).toBe(true);
+  });
+
+  it("clear restores the ability to recheck", async () => {
+    await useTrustStore.getState().reportConfigurationFault("/payments/deposits", "post", vi.fn());
+    expect(useTrustStore.getState().canRecheck).toBe(false);
+
+    useTrustStore.getState().clear();
+
+    expect(useTrustStore.getState().canRecheck).toBe(true);
+  });
+
+  it("clear resets the configuration fault, so a later trust rejection classifies normally", async () => {
+    getMyStatus.mockResolvedValue(myStatus("NONE"));
+
+    await useTrustStore.getState().reportConfigurationFault("/payments/deposits");
+    useTrustStore.getState().clear();
+    await useTrustStore.getState().reportRejection("/payments/deposits");
+
+    expect(useTrustStore.getState().block?.kind).toBe("onboarding-required");
+  });
+
   it("recheck prefers a refused read even when a write was refused first", async () => {
     getMyStatus.mockResolvedValue(myStatus("ACTIVE"));
     const replayPayment = vi.fn().mockResolvedValue({ status: 200 });

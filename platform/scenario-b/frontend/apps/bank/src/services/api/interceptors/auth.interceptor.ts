@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import axios, { AxiosError, type AxiosInstance, type AxiosResponse, type InternalAxiosRequestConfig } from "axios";
-import { isTrustRejection } from "../trust-errors";
+import { isRelayConfigurationFault, isTrustRejection } from "../trust-errors";
 
 const REFRESH_PATH = "/auth/refresh";
 const API_VERSION_PATH_RE = /\/api\/v[0-9]+$/i;
@@ -62,6 +62,16 @@ async function onTrustRejected(error: AxiosError, client: AxiosInstance) {
   return Promise.reject(error);
 }
 
+async function onRelayConfigurationFault(error: AxiosError, client: AxiosInstance) {
+  const { useTrustStore } = await import("../../../stores/trust.store");
+  const config = error.config;
+  // Same rule as onTrustRejected: the probe replays through this instance, and the method is what
+  // lets the store refuse to repeat a write.
+  const probe = config ? () => client.request(config) : undefined;
+  void useTrustStore.getState().reportConfigurationFault(pathOf(config?.url), config?.method, probe);
+  return Promise.reject(error);
+}
+
 export function attachAuthInterceptor(httpClient: AxiosInstance) {
   httpClient.interceptors.response.use(
     (response) => onTrustRestored(response),
@@ -72,6 +82,13 @@ export function attachAuthInterceptor(httpClient: AxiosInstance) {
       // with their session. Report it instead, so every screen can explain the real cause.
       if (isTrustRejection(error)) {
         return onTrustRejected(error, httpClient);
+      }
+
+      // Nor is the relay credential being refused. The session is valid here too, so the refresh
+      // would succeed and the retry would fail identically — the same ejection, reached through a
+      // different door. It is checked before the status test because one of these is a 503.
+      if (isRelayConfigurationFault(error)) {
+        return onRelayConfigurationFault(error, httpClient);
       }
 
       if (!error.response || error.response.status !== 401) {

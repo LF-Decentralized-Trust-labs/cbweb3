@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { onboardingApi } from "../services/api";
-import { classifyTrustBlock, type TrustBlock } from "../services/api/trust-errors";
+import { classifyTrustBlock, relayConfigurationBlock, type TrustBlock } from "../services/api/trust-errors";
 
 /**
  * TrustProbe re-issues one refused request through the same HTTP client that made it, so a success
@@ -25,6 +25,13 @@ type TrustState = {
    * operator pressed a button labelled "Recheck" would move value.
    */
   reportRejection: (path: string, method?: string, probe?: TrustProbe) => Promise<void>;
+  /**
+   * Called from the HTTP layer when the relay credential, rather than our identity, was refused.
+   *
+   * Separate from reportRejection because the explanation is already known from the code: there is
+   * no onboarding status to read, and reading one would replace a true notice with a wrong one.
+   */
+  reportConfigurationFault: (path: string, method?: string, probe?: TrustProbe) => Promise<void>;
   /** Called from the HTTP layer on every success; only a previously rejected path retires the notice. */
   noteSuccess: (path: string) => void;
   /**
@@ -36,6 +43,15 @@ type TrustState = {
    * rejection is a configuration problem and the notice is still true.
    */
   recheck: () => Promise<void>;
+  /**
+   * Whether recheck can do anything at all, so the notice does not offer a button that cannot work.
+   *
+   * False in exactly one case: a relay configuration fault with no refused read to replay. There the
+   * reason cannot change — the code already named it, and the onboarding status has no bearing on a
+   * credential shared between two gateways — and the only honest probe, replaying the refused
+   * request, is a write the store must never repeat.
+   */
+  canRecheck: boolean;
   clear: () => void;
 };
 
@@ -77,15 +93,40 @@ const isRead = (method?: string) => (method ?? "").toLowerCase() === "get";
  * inherits the explanation instead of surfacing a raw signature error.
  */
 export const useTrustStore = create<TrustState>((set, get) => {
+  /**
+   * Whether the notice on screen explains a relay configuration fault.
+   *
+   * Derived from the notice rather than tracked alongside it. A separate flag could disagree with
+   * what the operator is reading — a status call already in flight resolves, replaces the block, and
+   * leaves the flag saying otherwise — and every later decision would then be made on the wrong one.
+   */
+  const showingRelayFault = () => get().block?.kind === "relay-misconfigured";
+
+  const syncRecheckability = () => {
+    set({ canRecheck: readProbes.size > 0 || get().block?.kind !== "relay-misconfigured" });
+  };
+
+  /**
+   * settle applies an onboarding classification, unless a configuration notice is already up.
+   *
+   * The classification answers "what is wrong with this institution's registration", which is not
+   * the question when the gateway could not authenticate at all. Letting it land would replace a
+   * true explanation with a confident wrong one.
+   */
+  const settle = (candidate: TrustBlock) => {
+    set({ block: showingRelayFault() ? relayConfigurationBlock() : candidate, checking: false });
+    syncRecheckability();
+  };
+
   const load = async () => {
     set({ checking: true });
     try {
       const response = await onboardingApi.getMyStatus();
-      set({ block: classifyTrustBlock(response.status), checking: false });
+      settle(classifyTrustBlock(response.status));
     } catch {
       // The status call failing does not make the rejection go away; it only means we cannot name the
       // cause. Say that instead of guessing.
-      set({ block: classifyTrustBlock(null), checking: false });
+      settle(classifyTrustBlock(null));
     }
   };
 
@@ -101,6 +142,7 @@ export const useTrustStore = create<TrustState>((set, get) => {
   return {
     block: null,
     checking: false,
+    canRecheck: true,
 
     reportRejection: async (path, method, probe) => {
       const key = basePath(path);
@@ -108,12 +150,27 @@ export const useTrustStore = create<TrustState>((set, get) => {
       if (probe && isRead(method)) {
         readProbes.set(key, probe);
       }
+      syncRecheckability();
       // A page load fires several requests at once and each one is rejected. Without this the operator
       // would trigger one status call per failed request.
       if (get().block !== null) {
         return;
       }
       await dedupedLoad();
+    },
+
+    reportConfigurationFault: async (path, method, probe) => {
+      const key = basePath(path);
+      rejectedPaths.add(key);
+      if (probe && isRead(method)) {
+        readProbes.set(key, probe);
+      }
+      // First notice wins, as with a trust rejection: a page load raises several at once and the
+      // operator needs one explanation, not the last one to arrive.
+      if (get().block === null) {
+        set({ block: relayConfigurationBlock(), checking: false });
+      }
+      syncRecheckability();
     },
 
     noteSuccess: (path) => {
@@ -129,8 +186,12 @@ export const useTrustStore = create<TrustState>((set, get) => {
       const next = readProbes.entries().next();
       if (next.done) {
         // Nothing safe to repeat — only writes were refused, or the notice came from somewhere with
-        // no request to replay. Refreshing the reason is all this button can honestly do.
-        await dedupedLoad();
+        // no request to replay. Refreshing the reason is all this button can honestly do, and for a
+        // configuration fault it cannot even do that: canRecheck is false there and the notice offers
+        // no button, so this is the guard for a caller that asks anyway.
+        if (!showingRelayFault()) {
+          await dedupedLoad();
+        }
         return;
       }
       const [path, probe] = next.value;
@@ -140,7 +201,14 @@ export const useTrustStore = create<TrustState>((set, get) => {
         await probe();
       } catch {
         // Still refused. The cause may have changed even so (onboarding advanced, a credential was
-        // frozen), so the operator gets the current reason instead of the one from the first refusal.
+        // frozen), so the operator gets the current reason instead of the one from the first refusal
+        // — unless the refusal was the relay credential, where the onboarding status has no bearing
+        // on it. Re-reading it there would spend a request to learn nothing, so the notice stands and
+        // only the spinner stops.
+        if (showingRelayFault()) {
+          set({ checking: false });
+          return;
+        }
         await load();
         return;
       }
@@ -154,7 +222,7 @@ export const useTrustStore = create<TrustState>((set, get) => {
     clear: () => {
       rejectedPaths = new Set();
       readProbes = new Map();
-      set({ block: null, checking: false });
+      set({ block: null, checking: false, canRecheck: true });
     },
   };
 });
