@@ -24,13 +24,14 @@ import { useEffect, useMemo, useState } from "react";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import { usePaymentStore } from "../stores";
 import {
-  PaymentStatus,
   fiatUnitLabel,
   formatCeBM,
+  formatCeBMDisplay,
   formatFiatUnits,
   getPaymentStatusLabel,
   getPaymentStatusVariant,
   normalizePaymentStatus,
+  PaymentStatus,
 } from "../types";
 
 const shortHash = (value: string) =>
@@ -42,6 +43,9 @@ export function RedeemsPage() {
   const redeems = usePaymentStore((state) => state.redeems);
   const balance = usePaymentStore((state) => state.balance);
   const fiatBalance = usePaymentStore((state) => state.fiatBalance);
+  const fiatDecimals = usePaymentStore((state) => state.fiatDecimals);
+  const fiatSymbol = usePaymentStore((state) => state.fiatSymbol);
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
 
@@ -99,6 +103,7 @@ export function RedeemsPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <BalanceWidget
           balance={balance}
+          decimals={tCeBMDecimals}
           loading={status === "loading" && balance === null}
         />
         <Card>
@@ -107,7 +112,7 @@ export function RedeemsPage() {
             <CardTitle>
               {status === "loading" && fiatBalance === null
                 ? "Loading..."
-                : formatFiatUnits(fiatBalance ?? "0")}
+                : formatFiatUnits(fiatBalance ?? "0", fiatDecimals, fiatSymbol)}
             </CardTitle>
           </CardHeader>
         </Card>
@@ -160,7 +165,7 @@ export function RedeemsPage() {
           <CardHeader>
             <CardTitle>Confirm Redeem Request</CardTitle>
             <CardDescription>
-              {formatCeBM(amount)} will be submitted for central bank fiat
+              {formatCeBMDisplay(amount, tCeBMDecimals)} will be submitted for central bank fiat
               reserve release approval.
             </CardDescription>
           </CardHeader>
@@ -200,7 +205,7 @@ export function RedeemsPage() {
               {redeems.map((redeem) => (
                 <TableRow key={redeem.id}>
                   <TableCell className="font-medium">{redeem.id}</TableCell>
-                  <TableCell>{formatCeBM(redeem.amount)}</TableCell>
+                  <TableCell>{formatCeBM(redeem.amount, tCeBMDecimals)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(redeem.status)}>
                       {getPaymentStatusLabel(redeem.status)}

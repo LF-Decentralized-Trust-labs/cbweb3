@@ -16,6 +16,7 @@ import {
   TableRow,
 } from "@cbweb3/ui";
 import { useEffect, useMemo } from "react";
+import { usePaymentStore } from "../stores";
 import { useStatementStore } from "../stores";
 import { formatCeBM, formatFiatUnits, type Movement } from "../types";
 
@@ -33,22 +34,35 @@ const tokenLabel: Record<string, string> = {
   tCeBM: "tCeBM",
 };
 
-// Amounts are integer units; format per token (fiat symbol vs tCeBM) with a
-// directional sign.
-function formatAmount(movement: Movement): string {
-  const formatted = movement.token === "tCeBM" ? formatCeBM(movement.amount) : formatFiatUnits(movement.amount);
+// Amounts are base units; the scale comes from the store (ADR-009). Formatted per
+// token (fiat symbol vs tCeBM), with a directional sign.
+function formatAmount(
+  movement: Movement,
+  scales: { tCeBMDecimals: number; fiatDecimals: number; fiatSymbol: string },
+): string {
+  const formatted =
+    movement.token === "tCeBM"
+      ? formatCeBM(movement.amount, scales.tCeBMDecimals)
+      : formatFiatUnits(movement.amount, scales.fiatDecimals, scales.fiatSymbol);
   return `${movement.direction === "credit" ? "+" : "-"} ${formatted}`;
 }
 
 export function StatementPage() {
+  // The statement renders amounts from both tokens, so it needs both scales. They live
+  // in the payment store because that is where the balance endpoints report them.
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
+  const fiatDecimals = usePaymentStore((state) => state.fiatDecimals);
+  const fiatSymbol = usePaymentStore((state) => state.fiatSymbol);
+  const fetchPayments = usePaymentStore((state) => state.fetchAll);
   const fetchAll = useStatementStore((state) => state.fetchAll);
   const movements = useStatementStore((state) => state.movements);
   const status = useStatementStore((state) => state.status);
   const error = useStatementStore((state) => state.error);
 
   useEffect(() => {
+    void fetchPayments();
     void fetchAll();
-  }, [fetchAll]);
+  }, [fetchAll, fetchPayments]);
 
   const { credits, debits } = useMemo(
     () => ({
@@ -121,7 +135,7 @@ export function StatementPage() {
                       {movement.direction === "credit" ? "Credit" : "Debit"}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right font-medium">{formatAmount(movement)}</TableCell>
+                  <TableCell className="text-right font-medium">{formatAmount(movement, { tCeBMDecimals, fiatDecimals, fiatSymbol })}</TableCell>
                   <TableCell title={movement.reference}>{shortHash(movement.reference)}</TableCell>
                 </TableRow>
               ))}

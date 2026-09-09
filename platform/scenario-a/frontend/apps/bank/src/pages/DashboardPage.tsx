@@ -42,9 +42,16 @@ const kindLabel: Record<string, string> = {
   pvp_settlement: "PvP Settlement",
 };
 
-// Amounts are integer units; format per token with a directional sign.
-function formatMovementAmount(movement: Movement): string {
-  const formatted = movement.token === "tCeBM" ? formatCeBM(movement.amount) : formatFiatUnits(movement.amount);
+// Amounts are base units; the scale comes from the store because the token decides it,
+// not this component (ADR-009). Formatted per token, with a directional sign.
+function formatMovementAmount(
+  movement: Movement,
+  scales: { tCeBMDecimals: number; fiatDecimals: number; fiatSymbol: string },
+): string {
+  const formatted =
+    movement.token === "tCeBM"
+      ? formatCeBM(movement.amount, scales.tCeBMDecimals)
+      : formatFiatUnits(movement.amount, scales.fiatDecimals, scales.fiatSymbol);
   return `${movement.direction === "credit" ? "+" : "-"} ${formatted}`;
 }
 
@@ -70,6 +77,9 @@ export function DashboardPage() {
   const fetchPayments = usePaymentStore((state) => state.fetchAll);
   const paymentBalance = usePaymentStore((state) => state.balance);
   const fiatBalance = usePaymentStore((state) => state.fiatBalance);
+  const fiatDecimals = usePaymentStore((state) => state.fiatDecimals);
+  const fiatSymbol = usePaymentStore((state) => state.fiatSymbol);
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
   const paymentStatus = usePaymentStore((state) => state.status);
   const deposits = usePaymentStore((state) => state.deposits);
   const escrows = usePaymentStore((state) => state.escrows);
@@ -138,6 +148,7 @@ export function DashboardPage() {
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <BalanceWidget
           balance={paymentBalance}
+          decimals={tCeBMDecimals}
           loading={paymentStatus === "loading" && paymentBalance === null}
         />
         <Card>
@@ -146,7 +157,7 @@ export function DashboardPage() {
             <CardTitle>
               {paymentStatus === "loading" && fiatBalance === null
                 ? "Loading..."
-                : formatFiatUnits(fiatBalance ?? "0")}
+                : formatFiatUnits(fiatBalance ?? "0", fiatDecimals, fiatSymbol)}
             </CardTitle>
           </CardHeader>
         </Card>
@@ -311,7 +322,7 @@ export function DashboardPage() {
                   {new Date(movement.timestamp).toLocaleString()} · {kindLabel[movement.kind] ?? movement.kind} · {movement.token}
                 </span>
                 <span className="flex items-center gap-2">
-                  <span className="font-medium">{formatMovementAmount(movement)}</span>
+                  <span className="font-medium">{formatMovementAmount(movement, { tCeBMDecimals, fiatDecimals, fiatSymbol })}</span>
                   <Badge variant={movement.direction === "credit" ? "success" : "destructive"}>
                     {movement.direction === "credit" ? "Credit" : "Debit"}
                   </Badge>

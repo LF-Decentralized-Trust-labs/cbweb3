@@ -82,6 +82,14 @@ export interface ListRedeemsResponse {
 
 export interface BalanceResponse {
   balance: string;
+  /**
+   * Base-unit scale of the balance. Required to render it: without the scale a
+   * balance of "1000" is indistinguishable between 1000 wei and 1000 whole units,
+   * which is precisely what the portal used to get wrong (ADR-009).
+   */
+  decimals: number;
+  /** Token symbol from the contract for fCeBM, or the fixed "tCeBM" for the Zeto note. */
+  symbol: string;
 }
 
 export const paymentStatusLabel: Record<PaymentStatus, string> = {
@@ -143,20 +151,84 @@ export function getPaymentStatusVariant(status: unknown): "warning" | "success" 
   return normalized !== null ? paymentStatusVariant[normalized] : "outline";
 }
 
-export function formatCeBM(rawAmount: string): string {
-  if (!rawAmount || rawAmount === "0") {
-    return "0 tCeBM";
-  }
+// Money is displayed with exactly the minor units of the currency: two places for the
+// currencies in this pilot (ISO 4217). The tokens hold 18 decimals, so this is a
+// presentation decision — the value on the wire stays a base-unit integer.
+export const CURRENCY_DISPLAY_DECIMALS = 2;
 
+/**
+ * Render a base-unit amount for reading.
+ *
+ * TRUNCATES rather than rounds, so a balance never reads as more than it is, and a
+ * non-zero holding too small to appear at two places reads "< 0.01" instead of "0" —
+ * showing a zero for money someone holds is the same class of defect as showing the
+ * wrong figure.
+ *
+ * Never use this to prefill an amount input: truncating a value that becomes a
+ * transaction changes the transaction. Use baseToExactDisplay for that.
+ */
+export function formatBaseUnits(
+  rawAmount: string,
+  decimals: number,
+  displayDecimals: number = CURRENCY_DISPLAY_DECIMALS,
+): string {
+  if (!rawAmount || !/^\d+$/.test(rawAmount)) return (0).toFixed(displayDecimals);
+  const divisor = 10n ** BigInt(decimals);
   const value = BigInt(rawAmount);
-  return `${value.toLocaleString("en-US")} tCeBM`;
+  const whole = value / divisor;
+  const frac = (value % divisor).toString().padStart(decimals, "0").slice(0, displayDecimals);
+  if (whole === 0n && BigInt(frac || "0") === 0n && value > 0n) {
+    return `< 0.${"0".repeat(Math.max(displayDecimals - 1, 0))}1`;
+  }
+  return displayDecimals > 0
+    ? `${whole.toLocaleString("en-US")}.${frac}`
+    : whole.toLocaleString("en-US");
 }
 
-export function formatFiatUnits(rawAmount: string): string {
-  if (!rawAmount || rawAmount === "0") {
-    return `0 ${fiatUnitLabel}`;
-  }
-
+/**
+ * Full precision, for a value that will be typed back into an amount field — a
+ * suggested maximum, a matched amount. Trailing zeros trimmed.
+ */
+export function baseToExactDisplay(rawAmount: string, decimals: number): string {
+  if (!rawAmount || !/^\d+$/.test(rawAmount)) return "";
+  const divisor = 10n ** BigInt(decimals);
   const value = BigInt(rawAmount);
-  return `${value.toLocaleString("en-US")} ${fiatUnitLabel}`;
+  const whole = value / divisor;
+  const frac = (value % divisor).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return frac ? `${whole}.${frac}` : whole.toString();
+}
+
+/**
+ * Convert what an operator typed into the base-unit integer the API takes.
+ *
+ * Expects the canonical ISO 20022 form that parseAmount produces: digits, optionally
+ * one dot, digits. It does not clean its input, deliberately — a converter that
+ * silently strips characters is how "1000,10" became 100010 in the other scenario.
+ */
+export function displayToBase(displayAmount: string, decimals: number): string {
+  if (!displayAmount) return "0";
+  const [whole, frac = ""] = displayAmount.trim().split(".");
+  const fracPadded = frac.padEnd(decimals, "0").slice(0, decimals);
+  return `${whole}${fracPadded}`.replace(/^0+/, "") || "0";
+}
+
+export function formatCeBM(rawAmount: string, decimals: number): string {
+  return `${formatBaseUnits(rawAmount, decimals)} tCeBM`;
+}
+
+export function formatFiatUnits(rawAmount: string, decimals: number, symbol?: string | null): string {
+  return `${formatBaseUnits(rawAmount, decimals)} ${symbol?.trim() || fiatUnitLabel}`;
+}
+
+// The two below take what a FORM holds — the string the operator typed — and convert
+// before formatting. Handing a display value straight to formatCeBM/formatFiatUnits
+// divides it twice: at 18 decimals a typed 1500 renders as "0.00". That is the defect
+// the confirmation panels in the other scenario shipped with, and the reason
+// __tests__/confirmation-amount-units.test.ts exists here.
+export function formatCeBMDisplay(displayAmount: string, decimals: number): string {
+  return formatCeBM(displayToBase(displayAmount, decimals), decimals);
+}
+
+export function formatFiatDisplayUnits(displayAmount: string, decimals: number, symbol?: string | null): string {
+  return formatFiatUnits(displayToBase(displayAmount, decimals), decimals, symbol);
 }

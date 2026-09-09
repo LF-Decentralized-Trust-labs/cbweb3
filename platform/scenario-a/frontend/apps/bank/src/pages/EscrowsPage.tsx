@@ -24,12 +24,13 @@ import { useEffect, useMemo, useState } from "react";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import { usePaymentStore } from "../stores";
 import {
-  PaymentStatus,
   formatCeBM,
+  formatCeBMDisplay,
   formatFiatUnits,
   getPaymentStatusLabel,
   getPaymentStatusVariant,
   normalizePaymentStatus,
+  PaymentStatus,
 } from "../types";
 
 const shortHash = (value: string) => (value ? `${value.slice(0, 10)}...${value.slice(-8)}` : "-");
@@ -40,6 +41,9 @@ export function EscrowsPage() {
   const escrows = usePaymentStore((state) => state.escrows);
   const balance = usePaymentStore((state) => state.balance);
   const fiatBalance = usePaymentStore((state) => state.fiatBalance);
+  const fiatDecimals = usePaymentStore((state) => state.fiatDecimals);
+  const fiatSymbol = usePaymentStore((state) => state.fiatSymbol);
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
 
@@ -88,11 +92,11 @@ export function EscrowsPage() {
   return (
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-3">
-        <BalanceWidget balance={balance} loading={status === "loading" && balance === null} />
+        <BalanceWidget balance={balance} decimals={tCeBMDecimals} loading={status === "loading" && balance === null} />
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Fiat Reserve Balance</CardDescription>
-            <CardTitle>{status === "loading" && fiatBalance === null ? "Loading..." : formatFiatUnits(fiatBalance ?? "0")}</CardTitle>
+            <CardTitle>{status === "loading" && fiatBalance === null ? "Loading..." : formatFiatUnits(fiatBalance ?? "0", fiatDecimals, fiatSymbol)}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -137,7 +141,7 @@ export function EscrowsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Confirm Reserve Tokenisation</CardTitle>
-            <CardDescription>{formatCeBM(amount)} will be submitted for central bank tCeBM issuance.</CardDescription>
+            <CardDescription>{formatCeBMDisplay(amount, tCeBMDecimals)} will be submitted for central bank tCeBM issuance.</CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
             <Button onClick={() => void onSubmit()} disabled={status === "loading"}>
@@ -172,7 +176,7 @@ export function EscrowsPage() {
               {escrows.map((escrow) => (
                 <TableRow key={escrow.id}>
                   <TableCell className="font-medium">{escrow.id}</TableCell>
-                  <TableCell>{formatCeBM(escrow.amount)}</TableCell>
+                  <TableCell>{formatCeBM(escrow.amount, tCeBMDecimals)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(escrow.status)}>{getPaymentStatusLabel(escrow.status)}</Badge>
                   </TableCell>

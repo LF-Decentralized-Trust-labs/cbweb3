@@ -10,6 +10,13 @@ type PaymentState = {
   redeems: RedeemRecord[];
   balance: string | null;
   fiatBalance: string | null;
+  // Scales for the two balances above. A balance is unreadable without its scale, so
+  // these travel with it from the gateway (ADR-009). The fallbacks below are the
+  // deployed values, used only before the first fetch resolves.
+  tCeBMDecimals: number;
+  tCeBMSymbol: string;
+  fiatDecimals: number;
+  fiatSymbol: string;
   status: AsyncStatus;
   error: string | null;
   fetchAll: () => Promise<void>;
@@ -26,6 +33,10 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
   redeems: [],
   balance: null,
   fiatBalance: null,
+  tCeBMDecimals: 18,
+  tCeBMSymbol: "tCeBM",
+  fiatDecimals: 18,
+  fiatSymbol: "",
   status: "idle",
   error: null,
   fetchAll: async () => {
@@ -45,6 +56,10 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
         redeems: redeemsResponse.redeems,
         balance: balanceResponse.balance,
         fiatBalance: fiatBalanceResponse.balance,
+        tCeBMDecimals: balanceResponse.decimals,
+        tCeBMSymbol: balanceResponse.symbol || "tCeBM",
+        fiatDecimals: fiatBalanceResponse.decimals,
+        fiatSymbol: fiatBalanceResponse.symbol,
         status: "idle",
       });
     } catch (error) {

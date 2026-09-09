@@ -53,6 +53,7 @@ export function HTLCHistoryPage() {
   const search = useHtlcStore((state) => state.search);
   const fetchPayments = usePaymentStore((state) => state.fetchAll);
   const balance = usePaymentStore((state) => state.balance);
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
   const paymentStatus = usePaymentStore((state) => state.status);
 
   const [stateFilter, setStateFilter] = useState<FilterState>("ALL");
@@ -98,7 +99,7 @@ export function HTLCHistoryPage() {
         </Button>
       </div>
 
-      <BalanceWidget balance={balance} loading={paymentStatus === "loading" && balance === null} />
+      <BalanceWidget balance={balance} decimals={tCeBMDecimals} loading={paymentStatus === "loading" && balance === null} />
 
       <Card>
         <CardHeader>

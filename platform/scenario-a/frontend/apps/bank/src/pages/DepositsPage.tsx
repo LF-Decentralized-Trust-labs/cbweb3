@@ -24,12 +24,13 @@ import { useEffect, useMemo, useState } from "react";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import { usePaymentStore } from "../stores";
 import {
-  PaymentStatus,
   fiatUnitLabel,
+  formatFiatDisplayUnits,
   formatFiatUnits,
   getPaymentStatusLabel,
   getPaymentStatusVariant,
   normalizePaymentStatus,
+  PaymentStatus,
 } from "../types";
 
 const shortHash = (value: string) => (value ? `${value.slice(0, 10)}...${value.slice(-8)}` : "-");
@@ -39,7 +40,10 @@ export function DepositsPage() {
   const registerDeposit = usePaymentStore((state) => state.registerDeposit);
   const deposits = usePaymentStore((state) => state.deposits);
   const balance = usePaymentStore((state) => state.balance);
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
   const fiatBalance = usePaymentStore((state) => state.fiatBalance);
+  const fiatDecimals = usePaymentStore((state) => state.fiatDecimals);
+  const fiatSymbol = usePaymentStore((state) => state.fiatSymbol);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
 
@@ -88,11 +92,11 @@ export function DepositsPage() {
   return (
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-3">
-        <BalanceWidget balance={balance} loading={status === "loading" && balance === null} />
+        <BalanceWidget balance={balance} decimals={tCeBMDecimals} loading={status === "loading" && balance === null} />
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Fiat Reserve Balance</CardDescription>
-            <CardTitle>{status === "loading" && fiatBalance === null ? "Loading..." : formatFiatUnits(fiatBalance ?? "0")}</CardTitle>
+            <CardTitle>{status === "loading" && fiatBalance === null ? "Loading..." : formatFiatUnits(fiatBalance ?? "0", fiatDecimals, fiatSymbol)}</CardTitle>
           </CardHeader>
           <CardContent>
             <Badge variant="outline">Mirrors commercial bank fiat reserves</Badge>
@@ -139,7 +143,7 @@ export function DepositsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Confirm Issuance Request</CardTitle>
-            <CardDescription>{formatFiatUnits(amount)} will be submitted for central bank approval.</CardDescription>
+            <CardDescription>{formatFiatDisplayUnits(amount, fiatDecimals, fiatSymbol)} will be submitted for central bank approval.</CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
             <Button onClick={() => void onSubmit()} disabled={status === "loading"}>
@@ -173,7 +177,7 @@ export function DepositsPage() {
               {deposits.map((deposit) => (
                 <TableRow key={deposit.id}>
                   <TableCell className="font-medium">{deposit.id}</TableCell>
-                  <TableCell>{formatFiatUnits(deposit.amount)}</TableCell>
+                  <TableCell>{formatFiatUnits(deposit.amount, fiatDecimals, fiatSymbol)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(deposit.status)}>{getPaymentStatusLabel(deposit.status)}</Badge>
                   </TableCell>
