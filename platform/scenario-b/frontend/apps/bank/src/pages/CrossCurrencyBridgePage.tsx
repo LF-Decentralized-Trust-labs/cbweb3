@@ -469,7 +469,7 @@ export function CrossCurrencyBridgePage() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => setAmountInInput(weiToDisplay(suggestedMaxAmountIn, tokenDecimals))}
+                  onClick={() => setAmountInInput(weiToDisplay(suggestedMaxAmountIn, tokenDecimals, tokenDecimals))}
                 >
                   Use Suggested Max
                 </Button>

@@ -225,21 +225,52 @@ export function formatFiatUnits(rawAmount: string, decimals: number, tokenSymbol
   return `${formatTokenAmount(rawAmount, decimals)} ${fiatCurrencyLabel(tokenSymbol)}`;
 }
 
-// formatTokenAmount converts a raw base-unit amount string to a display decimal string.
-// Divides by 10^decimals and shows up to 6 fractional digits (trailing zeros trimmed).
-export function formatTokenAmount(rawAmount: string, decimals: number): string {
-  if (!rawAmount || rawAmount === "0") return "0";
+// Money is displayed with exactly the minor units of the currency: two places for
+// BRL, ARS and COP (ISO 4217). The token itself holds 18 decimals, so this is a
+// presentation decision and nothing else — the value on the wire is untouched.
+export const CURRENCY_DISPLAY_DECIMALS = 2;
+
+// formatTokenAmount converts a raw base-unit amount to the string an operator reads.
+//
+// It TRUNCATES rather than rounds, so a balance is never shown as more than it is,
+// and a non-zero amount too small to appear at two places reads "< 0.01" instead of
+// "0" — showing a zero for money someone holds is the same class of defect as
+// showing the wrong figure.
+//
+// Do not use this to prefill an amount input. Truncating a value that becomes a
+// transaction changes the transaction; use baseToExactDisplay for that.
+export function formatTokenAmount(
+  rawAmount: string,
+  decimals: number,
+  displayDecimals: number = CURRENCY_DISPLAY_DECIMALS,
+): string {
+  if (!rawAmount || rawAmount === "0") return (0).toFixed(displayDecimals);
   try {
     const divisor = 10n ** BigInt(decimals);
     const value = BigInt(rawAmount);
     const whole = value / divisor;
-    const frac = (value % divisor).toString().padStart(decimals, "0").slice(0, 6).replace(/0+$/, "");
-    return frac
+    const frac = (value % divisor).toString().padStart(decimals, "0").slice(0, displayDecimals);
+    if (whole === 0n && BigInt(frac || "0") === 0n && value > 0n) {
+      return `< 0.${"0".repeat(Math.max(displayDecimals - 1, 0))}1`;
+    }
+    return displayDecimals > 0
       ? `${whole.toLocaleString("en-US")}.${frac}`
       : whole.toLocaleString("en-US");
   } catch {
     return rawAmount;
   }
+}
+
+// baseToExactDisplay renders a base-unit amount at full precision, for a value that
+// will be typed back into an amount field (a suggested maximum, a matched amount).
+// Trailing zeros are trimmed so the result is the shortest exact form.
+export function baseToExactDisplay(rawAmount: string, decimals: number): string {
+  if (!rawAmount || !/^\d+$/.test(rawAmount)) return "";
+  const divisor = 10n ** BigInt(decimals);
+  const value = BigInt(rawAmount);
+  const whole = value / divisor;
+  const frac = (value % divisor).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return frac ? `${whole}.${frac}` : whole.toString();
 }
 
 // formatFiatDisplayUnits and formatCeBMDisplay render an amount the OPERATOR TYPED.

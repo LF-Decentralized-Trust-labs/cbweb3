@@ -75,7 +75,10 @@ export function calcMaxAmountIn(amountInWei: string, slippageBps = 1100): string
 // weiToDisplay converts a raw base-unit string to a human-readable decimal string.
 // tokenDecimals is the number of decimal places the token uses (read from contract).
 // displayDecimals controls how many fractional digits to show (default 6).
-export function weiToDisplay(wei: string, tokenDecimals: number, displayDecimals = 6): string {
+// Display only: two places, the minor units of the currency (ISO 4217). Callers
+// that prefill an amount input must pass the token's own decimals instead, or the
+// suggested figure they hand the operator is not the one they computed.
+export function weiToDisplay(wei: string, tokenDecimals: number, displayDecimals = 2): string {
   if (!wei || !/^\d+$/.test(wei)) {
     return "—";
   }

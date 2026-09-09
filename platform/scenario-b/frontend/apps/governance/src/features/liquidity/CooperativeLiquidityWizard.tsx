@@ -7,7 +7,7 @@ import { useAuthStore } from "../../stores/auth.store";
 import { usePaymentStore } from "../../stores";
 import { SOVEREIGN_FLOW_PHASE } from "../../types/liquidity.types";
 import type { CommitResult, CommitSide, PendingCommit } from "../../types/liquidity.types";
-import { currencyFromTokenSymbol, displayToBase, formatTokenAmount } from "../../types";
+import { baseToExactDisplay, currencyFromTokenSymbol, displayToBase, formatTokenAmount } from "../../types";
 import { usePolling } from "../../hooks/usePolling";
 import { formatRemainingMs, poolSideInfo, sideRoleLabel } from "./format";
 import { useLiquidityStore } from "./liquidity.store";
@@ -119,7 +119,9 @@ export function CooperativeLiquidityWizard({
       // FX-suggested amount (editable) on the Lock-Mint step; carry the pool pair forward.
       setCommitPoolPair(matchContext.poolPair);
       // suggestedAmount arrives as raw wei from the API — convert to display format.
-      setMintAmount(formatTokenAmount(matchContext.suggestedAmount, tokenDecimals));
+      // Exact, not the 2-place display form: this prefills the amount field, and a
+      // truncated suggestion would no longer match the counterparty's side.
+      setMintAmount(baseToExactDisplay(matchContext.suggestedAmount, tokenDecimals));
     }
   }, [matchContext, tokenDecimals]);
 
