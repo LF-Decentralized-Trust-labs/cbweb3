@@ -1,8 +1,8 @@
 # ADR-009: Unidade de valor no Scenario A
 
-**Status**: Proposto
+**Status**: **Aceito** (2026-09-09) — Opção A
 **Data**: 2026-09-09
-**Decisores**: Liderança técnica CBWeb3 — a decisão define a semântica de um campo já persistido
+**Decisores**: Antonio Souza (liderança técnica)
 **Card relacionado**: `[Scenario A] Give amounts a decimals layer — today the unit is a raw base unit`
 **Origem**: desdobramento de `[Scenario A] The proposal form rejects an amount with a decimal separator` (PR #232)
 
@@ -18,6 +18,7 @@ abaixo é a fundamentação.
 | **O que se pede** | Aprovar a **Opção A** — introduzir uma camada de decimais no Scenario A, convertendo na borda da interface, de modo que a unidade exibida e digitada passe a ser a unidade da moeda — **ou** aprovar a **Opção B**, que mantém a unidade-base crua e registra formalmente que valores fracionários não existem no Scenario A. |
 | **Quem assina** | Liderança técnica. Não requer IDB/LNet: nenhuma regra de negócio muda, e nenhum valor liquidado é alterado. |
 | **Recomendação a aprovar** | Opção A (ver §Recomendação). |
+| **Decidido** | **Opção A, aprovada em 2026-09-09.** A implementação segue em `feat/scenario-a-amount-decimals`, com o escopo de cinco itens de §Opções — sendo o item 5 (migração dos três chamadores) o de maior risco de omissão. |
 | **Se aprovado, desbloqueia** | O card acima, e com ele a paridade com o Scenario B, onde `100.20` já é transacionável. |
 | **Se não for aprovado** | Precisa ficar registrado como limitação aceita, com sign-off, que **nenhum valor fracionário pode ser transacionado no Scenario A** — nem em emissão, nem em resgate, nem em tokenização, nem em perna de HTLC, nem em proposta de FX. Não como pendência técnica. |
 | **Evidência** | Medida contra stack ao vivo em 2026-09-09 (`deploy-all.sh` do Scenario A, Brasil + Costa Rica). Detalhada em §Contexto. |
@@ -80,17 +81,56 @@ escrow contra o valor do depósito, nem checagem de saldo, no orquestrador do Sc
 
 ### 1. Qual é a unidade de cada campo
 
-Há dois tipos de campo, hoje tratados como um só:
+Há dois tipos de campo, hoje tratados como um só. **A primeira versão deste ADR errou aqui**:
+dizia que o campo denominado em token seria "limitado pelas casas do token", o que não
+significa nada para o tCeBM — no Scenario A ele **não é um ERC-20**, é uma nota Zeto, e
+uma nota guarda um inteiro sem conceito de casas decimais. O erro veio de generalizar a
+partir do Scenario B, onde o tCeBM é ERC-20.
 
-| Tipo | Campos | Limite de casas |
-|---|---|---|
-| **Denominado em moeda** | emissão e resgate de fCeBM, pernas da proposta de FX | o expoente ISO 4217 da moeda |
-| **Denominado em token** | resgate de tCeBM, pernas de HTLC | as casas do token |
+A tabela corrigida:
+
+| Tipo | Campos | Token | Limite de casas |
+|---|---|---|---|
+| **Denominado em moeda** | emissão e resgate de fCeBM | ERC-20 `FiatCentralBankMoney`, 18 casas | o expoente ISO 4217 da moeda |
+| **Denominado em token** | tokenização, resgate de tCeBM, pernas de HTLC, pernas de FX | **nota Zeto**, inteiro sem casas | a escala que este ADR define — não há `decimals()` para consultar |
+
+Como a nota Zeto é apenas um inteiro, a escala é uma convenção nossa. Adotamos
+**1 unidade de nota = 10⁻¹⁸ tCeBM**, a mesma escala do fCeBM, para que a tokenização
+continue sendo 1:1 e a perna de HTLC continue casando com a perna de FX.
 
 A distinção não é acadêmica. Um campo denominado em token carrega resíduo de AMM por
 construção — no Scenario B, um swap deixou saldo de `3.959753632757569189`. Limitar a
 entrada desse campo às duas casas da moeda tornaria os últimos `0.009753632757569189`
 irresgatáveis para sempre, e cada swap acrescentaria mais.
+
+### 1b. A escala de 10⁻¹⁸ cabe na nota Zeto? Medido: cabe, com folga enorme
+
+A escala acima só é viável se o circuito ZK aceitar valores grandes. Circuitos Zeto
+aplicam *range check* ao valor da nota, e nada no repositório documentava o limite — nem
+aqui, nem no ADR-001. Medido em 2026-09-09 contra o stack ao vivo, cunhando notas direto
+pelo Paladin do CB do Brasil (`ptx_sendTransaction`, domínio `zeto`, função `mint`):
+
+| Valor | Resultado |
+|---|---|
+| 2³², 2⁶³, 2⁶⁴, 2⁷⁰, 2⁸⁰ | aceitos |
+| **2¹⁰⁰ − 1** = 1267650600228229401496703205375 | **aceito** |
+| **2¹⁰⁰** | **recusado** — `PD210015: Failed to validate function parameters` |
+| 2¹²⁸ | recusado |
+| `100200000000000000000` (`100,20 × 10¹⁸`) | **aceito** |
+
+O teto por nota é exatamente **2¹⁰⁰ − 1**, um range check de 100 bits. À escala de 10⁻¹⁸
+isso são **~1,27 trilhão de tCeBM numa única nota**, e o valor de que a Opção A precisa
+(`100,20`) fica 12,6 bilhões de vezes abaixo do teto. E o limite é *por nota*, não por
+saldo — um saldo maior se distribui em várias notas.
+
+**Conclusão: a escala de 10⁻¹⁸ é viável e a Opção A sai como está.** Se a medição tivesse
+dado 64 bits, a escala teria de cair para centavos (10⁻²) e o Scenario A passaria a
+divergir deliberadamente do B, o que exigiria registro em `docs/scenario-drift.md`.
+
+Armadilha registrada para quem repetir a medição: o Paladin do CB do Brasil é a porta
+**31648**; a 31748 é a da Costa Rica. Chamar a errada devolve
+`PD012230: The from identity must be a valid identity local to the node`, que parece erro
+de identidade e é erro de nó.
 
 ### 2. Quantas casas cada moeda admite
 

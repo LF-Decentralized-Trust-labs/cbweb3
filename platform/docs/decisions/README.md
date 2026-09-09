@@ -17,7 +17,7 @@ plano de implementação, esforço/cronograma e tabela de Status / Sign-off.
 | [ADR-006](ADR-006-isolamento-de-rede-do-hub.md) | Isolamento de rede do hub do Scenario B | R1-11.4 | Aceito e implementado |
 | [ADR-007](ADR-007-rebase-de-chain-ids.md) | Rebase dos chain IDs (80000+ → 1337+) | R1-11.4 | Aceito; coordenação LNET pendente |
 | [ADR-008](ADR-008-sessao-por-cookie-nos-portais.md) | Sessão por cookie HttpOnly nos portais | R1-11.4 | Aceito e implementado |
-| [ADR-009](ADR-009-unidade-de-valor-no-scenario-a.md) | Unidade de valor no Scenario A (camada de decimais) | — | Proposto |
+| [ADR-009](ADR-009-unidade-de-valor-no-scenario-a.md) | Unidade de valor no Scenario A (camada de decimais) | — | **Aceito (2026-09-09)** — Opção A; implementação em curso |
 
 > **ADR-005 é bloqueante para a Wave 3.** T-P1-15 (A-ARCH-1) gate T-P1-16 e T-P1-19.
 > O documento `docs/scenario-a-n-spoke-scalability-plan.md` é um plano de design
@@ -38,7 +38,6 @@ o sign-off não exija ler o ADR inteiro.
 | ADR-002 | Portal como orquestrador de política + toolkit como executor, ou manter o self-service atual como decisão | IDB, LNet, CEMLA | `[R1-§7.2 / R2-A-ARCH-2]` |
 | ADR-003 | Descope formal da privacidade no hub (o mecanismo já foi decidido: sem Paladin) + emenda à constituição | IDB, LNet | `[R1-9.2]` e `[R2-9.2]` — o mesmo finding em dois relatórios |
 | ADR-004 | Topologia do staging e quem o opera | IDB, LNet | `[R2-12.5]` (fora do escopo in-repo) |
-| ADR-009 | Introduzir camada de decimais no Scenario A (conversão na borda), ou registrar formalmente que valores fracionários não são representáveis | Liderança técnica | O card `[Scenario A] Give amounts a decimals layer`; paridade com o Scenario B |
 
 Duas observações que economizam retrabalho:
 
