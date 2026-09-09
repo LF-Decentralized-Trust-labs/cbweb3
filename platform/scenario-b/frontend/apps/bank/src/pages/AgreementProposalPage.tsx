@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  amountRefusalMessage,
   Button,
   Card,
   CardContent,
@@ -9,6 +10,7 @@ import {
   CardTitle,
   Input,
   Label,
+  parseBaseUnits,
   Select,
   SelectContent,
   SelectItem,
@@ -46,12 +48,21 @@ export function AgreementProposalPage() {
   const [expiryDateTime, setExpiryDateTime] = useState(defaultExpiry);
   const [showConfirm, setShowConfirm] = useState(false);
 
+  // Parsed once and reused, so the rate on screen, the validation message and
+  // the value posted can never disagree about what the operator typed.
+  const parsedOrigin = useMemo(() => parseBaseUnits(originAmount), [originAmount]);
+  const parsedCounter = useMemo(() => parseBaseUnits(counterAmount), [counterAmount]);
+
   const rate = useMemo(() => {
-    const o = parseFloat(originAmount);
-    const c = parseFloat(counterAmount);
-    if (o > 0 && c > 0) return (c / o).toFixed(6);
-    return "";
-  }, [originAmount, counterAmount]);
+    if (!parsedOrigin.ok || !parsedCounter.ok) return "";
+    return (parsedCounter.value / parsedOrigin.value).toFixed(6);
+  }, [parsedOrigin, parsedCounter]);
+
+  // What the confirmation shows: the normalised figure that will actually be
+  // sent, not the keystrokes. An operator who typed "1000,10" is asked to
+  // approve "1000.10", which is the number the orchestrator will receive.
+  const originDisplay = parsedOrigin.ok ? parsedOrigin.canonical : originAmount;
+  const counterDisplay = parsedCounter.ok ? parsedCounter.canonical : counterAmount;
 
   const validate = () => {
     if (!counterpartyB.trim()) {
@@ -70,12 +81,12 @@ export function AgreementProposalPage() {
       toast.error("Beneficiary address is required.");
       return false;
     }
-    if (!originAmount || parseFloat(originAmount) <= 0) {
-      toast.error("Send amount must be a positive number.");
+    if (!parsedOrigin.ok) {
+      toast.error(amountRefusalMessage("Send amount", parsedOrigin.refusal));
       return false;
     }
-    if (!counterAmount || parseFloat(counterAmount) <= 0) {
-      toast.error("Receive amount must be a positive number.");
+    if (!parsedCounter.ok) {
+      toast.error(amountRefusalMessage("Receive amount", parsedCounter.refusal));
       return false;
     }
     if (!expiryDateTime) {
@@ -96,14 +107,21 @@ export function AgreementProposalPage() {
   };
 
   const onConfirm = async () => {
+    // Unreachable in the UI: the confirmation card only renders after validate()
+    // accepted both amounts. Kept because it is what narrows the union, and
+    // because an amount edited while the card is open must not slip past.
+    if (!parsedOrigin.ok || !parsedCounter.ok) {
+      setShowConfirm(false);
+      return;
+    }
     try {
       const result = await propose({
         counterparty_b: counterpartyB.trim(),
         settlement_agent: settlementAgent.trim(),
         custodian: custodian.trim(),
         beneficiary: beneficiary.trim(),
-        origin_amount: originAmount,
-        counter_amount: counterAmount,
+        origin_amount: parsedOrigin.canonical,
+        counter_amount: parsedCounter.canonical,
         origin_currency: originCurrency,
         counter_currency: counterCurrency,
         rate: rate,
@@ -204,9 +222,9 @@ export function AgreementProposalPage() {
               <Label htmlFor="origin-amount">Send Amount</Label>
               <Input
                 id="origin-amount"
-                type="number"
-                min="0"
-                step="any"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
                 placeholder="1000"
                 value={originAmount}
                 onChange={(e) => setOriginAmount(e.target.value)}
@@ -234,9 +252,9 @@ export function AgreementProposalPage() {
               <Label htmlFor="counter-amount">Receive Amount</Label>
               <Input
                 id="counter-amount"
-                type="number"
-                min="0"
-                step="any"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
                 placeholder="5000"
                 value={counterAmount}
                 onChange={(e) => setCounterAmount(e.target.value)}
@@ -300,10 +318,10 @@ export function AgreementProposalPage() {
             <p className="text-sm">Custodian: {custodian}</p>
             <p className="text-sm">Beneficiary: {beneficiary}</p>
             <p className="text-sm">
-              Send: {originAmount} {originCurrency}
+              Send: {originDisplay} {originCurrency}
             </p>
             <p className="text-sm">
-              Receive: {counterAmount} {counterCurrency}
+              Receive: {counterDisplay} {counterCurrency}
             </p>
             <p className="text-sm">Exchange Rate: {rate}</p>
             <p className="text-sm">Expiry: {new Date(expiryDateTime).toLocaleString()}</p>

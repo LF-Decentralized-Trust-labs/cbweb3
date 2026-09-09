@@ -273,17 +273,13 @@ export function displayToBase(displayAmount: string, decimals: number): string {
   return combined;
 }
 
-// formatAmountInput formats a numeric string with thousand-separator commas for display
-// inside an input field (e.g. "1000000.5" → "1,000,000.5").
-// Feed it a clean string (digits + at most one dot); it preserves the fractional part as-is.
-export function formatAmountInput(value: string): string {
-  if (!value) return "";
-  const [whole = "", frac] = value.split(".");
-  const formatted = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return frac !== undefined ? `${formatted}.${frac}` : formatted;
-}
-
-// parseAmountInput strips thousand-separator commas so the result can be passed to displayToBase.
-export function parseAmountInput(value: string): string {
-  return value.replace(/,/g, "");
-}
+// formatAmountInput and parseAmountInput were removed deliberately.
+//
+// They put comma thousands separators INTO the amount field and then stripped
+// every comma back out before conversion, which meant a pt-BR operator typing
+// "1000,10" had it read as 100010 — a hundredfold overstatement that reached
+// displayToBase with nothing in the path to catch it.
+//
+// Amounts now follow ISO 20022: dot decimal separator, no grouping, parsed by
+// parseAmount from @cbweb3/ui. Do not reintroduce a grouping formatter on an
+// input the operator edits.

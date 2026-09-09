@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  amountRefusalMessage,
   Badge,
   Button,
   Card,
@@ -10,6 +11,7 @@ import {
   CardTitle,
   Input,
   Label,
+  parseAmount,
   Table,
   TableBody,
   TableCell,
@@ -56,6 +58,18 @@ export function RedeemsPage() {
   const decimals = tCeBMDecimals ?? 18;
 
   const [amount, setAmount] = useState("0");
+
+  // Parsed once and reused. The old guard, /^\d+(\.\d+)?$/, could not catch the
+  // real defect: `<input type="number">` in a pt-BR browser turns a typed
+  // "1.000,10" into "1.00010", which that regex accepts as a well-formed
+  // decimal — and displayToBase then faithfully settles 1.0001 instead of
+  // 1000.10. See @cbweb3/ui (lib/amount.ts) for the measurement.
+  const parsedAmount = useMemo(() => parseAmount(amount), [amount]);
+
+  // Shown on the confirmation card. A refused amount renders as "0" rather than
+  // as the mis-read figure displayToBase would produce for it: an operator must
+  // never be shown a plausible number for a value the form will not submit.
+  const amountForDisplay = parsedAmount.ok ? parsedAmount.canonical : "0";
   const [confirmRequest, setConfirmRequest] = useState(false);
   const [page, setPage] = useState(1);
 
@@ -83,13 +97,13 @@ export function RedeemsPage() {
   const rangeEnd = Math.min(page * PAGE_SIZE, total);
 
   const onSubmit = async () => {
-    if (!/^\d+(\.\d+)?$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive number.");
+    if (!parsedAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedAmount.refusal));
       return;
     }
 
     try {
-      const redeemId = await requestRedeem(displayToBase(amount, decimals));
+      const redeemId = await requestRedeem(displayToBase(parsedAmount.canonical, decimals));
       toast.success(`Redeem request submitted: ${redeemId}`);
       setAmount("0");
       setConfirmRequest(false);
@@ -103,8 +117,8 @@ export function RedeemsPage() {
   };
 
   const onPrepareSubmit = () => {
-    if (!/^\d+(\.\d+)?$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive number.");
+    if (!parsedAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedAmount.refusal));
       return;
     }
     setConfirmRequest(true);
@@ -139,9 +153,9 @@ export function RedeemsPage() {
             <Label htmlFor="redeem-amount">Amount ({tCeBMName})</Label>
             <Input
               id="redeem-amount"
-              type="number"
-              min="0"
-              step="any"
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
             />
@@ -167,7 +181,7 @@ export function RedeemsPage() {
           <CardHeader>
             <CardTitle>Confirm Redeem Request</CardTitle>
             <CardDescription>
-              {formatCeBMDisplay(amount, decimals, tCeBMSymbol)} will be submitted for central bank fiat
+              {formatCeBMDisplay(amountForDisplay, decimals, tCeBMSymbol)} will be submitted for central bank fiat
               reserve release approval.
             </CardDescription>
           </CardHeader>

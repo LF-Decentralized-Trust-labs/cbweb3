@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  amountRefusalMessage,
   Button,
   Card,
   CardContent,
@@ -9,6 +10,7 @@ import {
   CardTitle,
   Input,
   Label,
+  parseBaseUnits,
   Select,
   SelectContent,
   SelectItem,
@@ -55,6 +57,11 @@ export function HTLCNewPage() {
   const [agreementId, setAgreementId] = useState("");
   const [lockReceiver, setLockReceiver] = useState("");
   const [lockAmount, setLockAmount] = useState("");
+
+  // Parsed once. Whole base units, the same unit as the FX proposal leg this
+  // lock settles — see @cbweb3/ui (lib/amount.ts). Plain text, because
+  // <input type="number"> reads keystrokes through the browser locale.
+  const parsedLockAmount = useMemo(() => parseBaseUnits(lockAmount), [lockAmount]);
   const [duration, setDuration] = useState<DurationOption>("none");
   const [customDateTime, setCustomDateTime] = useState("");
   const [showLockConfirm, setShowLockConfirm] = useState(false);
@@ -62,6 +69,11 @@ export function HTLCNewPage() {
   const [hashLock, setHashLock] = useState("");
   const [hashReceiver, setHashReceiver] = useState("");
   const [hashAmount, setHashAmount] = useState("");
+
+  // Parsed once. Whole base units, the same unit as the FX proposal leg this
+  // lock settles — see @cbweb3/ui (lib/amount.ts). Plain text, because
+  // <input type="number"> reads keystrokes through the browser locale.
+  const parsedHashAmount = useMemo(() => parseBaseUnits(hashAmount), [hashAmount]);
   const [hashAgreementId, setHashAgreementId] = useState("");
   const [showLockWithHashConfirm, setShowLockWithHashConfirm] = useState(false);
 
@@ -142,8 +154,8 @@ export function HTLCNewPage() {
       toast.error("Receiver identity is required.");
       return false;
     }
-    if (!/^\d+$/.test(lockAmount) || Number(lockAmount) <= 0) {
-      toast.error("Amount must be a positive integer.");
+    if (!parsedLockAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedLockAmount.refusal));
       return false;
     }
     if (agreementId && !/^[a-zA-Z0-9_-]{1,64}$/.test(agreementId)) {
@@ -162,8 +174,8 @@ export function HTLCNewPage() {
       toast.error("Receiver identity is required.");
       return false;
     }
-    if (!/^\d+$/.test(hashAmount) || Number(hashAmount) <= 0) {
-      toast.error("Amount must be a positive integer.");
+    if (!parsedHashAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedHashAmount.refusal));
       return false;
     }
     if (!/^([A-Fa-f0-9]{64}|0x[A-Fa-f0-9]{64})$/.test(hashLock.trim())) {
@@ -338,9 +350,9 @@ export function HTLCNewPage() {
               <Label htmlFor="lock-amount">Amount (tCeBM)</Label>
               <Input
                 id="lock-amount"
-                type="number"
-                min="1"
-                step="1"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
                 value={lockAmount}
                 onChange={(event) => setLockAmount(event.target.value)}
               />
@@ -426,9 +438,9 @@ export function HTLCNewPage() {
               <Label htmlFor="hash-amount">Amount (tCeBM)</Label>
               <Input
                 id="hash-amount"
-                type="number"
-                min="1"
-                step="1"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
                 value={hashAmount}
                 onChange={(event) => setHashAmount(event.target.value)}
               />

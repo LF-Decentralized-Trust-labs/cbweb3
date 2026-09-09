@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  amountRefusalMessage,
   Badge,
   Button,
   Card,
@@ -11,6 +12,8 @@ import {
   ConfirmActionDialog,
   Input,
   Label,
+  parseAmount,
+  toast,
 } from "@cbweb3/ui";
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
@@ -25,7 +28,16 @@ import {
 import { usePaymentStore } from "../stores";
 import type { HubCurrency, HubPair } from "../types/amm-v2.types";
 import { CROSS_CURRENCY_SWAP_ERROR } from "../types/cross-currency-swap.types";
-import { displayToBase, formatAmountInput, parseAmountInput } from "../types";
+import { displayToBase } from "../types";
+
+// Turn a typed amount into base units under the ISO 20022 rule, or null when the
+// field does not hold a valid amount, so a quote is skipped rather than requested
+// for a figure the operator did not type. Replaces parseAmountInput, which read
+// every comma as a thousands separator: "1000,10" became 100010 in silence.
+const toBaseUnits = (typed: string, decimals: number): string | null => {
+  const parsed = parseAmount(typed);
+  return parsed.ok ? displayToBase(parsed.canonical, decimals) : null;
+};
 import { evaluateExecuteGating } from "../features/amm/execute-gating";
 
 const CROSS_CURRENCY_ERROR_MESSAGES: Record<string, string> = {
@@ -184,7 +196,11 @@ export function CrossCurrencyBridgePage() {
       if (!amountOut || !sourceCurrency || !targetCurrency) {
         return;
       }
-      void fetchQuote(sourceCurrency, targetCurrency, displayToBase(parseAmountInput(amountOut), tokenDecimals), selectedPair?.pair_id);
+      const amount = toBaseUnits(amountOut, tokenDecimals);
+      if (!amount) {
+        return;
+      }
+      void fetchQuote(sourceCurrency, targetCurrency, amount, selectedPair?.pair_id);
     },
     CROSS_CURRENCY_QUOTE_REFRESH_MS,
     step === "idle" && quote !== null && amountOut.length > 0,
@@ -224,7 +240,12 @@ export function CrossCurrencyBridgePage() {
   const handleGetQuote = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     clearQuoteRefreshedNotice();
-    await fetchQuote(sourceCurrency, targetCurrency, displayToBase(parseAmountInput(amountOut), tokenDecimals), selectedPair?.pair_id);
+    const parsed = parseAmount(amountOut);
+    if (!parsed.ok) {
+      toast.error(amountRefusalMessage("Amount out", parsed.refusal));
+      return;
+    }
+    await fetchQuote(sourceCurrency, targetCurrency, displayToBase(parsed.canonical, tokenDecimals), selectedPair?.pair_id);
   };
 
   // The submit used to bridge, swap and bridge out on one click (finding R2-M-8).
@@ -247,12 +268,17 @@ export function CrossCurrencyBridgePage() {
     // The dialog closes after the call, not before it. Closing first made the `busy`
     // prop unreachable — the dialog was already gone by the time the swap was in
     // flight — so the confirm button was never actually disabled during settlement.
+    const amountOutBase = toBaseUnits(amountOut, tokenDecimals);
+    const maxAmountInBase = toBaseUnits(amountInInput, tokenDecimals);
+    if (!amountOutBase || !maxAmountInBase) {
+      return;
+    }
     await executeSwap({
       source_currency: sourceCurrency,
       target_currency: targetCurrency,
       pool_pair: selectedPair.pair_id,
-      amount_out: displayToBase(parseAmountInput(amountOut), tokenDecimals),
-      max_amount_in: displayToBase(parseAmountInput(amountInInput), tokenDecimals),
+      amount_out: amountOutBase,
+      max_amount_in: maxAmountInBase,
       beneficiary_bank_id: beneficiaryBankId,
       quote_id: quote.quote_id,
     });
@@ -374,8 +400,7 @@ export function CrossCurrencyBridgePage() {
                 value={amountOut}
                 onChange={(event) => {
                   clearQuoteRefreshedNotice();
-                  const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
-                  setAmountOut(formatAmountInput(cleaned));
+                  setAmountOut(event.target.value);
                 }}
                 inputMode="decimal"
                 placeholder="0.00"
@@ -431,10 +456,7 @@ export function CrossCurrencyBridgePage() {
                 <Input
                   id="swap-max-amount-in"
                   value={amountInInput}
-                  onChange={(event) => {
-                    const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
-                    setAmountInInput(formatAmountInput(cleaned));
-                  }}
+                  onChange={(event) => setAmountInInput(event.target.value)}
                   inputMode="decimal"
                   placeholder="0.00"
                   required
@@ -447,7 +469,7 @@ export function CrossCurrencyBridgePage() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => setAmountInInput(formatAmountInput(weiToDisplay(suggestedMaxAmountIn, tokenDecimals)))}
+                  onClick={() => setAmountInInput(weiToDisplay(suggestedMaxAmountIn, tokenDecimals))}
                 >
                   Use Suggested Max
                 </Button>

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  amountRefusalMessage,
   Badge,
   Button,
   Card,
@@ -10,6 +11,7 @@ import {
   CardTitle,
   Input,
   Label,
+  parseAmount,
   Table,
   TableBody,
   TableCell,
@@ -80,6 +82,18 @@ export function EscrowsPage() {
 
   const [depositId, setDepositId] = useState("");
   const [amount, setAmount] = useState("0");
+
+  // Parsed once and reused. The old guard, /^\d+(\.\d+)?$/, could not catch the
+  // real defect: `<input type="number">` in a pt-BR browser turns a typed
+  // "1.000,10" into "1.00010", which that regex accepts as a well-formed
+  // decimal — and displayToBase then faithfully settles 1.0001 instead of
+  // 1000.10. See @cbweb3/ui (lib/amount.ts) for the measurement.
+  const parsedAmount = useMemo(() => parseAmount(amount), [amount]);
+
+  // Shown on the confirmation card. A refused amount renders as "0" rather than
+  // as the mis-read figure displayToBase would produce for it: an operator must
+  // never be shown a plausible number for a value the form will not submit.
+  const amountForDisplay = parsedAmount.ok ? parsedAmount.canonical : "0";
   const [confirmRequest, setConfirmRequest] = useState(false);
   const [page, setPage] = useState(1);
 
@@ -118,16 +132,24 @@ export function EscrowsPage() {
       toast.error("Deposit ID is required.");
       return;
     }
-    if (!/^\d+(\.\d+)?$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive number.");
+    if (!parsedAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedAmount.refusal));
       return;
     }
     setConfirmRequest(true);
   };
 
   const onSubmit = async () => {
+    // onSubmit used to lean entirely on onPrepareSubmit for this. Re-checked
+    // here because the operator can edit the field while the confirmation card
+    // is open, and because it is what narrows parsedAmount at the call below.
+    if (!parsedAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedAmount.refusal));
+      return;
+    }
+
     try {
-      const escrowId = await requestEscrow(depositId, displayToBase(amount, fDecimals));
+      const escrowId = await requestEscrow(depositId, displayToBase(parsedAmount.canonical, fDecimals));
       toast.success(`Tokenisation request submitted: ${escrowId}`);
       setDepositId("");
       setAmount("0");
@@ -187,9 +209,9 @@ export function EscrowsPage() {
             <Label htmlFor="escrow-amount">Amount ({fiatCurrencyLabel(fCeBMSymbol)})</Label>
             <Input
               id="escrow-amount"
-              type="number"
-              min="0"
-              step="any"
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
             />
@@ -211,8 +233,8 @@ export function EscrowsPage() {
           <CardHeader>
             <CardTitle>Confirm Tokenisation Request</CardTitle>
             <CardDescription>
-              {formatFiatDisplayUnits(amount, fDecimals, fCeBMSymbol)} held as {fCeBMName} will be submitted to the central bank for conversion to{" "}
-              {formatCeBMDisplay(amount, tDecimals, tCeBMSymbol)}.
+              {formatFiatDisplayUnits(amountForDisplay, fDecimals, fCeBMSymbol)} held as {fCeBMName} will be submitted to the central bank for conversion to{" "}
+              {formatCeBMDisplay(amountForDisplay, tDecimals, tCeBMSymbol)}.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
