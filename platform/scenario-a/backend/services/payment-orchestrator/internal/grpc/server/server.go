@@ -1013,13 +1013,25 @@ func (s *paymentOrchestratorService) TransferToken(ctx context.Context, req *pb.
 	return &pb.TransferTokenResponse{TxHash: txHash}, nil
 }
 
-// tCeBM is a Zeto privacy note rather than an ERC-20, so its scale is a convention
-// rather than a contract read. ADR-009 fixes it at 10^-18 per note unit, the same scale
-// as fCeBM, so that tokenisation is 1:1 across the two and an FX leg keeps matching the
-// HTLC leg that settles it.
+// amountScaleDecimals is the scale of every amount this scenario handles: an integer
+// amount means hundredths, i.e. the minor unit of the currencies in the pilot (ADR-009).
+//
+// It is a convention, not a contract read, and it is bounded by measurement rather than
+// taste. tCeBM is a Zeto note, and the Zeto LOCK circuit refuses any note value at or
+// above 2^64 — measured on a live stack: 2^64-1 locks, 2^64 hangs. The mint circuit is
+// far wider (2^100-1), which is what made an earlier reading of this conclude that a
+// 10^-18 scale was viable. It is not: at 18 decimals the largest lockable amount would
+// be 18.45 currency units. At hundredths the ceiling is ~1.8e17 units, which is room
+// enough that no pilot will meet it.
+//
+// fCeBM's ERC-20 contract declares 18 decimals, and the application deliberately does
+// NOT use them: it treats the integer as hundredths for both tokens, so tokenisation
+// stays 1:1 and an FX leg keeps matching the HTLC leg that settles it. The unused
+// precision on the ERC-20 side is harmless; a mismatch in the other direction would not
+// be, which is what checkFiatScale below guards.
 const (
-	tCeBMDecimals = 18
-	tCeBMSymbol   = "tCeBM"
+	amountScaleDecimals = 2
+	tCeBMSymbol         = "tCeBM"
 )
 
 func (s *paymentOrchestratorService) GetBalance(ctx context.Context, _ *pb.GetBalanceRequest) (*pb.GetBalanceResponse, error) {
@@ -1035,7 +1047,7 @@ func (s *paymentOrchestratorService) GetBalance(ctx context.Context, _ *pb.GetBa
 	// 1.27 trillion tCeBM in a single note at this scale.
 	return &pb.GetBalanceResponse{
 		Balance:  balance,
-		Decimals: tCeBMDecimals,
+		Decimals: amountScaleDecimals,
 		Symbol:   tCeBMSymbol,
 	}, nil
 }
@@ -1050,9 +1062,15 @@ func (s *paymentOrchestratorService) GetFiatBalance(ctx context.Context, _ *pb.G
 		return nil, status.Errorf(codes.Internal, "fiat balance: %v", err)
 	}
 
-	decimals, err := s.fiat.Decimals(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "fiat decimals: %v", err)
+	// The contract's own decimals are read only to catch a token that cannot represent
+	// the scale the application uses. They are NOT what is reported: the application
+	// scale is hundredths for both tokens, bounded by the Zeto lock circuit.
+	if contractDecimals, err := s.fiat.Decimals(ctx); err != nil {
+		s.logger.Warn("fCeBM decimals read failed; cannot verify the token represents hundredths", "error", err)
+	} else if contractDecimals < amountScaleDecimals {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"fCeBM declares %d decimals, fewer than the %d the application uses",
+			contractDecimals, amountScaleDecimals)
 	}
 
 	// The symbol names the currency in the UI but is not needed to read the balance
@@ -1067,7 +1085,7 @@ func (s *paymentOrchestratorService) GetFiatBalance(ctx context.Context, _ *pb.G
 
 	return &pb.GetFiatBalanceResponse{
 		Balance:  balance,
-		Decimals: uint32(decimals),
+		Decimals: amountScaleDecimals,
 		Symbol:   symbol,
 	}, nil
 }

@@ -95,42 +95,74 @@ A tabela corrigida:
 | **Denominado em token** | tokenização, resgate de tCeBM, pernas de HTLC, pernas de FX | **nota Zeto**, inteiro sem casas | a escala que este ADR define — não há `decimals()` para consultar |
 
 Como a nota Zeto é apenas um inteiro, a escala é uma convenção nossa. Adotamos
-**1 unidade de nota = 10⁻¹⁸ tCeBM**, a mesma escala do fCeBM, para que a tokenização
-continue sendo 1:1 e a perna de HTLC continue casando com a perna de FX.
+**1 unidade de nota = 10⁻² tCeBM** (centavos), a mesma escala usada para o fCeBM, para
+que a tokenização continue sendo 1:1 e a perna de HTLC continue casando com a de FX. O
+número é imposto pelo circuito de lock — ver §1b.
 
 A distinção não é acadêmica. Um campo denominado em token carrega resíduo de AMM por
 construção — no Scenario B, um swap deixou saldo de `3.959753632757569189`. Limitar a
 entrada desse campo às duas casas da moeda tornaria os últimos `0.009753632757569189`
 irresgatáveis para sempre, e cada swap acrescentaria mais.
 
-### 1b. A escala de 10⁻¹⁸ cabe na nota Zeto? Medido: cabe, com folga enorme
+### 1b. Qual escala cabe na nota Zeto? Medido: centavos, não 10⁻¹⁸
 
-A escala acima só é viável se o circuito ZK aceitar valores grandes. Circuitos Zeto
-aplicam *range check* ao valor da nota, e nada no repositório documentava o limite — nem
-aqui, nem no ADR-001. Medido em 2026-09-09 contra o stack ao vivo, cunhando notas direto
-pelo Paladin do CB do Brasil (`ptx_sendTransaction`, domínio `zeto`, função `mint`):
+**Esta seção substitui uma versão anterior que concluía o contrário, a partir de uma
+medição do circuito errado.** O registro do erro fica aqui porque ele é instrutivo.
 
-| Valor | Resultado |
+A primeira medição cunhou notas de tamanhos crescentes e achou o teto em **2¹⁰⁰−1**,
+concluindo que 10⁻¹⁸ caberia com folga. Mas **mint e lock são circuitos distintos**, e
+só o mint havia sido medido. Medindo o lock — identidade nova a cada ponto, para a
+carteira não ter notas antigas competindo na seleção:
+
+| Valor | Mint | Lock |
+|---|---|---|
+| 10¹⁶, 10¹⁷, 10¹⁸, 10¹⁹ | aceita | **aceita** |
+| `18446744073709551615` = **2⁶⁴ − 1** | aceita | **aceita** |
+| `18446744073709551616` = **2⁶⁴** | aceita | **TRAVA** |
+| 1,002×10²⁰ (`100,20` a 10⁻¹⁸) | aceita | **TRAVA** |
+
+O circuito de **lock tem faixa de 64 bits**; o de mint vai a 2¹⁰⁰−1. A diferença é de 36
+ordens de grandeza, e é o lock que a perna de HTLC precisa.
+
+E o travamento é da pior espécie: a transação não é recusada, ela **nunca é montada** —
+o Paladin registra falha de circuito (`Zeto_94`, `CheckHashes_92`, `PD012618`) e nenhum
+recibo é emitido. Quem chamou espera indefinidamente.
+
+### O que isso decide
+
+| Escala | Maior valor travável |
 |---|---|
-| 2³², 2⁶³, 2⁶⁴, 2⁷⁰, 2⁸⁰ | aceitos |
-| **2¹⁰⁰ − 1** = 1267650600228229401496703205375 | **aceito** |
-| **2¹⁰⁰** | **recusado** — `PD210015: Failed to validate function parameters` |
-| 2¹²⁸ | recusado |
-| `100200000000000000000` (`100,20 × 10¹⁸`) | **aceito** |
+| 10⁻¹⁸ | **18,45 unidades monetárias** — inviável |
+| 10⁻⁶ | 18 trilhões |
+| **10⁻² (centavos)** | **~1,8 × 10¹⁷** |
 
-O teto por nota é exatamente **2¹⁰⁰ − 1**, um range check de 100 bits. À escala de 10⁻¹⁸
-isso são **~1,27 trilhão de tCeBM numa única nota**, e o valor de que a Opção A precisa
-(`100,20`) fica 12,6 bilhões de vezes abaixo do teto. E o limite é *por nota*, não por
-saldo — um saldo maior se distribui em várias notas.
+**A escala adotada é 10⁻², centavos, para os dois tokens.** Coincide com a unidade menor
+que a ISO 4217 dá às moedas do piloto, e usa 5×10⁻¹⁶ do teto.
 
-**Conclusão: a escala de 10⁻¹⁸ é viável e a Opção A sai como está.** Se a medição tivesse
-dado 64 bits, a escala teria de cair para centavos (10⁻²) e o Scenario A passaria a
-divergir deliberadamente do B, o que exigiria registro em `docs/scenario-drift.md`.
+O fCeBM continua sendo ERC-20 de 18 casas, e a aplicação **deliberadamente não usa** essa
+precisão: trata o inteiro como centavos dos dois lados, para a tokenização seguir 1:1. A
+precisão não usada do lado ERC-20 é inofensiva; o inverso não seria, e por isso a leitura
+de `decimals()` do contrato permanece — como guarda, recusando um token que declare menos
+casas que a escala da aplicação.
 
-Armadilha registrada para quem repetir a medição: o Paladin do CB do Brasil é a porta
-**31648**; a 31748 é a da Costa Rica. Chamar a errada devolve
-`PD012230: The from identity must be a valid identity local to the node`, que parece erro
-de identidade e é erro de nó.
+### Como o erro passou
+
+Vale registrar o método, não só o resultado. As duas observações que sustentaram a
+conclusão errada eram artefatos do estado das carteiras:
+
+- "trava com nota pequena recém-cunhada" — a carteira ainda continha a nota de 5×10²⁰, e
+  a seleção de notas do Zeto podia escolhê-la;
+- "o CB fundador trava e o banco não" — o CB só tinha notas pequenas naquele momento.
+
+Ou seja, mediu-se o estado das carteiras e chamou-se aquilo de propriedade do nó. A
+correção veio de quem já havia rodado o fluxo muitas vezes sem ver o problema. **Ao medir
+Zeto, use uma identidade nova por ponto**, ou a seleção de notas contamina o resultado.
+
+### Confirmação ponta a ponta
+
+Com a escala em centavos, `samples/sample-tryout.sh` passa completo: acordo de FX de
+`100,20 → 501,00` proposto, relayado, aceito, **as duas pernas de HTLC travadas e
+liquidadas** com revelação do segredo, e resgate devolvendo tCeBM a fCeBM.
 
 ### 2. Quantas casas cada moeda admite
 

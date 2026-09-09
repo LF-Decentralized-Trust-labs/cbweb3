@@ -205,21 +205,21 @@ poll_onboarding() {
   die "[$label] onboarding not OK after 3 attempts (last status=$st)"
 }
 
-# base DECIMAL — scale a currency figure to base units (ADR-009).
+# base DECIMAL — scale a currency figure to base units (ADR-009): hundredths.
 #
 # Every amount below is written as the operator would type it and scaled here, rather
 # than as a raw integer. Before ADR-009 the two were the same thing; now they are not,
 # and a literal 1000 in this file would mean 1000 wei — 1e-15 tokens, an amount the
 # portal cannot even express, since its smallest input is one minor unit (0.01).
 #
-# The scripts did not break when the portal changed: the API always took base units and
-# these assertions are self-consistent in them. What they stopped doing is exercising
-# amounts a user can actually produce — and they never exercised a fractional one at
-# all, which is the whole point of the change.
+# The scale is hundredths, not 10^-18, and that is bounded by measurement: the Zeto
+# LOCK circuit refuses a note value at or above 2^64 (2^64-1 locks, 2^64 hangs), so at
+# 18 decimals the largest lockable amount would be 18.45 currency units. Tokenising
+# 500.00 at that scale is what wedged an earlier run of this script.
 base() { python3 -c "
 import sys
 from decimal import Decimal
-print(int(Decimal(sys.argv[1]) * (10 ** 18)))" "$1"; }
+print(int(Decimal(sys.argv[1]) * (10 ** 2)))" "$1"; }
 
 # issue BANK_URL BANK_TOK CB_URL TRE_TOK AMOUNT LABEL — reserve issuance in THREE steps:
 #   1) request deposit (bank), 2) approve (treasury — only flips status to APPROVED),
