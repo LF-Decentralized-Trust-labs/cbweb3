@@ -10,7 +10,7 @@ import {
   CardTitle,
   Input,
   Label,
-  parseAmount,
+  parseCurrencyAmount,
   Select,
   SelectContent,
   SelectItem,
@@ -22,7 +22,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
-import { displayToBase } from "../types";
+import {
+  currencyFromTokenSymbol,
+  displayToBase,
+} from "../types";
 import { useHtlcStore, usePaymentStore } from "../stores";
 
 type DurationOption = "none" | "1h" | "6h" | "24h" | "custom";
@@ -42,6 +45,9 @@ export function HTLCNewPage() {
   const fetchPayments = usePaymentStore((state) => state.fetchAll);
   const balance = usePaymentStore((state) => state.balance);
   const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
+  const fiatSymbol = usePaymentStore((state) => state.fiatSymbol);
+  // Bounded by the spoke currency's ISO 4217 minor unit (ADR-009).
+  const spokeCurrency = currencyFromTokenSymbol(fiatSymbol);
   const paymentStatus = usePaymentStore((state) => state.status);
 
   const fetchAgreements = useFxAgreementStore((s) => s.fetchAll);
@@ -63,7 +69,10 @@ export function HTLCNewPage() {
   // Parsed once. Whole base units, the same unit as the FX proposal leg this
   // lock settles — see @cbweb3/ui (lib/amount.ts). Plain text, because
   // <input type="number"> reads keystrokes through the browser locale.
-  const parsedLockAmount = useMemo(() => parseAmount(lockAmount), [lockAmount]);
+  const parsedLockAmount = useMemo(
+    () => parseCurrencyAmount(lockAmount, spokeCurrency),
+    [lockAmount, spokeCurrency],
+  );
   const [duration, setDuration] = useState<DurationOption>("none");
   const [customDateTime, setCustomDateTime] = useState("");
   const [showLockConfirm, setShowLockConfirm] = useState(false);
@@ -75,7 +84,10 @@ export function HTLCNewPage() {
   // Parsed once. Whole base units, the same unit as the FX proposal leg this
   // lock settles — see @cbweb3/ui (lib/amount.ts). Plain text, because
   // <input type="number"> reads keystrokes through the browser locale.
-  const parsedHashAmount = useMemo(() => parseAmount(hashAmount), [hashAmount]);
+  const parsedHashAmount = useMemo(
+    () => parseCurrencyAmount(hashAmount, spokeCurrency),
+    [hashAmount, spokeCurrency],
+  );
   const [hashAgreementId, setHashAgreementId] = useState("");
   const [showLockWithHashConfirm, setShowLockWithHashConfirm] = useState(false);
 

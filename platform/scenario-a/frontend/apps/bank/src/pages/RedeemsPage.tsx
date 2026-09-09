@@ -11,7 +11,7 @@ import {
   CardTitle,
   Input,
   Label,
-  parseAmount,
+  parseCurrencyAmount,
   Table,
   TableBody,
   TableCell,
@@ -24,6 +24,7 @@ import { useEffect, useMemo, useState } from "react";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import { usePaymentStore } from "../stores";
 import {
+  currencyFromTokenSymbol,
   displayToBase,
   fiatUnitLabel,
   formatCeBM,
@@ -59,7 +60,13 @@ export function RedeemsPage() {
   // Parsed under the ISO 20022 rule, then scaled by the token's own decimals before
   // it leaves the form. Until ADR-009 this was a whole count of raw base units, so
   // a tCeBM amount of 100.20 could not be expressed at all.
-  const parsedAmount = useMemo(() => parseAmount(amount), [amount]);
+  // Bounded by the spoke currency's ISO 4217 minor unit, not by a fixed two places:
+  // two of the currencies this pilot offers (CLP, PYG) have no subunit at all.
+  const spokeCurrency = currencyFromTokenSymbol(fiatSymbol);
+  const parsedAmount = useMemo(
+    () => parseCurrencyAmount(amount, spokeCurrency),
+    [amount, spokeCurrency],
+  );
   const [confirmRequest, setConfirmRequest] = useState(false);
 
   useEffect(() => {

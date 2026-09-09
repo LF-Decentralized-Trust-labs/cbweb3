@@ -151,6 +151,20 @@ export function getPaymentStatusVariant(status: unknown): "warning" | "success" 
   return normalized !== null ? paymentStatusVariant[normalized] : "outline";
 }
 
+// currencyFromTokenSymbol extracts the ISO 4217 code from an on-chain ERC-20 symbol,
+// e.g. "fCeBM_BRL" -> "BRL". The contract is the source of truth for which currency a
+// spoke settles in; VITE_FIAT_SYMBOL is only the fallback before the first balance
+// read resolves.
+export function currencyFromTokenSymbol(tokenSymbol: string | null | undefined): string {
+  if (tokenSymbol) {
+    const idx = tokenSymbol.lastIndexOf("_");
+    if (idx >= 0 && idx < tokenSymbol.length - 1) {
+      return tokenSymbol.slice(idx + 1).trim();
+    }
+  }
+  return fiatUnitLabel;
+}
+
 // Money is displayed with exactly the minor units of the currency: two places for the
 // currencies in this pilot (ISO 4217). The tokens hold 18 decimals, so this is a
 // presentation decision — the value on the wire stays a base-unit integer.

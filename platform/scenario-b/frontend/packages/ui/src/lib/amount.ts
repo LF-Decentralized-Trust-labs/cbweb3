@@ -49,7 +49,9 @@ export type AmountRefusal =
   | "separator"
   | "malformed"
   | "not-positive"
-  | "not-whole";
+  | "not-whole"
+  | "too-many-decimals"
+  | "no-subunit";
 
 export type ParsedAmount =
   | {
@@ -143,5 +145,59 @@ export function amountRefusalMessage(label: string, refusal: AmountRefusal): str
       return `${label} must be greater than zero.`;
     case "not-whole":
       return `${label} must be a whole number of base units: digits only, with no decimal or thousands separator.`;
+    case "too-many-decimals":
+      return `${label} carries more decimal places than the currency has.`;
+    case "no-subunit":
+      return `${label} must be a whole number: this currency has no subunit.`;
   }
+}
+
+// ─── ISO 4217 minor units ────────────────────────────────────────────────────
+//
+// ISO 20022 bounds an amount's fraction digits by the currency's ISO 4217 minor unit,
+// and that is emphatically not a flat 2. Two of the currencies this pilot already
+// offers have an exponent of ZERO: the Chilean peso and the Paraguayan guaraní have no
+// subunit at all, so "1000.50 CLP" is not a small amount — it is not an amount. A fixed
+// two-place rule would accept it while looking standards-compliant, which is worse than
+// applying no rule.
+//
+// Only the currencies the forms can actually select are listed. An unlisted code is
+// NOT silently given a default: unknownCurrencyMinorUnits returns null and the caller
+// decides, because guessing the scale of money is the mistake this whole module exists
+// to stop.
+const ISO4217_MINOR_UNITS: Readonly<Record<string, number>> = Object.freeze({
+  ARS: 2, BOB: 2, BRL: 2, COP: 2, CRC: 2, CUP: 2, DOP: 2, GTQ: 2,
+  HNL: 2, MXN: 2, NIO: 2, PAB: 2, PEN: 2, USD: 2, UYU: 2, VES: 2,
+  CLP: 0, // no subunit
+  PYG: 0, // no subunit
+});
+
+/** Minor units for an ISO 4217 code, or null when the code is not one we know. */
+export function currencyMinorUnits(code: string | null | undefined): number | null {
+  if (!code) return null;
+  const key = code.trim().toUpperCase();
+  return key in ISO4217_MINOR_UNITS ? ISO4217_MINOR_UNITS[key] : null;
+}
+
+/**
+ * Parse an amount denominated in a currency, bounding its fraction digits by that
+ * currency's ISO 4217 minor unit on top of the ISO 20022 shape.
+ *
+ * An unknown currency falls back to the shape check alone rather than to a guessed
+ * scale — refusing a legitimate amount because we lack a table entry would be worse
+ * than accepting one extra decimal place.
+ */
+export function parseCurrencyAmount(input: string, currencyCode: string | null | undefined): ParsedAmount {
+  const parsed = parseAmount(input);
+  if (!parsed.ok) return parsed;
+
+  const minor = currencyMinorUnits(currencyCode);
+  if (minor === null) return parsed;
+
+  const dot = parsed.canonical.indexOf(".");
+  const typedDecimals = dot < 0 ? 0 : parsed.canonical.length - dot - 1;
+  if (typedDecimals > minor) {
+    return { ok: false, refusal: minor === 0 ? "no-subunit" : "too-many-decimals" };
+  }
+  return parsed;
 }

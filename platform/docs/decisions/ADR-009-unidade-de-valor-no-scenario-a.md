@@ -148,6 +148,28 @@ moeda → expoente.
 
 ---
 
+### 2b. Refinamento durante a implementação: o limite vale para TODOS os campos de A
+
+A tabela de §1 separa campo de moeda de campo de token, e o raciocínio para não limitar o
+segundo veio do Scenario B, onde um swap na AMM deixa resíduo abaixo do centavo — limitar
+a entrada ali tornaria a poeira irresgatável.
+
+**O Scenario A não tem AMM.** O tCeBM de A nasce da tokenização de fCeBM, 1:1, e as pernas
+de HTLC apenas o transferem. Não existe fonte de resíduo sub-centavo. Logo o limite ISO 4217
+se aplica a todos os sete campos, cada um pela moeda que ele de fato denomina:
+
+| Campo | Moeda usada no limite |
+|---|---|
+| emissão, resgate, tokenização, duas pernas de HTLC | a moeda do próprio spoke, extraída do símbolo do fCeBM |
+| perna de origem da proposta de FX | `originCurrency` |
+| perna de contrapartida da proposta de FX | `counterCurrency` — pode ser CLP ou PYG |
+
+A última linha é onde a tabela por moeda deixa de ser preciosismo: a perna de contrapartida
+é selecionada pelo operador entre 18 moedas, duas delas sem subunidade.
+
+Moeda desconhecida **não** recebe escala padrão — cai para a checagem de forma apenas.
+Recusar um valor legítimo por falta de linha na tabela seria pior que aceitar uma casa a mais.
+
 ## Opções
 
 ### Opção A — camada de decimais, conversão na borda

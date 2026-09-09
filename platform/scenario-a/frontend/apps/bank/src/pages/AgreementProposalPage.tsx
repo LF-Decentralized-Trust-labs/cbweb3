@@ -10,7 +10,7 @@ import {
   CardTitle,
   Input,
   Label,
-  parseAmount,
+  parseCurrencyAmount,
   Select,
   SelectContent,
   SelectItem,
@@ -126,8 +126,16 @@ export function AgreementProposalPage() {
 
   // Parsed once and reused, so the rate on screen, the validation message and
   // the value posted can never disagree about what the operator typed.
-  const parsedOrigin = useMemo(() => parseAmount(originAmount), [originAmount]);
-  const parsedCounter = useMemo(() => parseAmount(counterAmount), [counterAmount]);
+  // Each leg is bounded by ITS OWN declared currency, which is where the table earns
+  // its keep: the counter leg can be CLP or PYG, and neither has a subunit.
+  const parsedOrigin = useMemo(
+    () => parseCurrencyAmount(originAmount, originCurrency),
+    [originAmount, originCurrency],
+  );
+  const parsedCounter = useMemo(
+    () => parseCurrencyAmount(counterAmount, counterCurrency),
+    [counterAmount, counterCurrency],
+  );
 
   const rate = useMemo(() => {
     if (!parsedOrigin.ok || !parsedCounter.ok) return "";
