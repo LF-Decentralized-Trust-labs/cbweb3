@@ -270,8 +270,68 @@ A lacuna é real em dois níveis: A não tem a guarda de teste, e as recusas sã
 A **consequência** é que ainda não foi medida. Portar a correção de B às cegas descreveria
 um defeito que A não tem.
 
-> Próximo passo desta linha: dirigir o portal de A com um `INTERNAL_RELAY_AUTH_SECRET`
-> divergente e registrar o que o operador vê. Só então decidir o que portar.
+### O que o operador de A vê — medido
+
+A cadeia inteira é determinística e foi percorrida no código, com o único elo incerto
+medido de fato:
+
+1. O banco central recusa: `401 {"error":"invalid relay auth secret"}`
+   (`middleware/internal_relay_auth.go`).
+2. O gateway do banco **não repassa**. `getInternalJSON` converte qualquer não-200 em
+   `fmt.Errorf("central bank returned %d: %s", …)`
+   (`handlers/payment_proxy.go:199`).
+3. O handler de extrato converte esse erro em **`502 Bad Gateway`** com o corpo
+   `{"error":"statement: load deposits: central bank returned 401: …"}`
+   (`handlers/statement.go:135`).
+4. O interceptor do portal só ramifica em `401`
+   (`interceptors/auth.interceptor.ts:15`), então **nada de refresh, retry ou
+   `forceLogout()`**.
+5. A store guarda `error.message`, não `response.data`
+   (`stores/statement.store.ts:24`).
+
+O elo 5 era o único que dependia de comportamento de biblioteca, então foi medido contra o
+axios instalado no próprio app, com um servidor devolvendo exatamente o 502 acima:
+
+```
+error.message   = "Request failed with status code 502"
+response.status = 502
+response.data   = {"error":"statement: load deposits: central bank returned 401: …"}
+```
+
+**Conclusão: o sintoma de B não existe em A, e portar a correção de B descreveria um
+defeito que A não tem.** O operador de A não é ejetado para a tela de login. Ele vê, na
+página de extrato:
+
+> Request failed with status code 502
+
+E só isso. A explicação que o gateway montou — inclusive o `401` do banco central e o
+motivo — está em `response.data` e é descartada pela store.
+
+O defeito de A é, portanto, **outro**, e menor em consequência e maior em opacidade: não há
+perda de sessão, mas também não há nenhuma pista. Nem o operador nem o suporte conseguem
+distinguir "credencial de relay divergente" de "banco central fora do ar" a partir do que a
+tela mostra.
+
+O que isso implica para o port: **não portar `trust-errors.ts`**. A correção que A precisa
+é de outra natureza — apresentar `response.data.error` em vez de `error.message` — e não
+depende de códigos. Codificar as recusas de relay-auth de A continua desejável, mas é a
+segunda etapa, e o ganho é bem menor do que o inventário sugeria.
+
+**E não é local à store do extrato.** O mesmo `error instanceof Error ? error.message : …`
+aparece **31 vezes em 13 arquivos** do portal do banco de A — todas as stores, sete páginas
+e o fluxo de onboarding. Ou seja: *nenhum* erro de API nesse portal mostra a mensagem que o
+servidor mandou; todos mostram "Request failed with status code NNN". A forma da correção já
+existe no próprio app, em `stores/payment.store.ts:29` (`getErrorMessage`), que só precisa
+consultar `response.data` antes de `message` e ser usada em toda parte.
+
+Isso é maior do que esta auditoria e muda o que **toda** página do portal exibe, então fica
+como card próprio e não entra aqui — mas foi esta linha que o encontrou, e a medição acima é
+a evidência.
+
+*Nível de verificação:* fonte para a cadeia (elos 1–4, todos leitura direta e sem ramificação
+condicional), medição real para o elo 5. Não foi um stack de ponta a ponta: a única coisa que
+um stack ao vivo acrescentaria é confirmar a mesma string na tela, e ela já está determinada
+pelo elo 5.
 
 A codificação de erros em A não é inexistente: o caminho de login já usa
 `CodeInvalidRequest`, `CodeMissingCredentials` e `CodeAuthServiceUnavailable`
@@ -351,9 +411,10 @@ lembrete de que este documento inteiro é feito do tipo de leitura que produz es
    **Feito** — as sete estão na tabela acima.
 2. ~~**Corrigir a exposição de segredo em argv em A**, portando junto o teste de B.~~
    **Feito** — ver a seção acima.
-3. **Medir a consequência real da lacuna de recusas codificadas em A** antes de portar —
-   o proxy de A converte o não-200 em vez de repassá-lo, então o sintoma de B (ejeção para
-   a tela de login) pode simplesmente não se reproduzir.
+3. ~~**Medir a consequência real da lacuna de recusas codificadas em A** antes de portar.~~
+   **Feito** — o sintoma de B não se reproduz. O que A precisa é mostrar
+   `response.data.error` em vez de `error.message` na store do extrato; codificar as
+   recusas é uma segunda etapa, de ganho menor. Ver a seção acima.
 4. ~~**Decidir o sentido inverso:** as guardas de literal de imagem vão para B?~~
    **Feito** — foram, com o pin centralizado numa constante. Ver a seção acima.
 5. **Abrir card próprio para a asserção de estado final do Keycloak em A** — o script de
