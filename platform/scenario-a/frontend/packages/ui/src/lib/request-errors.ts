@@ -3,7 +3,7 @@
 /**
  * One explanation of a failed API request, shared by every Scenario A portal.
  *
- * The sibling of `login-errors.ts`, for the other 31 call sites. That module fixed the sign-in
+ * The sibling of `login-errors.ts`, for the other 34 call sites. That module fixed the sign-in
  * routes: the gateway grew stable `code` fields and the five portals stopped rendering axios's own
  * message. Everything else in the bank portal kept doing exactly what sign-in used to — every store
  * and page surfaced `error.message`, so an operator read "Request failed with status code 502"
@@ -19,7 +19,7 @@
  *
  *   - loginErrorMessage maps a CODE to curated copy, because sign-in has five outcomes and the
  *     words for each are a product decision that must agree across five portals.
- *   - These routes carry no codes. Two hundred and fourteen handlers answer with prose in `error`
+ *   - These routes carry no codes. Two hundred and sixteen handlers answer with prose in `error`
  *     and nothing else. There is no mapping to make — the job is to stop throwing that prose away.
  *
  * Merging them would mean either inventing copy for two hundred handlers or letting the login
@@ -31,7 +31,7 @@
  *
  * Only two strings: everything else on this path is the gateway's own prose, deliberately. No i18n
  * in these apps, so nothing is localised; keeping the strings named gives a future translation pass
- * one seam instead of thirty-one catch blocks.
+ * one seam instead of thirty-four catch blocks.
  */
 export const REQUEST_ERROR_COPY = {
   unreachable: "Could not reach the gateway. Check your connection and try again.",
@@ -69,9 +69,18 @@ const prose = (value: unknown): string | null => {
 /**
  * explanationFrom pulls the gateway's own words out of a response body.
  *
- * `error` first and `message` second because that is the split in this gateway: 214 handlers answer
- * with `error`, two with `message`. Reading only the first would leave those two rendering the
- * fallback, which looks exactly like the defect never got fixed.
+ * Three shapes, in the order they are read:
+ *
+ *   - A bare string body. This is the load-bearing one, and the least obvious. `serverConfig()`
+ *     installs no `ErrorHandler`, so Fiber's default applies: `text/plain` and
+ *     `SendString(err.Error())`. A 404 on an unknown route, or a panic, arrives as prose with no
+ *     JSON around it, and nothing but this branch would surface it.
+ *   - `{"error": …}`, which is 216 of the gateway's handlers and every deliberate refusal.
+ *   - `{"message": …}`, read last and on no present evidence. The gateway's only two `message`
+ *     bodies are `StatusOK` — "logged out successfully" and "client secret changed successfully" —
+ *     so nothing that exists today reaches this branch. It costs one `??` and covers the day a
+ *     handler answers a failure that way, which is the whole of its justification. Named here
+ *     because "two handlers use it" would read as evidence, and it is not.
  */
 const explanationFrom = (data: unknown): string | null => {
   const bare = prose(data);

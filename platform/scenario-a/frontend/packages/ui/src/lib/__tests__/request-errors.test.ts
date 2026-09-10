@@ -8,7 +8,7 @@ import { apiErrorMessage, REQUEST_ERROR_COPY } from "../request-errors";
  *
  * Every store and page in Scenario A's bank portal surfaced `error.message`, which for axios is the
  * string "Request failed with status code NNN". The gateway's own explanation sat in
- * `response.data.error` and was thrown away — 31 call sites across 13 files.
+ * `response.data.error` and was thrown away — 34 call sites across 16 files.
  *
  * The case that found it: a divergent INTERNAL_RELAY_AUTH_SECRET makes the central bank answer 401,
  * the bank's gateway wraps that into a 502 whose body says exactly what happened, and the operator
@@ -47,9 +47,10 @@ describe("apiErrorMessage", () => {
     expect(apiErrorMessage(error, FALLBACK)).not.toContain("Request failed with status code");
   });
 
-  // 214 handlers in this gateway answer with `error`; two answer with `message`. Reading only the
-  // first would leave those two rendering the fallback and look like the defect never got fixed.
-  it("reads `message` for the handlers that use it", () => {
+  // 216 handlers in this gateway answer with `error`. The two that answer with `message` are both
+  // StatusOK, so no error path emits that key today — this branch is forward cover, not a fix for
+  // an observed body. Pinned so that the day a handler does answer a failure that way, it renders.
+  it("reads `message` from a body that carries only that key", () => {
     const error = axiosFailure(400, { message: "escrow amount must be positive" });
     expect(apiErrorMessage(error, FALLBACK)).toBe("escrow amount must be positive");
   });
@@ -59,6 +60,9 @@ describe("apiErrorMessage", () => {
     expect(apiErrorMessage(error, FALLBACK)).toBe("the specific one");
   });
 
+  // Not an edge case: the gateway installs no Fiber ErrorHandler, so a 404 on an unknown route or
+  // a panic comes back as text/plain prose with no JSON around it. This branch is the only one
+  // that surfaces those, which makes it the load-bearing one of the three.
   it("accepts a body that is a bare string", () => {
     expect(apiErrorMessage(axiosFailure(503, "upstream is draining"), FALLBACK)).toBe(
       "upstream is draining",
