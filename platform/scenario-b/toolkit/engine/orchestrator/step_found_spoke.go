@@ -102,7 +102,7 @@ func (c *SpokeConfig) WithDefaults() {
 		c.ValidatorCount = 1
 	}
 	if c.BesuImage == "" {
-		c.BesuImage = "hyperledger/besu:25.8.0"
+		c.BesuImage = DefaultBesuImage
 	}
 	if c.GenesisDir == "" {
 		c.GenesisDir = filepath.Join(c.OutDir, "genesis-"+c.SpokeID)
