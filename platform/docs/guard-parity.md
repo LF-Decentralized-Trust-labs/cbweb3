@@ -133,6 +133,32 @@ registrada em [`docs/scenario-drift.md`](scenario-drift.md) §13.
 `Check` do passo, que roda em **todo** apply. Um apply que converge e não muda nada pagava
 a exposição do mesmo jeito.
 
+### Verificado ao vivo, contra a imagem que A fixa
+
+A correção de A herdava a verificação de B ("kcadm lê `KC_CLI_PASSWORD` quando a flag está
+ausente"). Herdar não é medir, então foi medido — sem subir o stack: um único container
+`quay.io/keycloak/keycloak:26.0`, a imagem que A fixa, com `KC_BOOTSTRAP_ADMIN_PASSWORD` no
+ambiente, e a linha de login **exatamente como o toolkit de A a gera agora**.
+
+| Condição | Esperado | `exit` |
+|---|---|---|
+| variável presente, sem `--password` | login funciona | **0** |
+| variável **vazia**, sem `--password` | falha | **1** |
+| variável **errada**, sem `--password` | falha | **1** |
+| a cadeia do script depois de um login falhado | para | **1** |
+| o comando seguinte da cadeia | não corre | realm não criado |
+
+As três últimas linhas são a parte que importa e a que uma verificação preguiçosa saltaria:
+não basta o login funcionar quando a variável está certa. Se um login falhado saísse `0`, o
+script seguiria em frente contra um Keycloak não autenticado e o passo reportaria sucesso —
+que é a forma exata do defeito descrito acima em "Pré-requisitos do Keycloak". Não sai: o
+`|| exit 1` morde e nada a jusante corre.
+
+Uma nota de método, porque custou uma leitura errada aqui: `docker exec … | tail` seguido de
+`$?` lê o código de saída do `tail`, não do `docker`. A primeira passagem deste quadro deu
+`exit=0` na linha que tinha de falhar. Os números acima vêm de `docker exec …; echo $?`, sem
+pipeline no meio.
+
 ### Uma exposição que nenhum dos dois cobre
 
 Ao verificar isso apareceu um terceiro caso, e ele não é lacuna de paridade — é lacuna nos
@@ -402,6 +428,77 @@ trivial pode não justificar — mas é o mapa de onde a auditoria não pode con
 *"vet, build and test"* e uma leitura apressada não achou o passo de teste. Ele existe —
 `go test -count=1 ./...`. O grep tinha cortado nos primeiros resultados. Vale como
 lembrete de que este documento inteiro é feito do tipo de leitura que produz esse erro.
+
+---
+
+## Validação: o gatilho do CI não cobria o que as guardas leem
+
+Achado ao reexecutar as dezesseis mutações de propósito, não por leitura. Quatro delas
+editam ficheiros que o job do `toolkit` **não** observava, e uma guarda que não roda é uma
+guarda que não guarda.
+
+As guardas do toolkit leem quatro árvores fora do próprio módulo:
+
+| Árvore | Quem lê | Estava no gatilho? |
+|---|---|---|
+| `provisioning/templates/` | limite de log, defaults de credencial, sufixos de serviço | sim |
+| `samples/` | portas efêmeras, limite DNS, upstreams do proxy | **não** |
+| `deploy-lnet/*/manifests/` | portas efêmeras, limite DNS | **não** |
+| `backend/services/*/Dockerfile` | endurecimento de Dockerfile (recusa estágio como root) | **não** |
+
+O comentário do próprio workflow já enunciava a regra para `provisioning/` — *"a mudança
+que introduz a credencial é exatamente a que pula o gate"* — e as outras três ficaram de
+fora. As consequências são concretas e são exatamente as mutações desta auditoria: um PR
+que pusesse uma porta RPC do Besu dentro do range efêmero de um sample, ou um nome de
+entidade além dos 63 octetos, **não dispararia a única guarda que o pega**.
+
+Corrigido em `.github/workflows/toolkit.yml`, nos dois blocos de `paths`. Dos Dockerfiles
+entra só o ficheiro, não a árvore de backend: a guarda não lê mais nada ali, e alargar
+rodaria a matriz do toolkit em todo PR de backend sem cobertura adicional.
+
+Regra que fica escrita no workflow: **se um teste lê um caminho, esse caminho pertence ao
+gatilho.** Acrescentar uma guarda que lê uma árvore nova significa acrescentar a árvore
+ali, ou a guarda é decorativa.
+
+---
+
+## Como reexecutar esta auditoria
+
+```bash
+bash tools/verify-guard-mutations.test.sh   # o self-test: o harness tem de recusar
+bash tools/verify-guard-mutations.sh        # as dezesseis mutações
+```
+
+Ambos saem `0`. Rode com **bash, nunca zsh** — zsh não bifurca o último estágio de um
+pipeline, que é a classe de bug que uma vez deixou o gate de licenças passar sem verificar
+nada.
+
+O harness quebra o sujeito, roda o teste nomeado, restaura por `git checkout --` e reporta
+por código de saída. Ao final compara a árvore com o estado em que a encontrou, não com uma
+árvore limpa: ele não pode deixar resíduo, mas as edições pendentes de quem o chamou não são
+assunto dele, e reportá-las como resíduo treinaria o leitor a ignorar essa linha.
+
+Três recusas estão embutidas, cada uma vinda de um falso "não detectou" desta auditoria:
+
+- mutação que não casa o padrão → o caso aborta, nunca vira aprovação;
+- mutação que não compila → **INCONCLUSIVO**, não detecção;
+- todo `go test` com `-count=1`, porque estas guardas leem ficheiros fora do pacote e o
+  cache do Go não os observa.
+
+Além disso, cada caso confere se o `-run` casou com algum teste: um filtro com nome errado
+sai 0 e passaria por sucesso.
+
+E o harness prova as próprias recusas. `tools/verify-guard-mutations.test.sh` roda quatro
+casos deliberadamente quebrados e exige a classificação certa de cada um: padrão que não
+casa → `HARNESS`; mutação que não compila → `INCONCL.`; `-run` sem correspondência →
+`HARNESS`; e um controlo positivo, mutação real de guarda real → `DETECTOU`. O controlo
+positivo existe porque as três recusas, sozinhas, também seriam satisfeitas por um harness
+que recusa tudo.
+
+Uma distinção que o harness torna visível e a prosa escondia: para o segredo em argv há
+**dois** casos por cenário. Escrever o texto literal `--password $KC_ADMIN_PASSWORD`
+dispara só a asserção de **forma**; a de **valor** exige interpolar o segredo resolvido, e
+é caso à parte. Os quatro detectam.
 
 ---
 
