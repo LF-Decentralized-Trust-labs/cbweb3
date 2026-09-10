@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { amountRefusalMessage, parseAmount, parseBaseUnits } from "../amount";
+import {
+  amountRefusalMessage,
+  currencyMinorUnits,
+  parseAmount,
+  parseBaseUnits,
+  parseCurrencyAmount,
+} from "../amount";
 
 // The rule pinned here is ISO 20022: dot decimal separator, no grouping. The
 // project chose to make the form accept exactly what the wire accepts rather
@@ -111,5 +117,60 @@ describe("amountRefusalMessage", () => {
     expect(amountRefusalMessage("Receive amount", "not-positive")).toBe(
       "Receive amount must be greater than zero.",
     );
+  });
+});
+
+// ISO 20022 bounds fraction digits by the currency's ISO 4217 minor unit. The pilot's
+// own currency list already contains two with no subunit at all, which is why this is
+// a table and not a constant.
+describe("parseCurrencyAmount", () => {
+  it("knows the minor units of the currencies the forms offer", () => {
+    expect(currencyMinorUnits("BRL")).toBe(2);
+    expect(currencyMinorUnits("brl")).toBe(2);
+    expect(currencyMinorUnits("CLP")).toBe(0);
+    expect(currencyMinorUnits("PYG")).toBe(0);
+  });
+
+  // Guessing the scale of money is the mistake this module exists to stop, so an
+  // unknown code yields null rather than a default.
+  it("does not invent a scale for a currency it does not know", () => {
+    expect(currencyMinorUnits("XYZ")).toBeNull();
+    expect(currencyMinorUnits("")).toBeNull();
+    expect(currencyMinorUnits(null)).toBeNull();
+  });
+
+  it.each([
+    ["100.20", "BRL"],
+    ["100", "BRL"],
+    ["100", "CLP"],
+  ])("accepts %s in %s", (input, code) => {
+    expect(parseCurrencyAmount(input, code).ok).toBe(true);
+  });
+
+  it("refuses more decimals than the currency has", () => {
+    const parsed = parseCurrencyAmount("100.123", "BRL");
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.refusal).toBe("too-many-decimals");
+  });
+
+  // The case a flat "2 decimal places" rule would wave through while looking correct.
+  it("refuses any subunit for a zero-exponent currency", () => {
+    for (const code of ["CLP", "PYG"]) {
+      const parsed = parseCurrencyAmount("1000.50", code);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.refusal).toBe("no-subunit");
+    }
+  });
+
+  // Falling back to the shape check beats refusing a legitimate amount over a missing
+  // table entry.
+  it("falls back to the shape rule for an unknown currency", () => {
+    expect(parseCurrencyAmount("100.123456", "XYZ").ok).toBe(true);
+    expect(parseCurrencyAmount("100,12", "XYZ").ok).toBe(false);
+  });
+
+  it("says what is wrong in currency terms", () => {
+    expect(amountRefusalMessage("Amount", "no-subunit")).toContain("no subunit");
+    expect(amountRefusalMessage("Amount", "too-many-decimals")).toContain("decimal places");
   });
 });

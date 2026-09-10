@@ -26,8 +26,10 @@ CB_B_ENV="${CB_B_ENV:-backend/config/.env.infra.central-bank-b}"
 # FX/HTLC amounts must stay aligned with agreement terms:
 # - spoke-a lock uses origin amount
 # - spoke-b lock uses counter amount
-FX_ORIGIN_AMOUNT="${FX_ORIGIN_AMOUNT:-100000}"
-FX_COUNTER_AMOUNT="${FX_COUNTER_AMOUNT:-520000}"
+# Base units (hundredths, ADR-009), not currency figures. 100.00 and 520.00 keep the
+# 5.2 rate the assertions below expect.
+FX_ORIGIN_AMOUNT="${FX_ORIGIN_AMOUNT:-10000}"   # 100.00
+FX_COUNTER_AMOUNT="${FX_COUNTER_AMOUNT:-52000}" # 520.00
 # Backward-compatible override: if LOCK_AMOUNT is set, force both legs to same value.
 LOCK_AMOUNT="${LOCK_AMOUNT:-}"
 LOCK_AMOUNT_A="${LOCK_AMOUNT_A:-${LOCK_AMOUNT:-$FX_ORIGIN_AMOUNT}}"

@@ -10,7 +10,7 @@ import {
   CardTitle,
   Input,
   Label,
-  parseBaseUnits,
+  parseCurrencyAmount,
   Select,
   SelectContent,
   SelectItem,
@@ -21,6 +21,8 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { spokeIdsFromRoster } from "../features/fx/spoke-roster";
+import { displayToBase } from "../types";
+import { usePaymentStore } from "../stores";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
 import { useIdentityStore } from "../stores/identity.store";
 
@@ -81,6 +83,8 @@ const defaultExpiry = () => {
 export function AgreementProposalPage() {
   const navigate = useNavigate();
   const propose = useFxAgreementStore((s) => s.propose);
+  // The FX leg carries the same unit as the HTLC leg that settles it (ADR-009).
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
   const status = useFxAgreementStore((s) => s.status);
   const identities = useIdentityStore((s) => s.identities);
   const fetchIdentities = useIdentityStore((s) => s.fetchAll);
@@ -122,8 +126,16 @@ export function AgreementProposalPage() {
 
   // Parsed once and reused, so the rate on screen, the validation message and
   // the value posted can never disagree about what the operator typed.
-  const parsedOrigin = useMemo(() => parseBaseUnits(originAmount), [originAmount]);
-  const parsedCounter = useMemo(() => parseBaseUnits(counterAmount), [counterAmount]);
+  // Each leg is bounded by ITS OWN declared currency, which is where the table earns
+  // its keep: the counter leg can be CLP or PYG, and neither has a subunit.
+  const parsedOrigin = useMemo(
+    () => parseCurrencyAmount(originAmount, originCurrency),
+    [originAmount, originCurrency],
+  );
+  const parsedCounter = useMemo(
+    () => parseCurrencyAmount(counterAmount, counterCurrency),
+    [counterAmount, counterCurrency],
+  );
 
   const rate = useMemo(() => {
     if (!parsedOrigin.ok || !parsedCounter.ok) return "";
@@ -192,8 +204,10 @@ export function AgreementProposalPage() {
         settlement_agent: settlementAgent.trim(),
         custodian: custodian.trim(),
         beneficiary: beneficiary.trim(),
-        origin_amount: parsedOrigin.canonical,
-        counter_amount: parsedCounter.canonical,
+        // Scaled with the SAME decimals the HTLC leg uses. The two must stay equal:
+        // sample-tryout locks an HTLC of the origin amount against this very field.
+        origin_amount: displayToBase(parsedOrigin.canonical, tCeBMDecimals),
+        counter_amount: displayToBase(parsedCounter.canonical, tCeBMDecimals),
         origin_currency: originCurrency,
         counter_currency: counterCurrency,
         rate: rate,
@@ -289,9 +303,9 @@ export function AgreementProposalPage() {
               <Input
                 id="origin-amount"
                 type="text"
-                inputMode="numeric"
+                inputMode="decimal"
                 autoComplete="off"
-                placeholder="1000"
+                placeholder="1000.00"
                 value={originAmount}
                 onChange={(e) => setOriginAmount(e.target.value)}
               />
@@ -309,9 +323,9 @@ export function AgreementProposalPage() {
               <Input
                 id="counter-amount"
                 type="text"
-                inputMode="numeric"
+                inputMode="decimal"
                 autoComplete="off"
-                placeholder="5000"
+                placeholder="5000.00"
                 value={counterAmount}
                 onChange={(e) => setCounterAmount(e.target.value)}
               />

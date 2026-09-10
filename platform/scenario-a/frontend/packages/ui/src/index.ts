@@ -43,7 +43,13 @@ export {
 export { cn } from "./lib/utils";
 export { getLauncherUrl, goToLauncher } from "./lib/launcher";
 export { loginErrorMessage, LOGIN_ERROR_COPY } from "./lib/login-errors";
-export { parseAmount, parseBaseUnits, amountRefusalMessage } from "./lib/amount";
+export {
+  parseAmount,
+  parseBaseUnits,
+  parseCurrencyAmount,
+  currencyMinorUnits,
+  amountRefusalMessage,
+} from "./lib/amount";
 export type { ParsedAmount, AmountRefusal } from "./lib/amount";
 export {
   Dialog,

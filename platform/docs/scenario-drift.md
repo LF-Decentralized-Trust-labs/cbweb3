@@ -47,6 +47,8 @@ estão marcadas como tal, para que ninguém gaste tempo nelas.
 | Caminhos de módulo Go | **Convergir** | Três serviços dos dois cenários declaram o mesmo módulo |
 | App `dispatcher` | **Decisão** | Existe só em A |
 | Faixas de porta host | **Convergida** | As duas ficavam acima de 32768 em parte dos samples; agora A vive na faixa x645 e B na x145 |
+| Escala dos valores | **Intencional** | A usa centavos porque o lock do Zeto trava em 2^64; B usa 18 casas porque seus tokens são ERC-20 |
+| Proposta de FX | **Convergir** | A aceita decimais; B segue em unidades inteiras, numa tela que o build de B nem roteia |
 
 ---
 
@@ -430,6 +432,65 @@ Depois desta mudança, subir sem `--clean` mistura as duas numerações — use 
 2. **Colapsar os literais do B sobre as constantes de `ports.go`.** Os offsets do B são
    literais inline em `step_found_hub.go`, `step_found_spoke.go` e `step_join.go` — os
    três de PRs abertas (#226, #228, #229). O teste anti-drift cobre o intervalo até lá.
+
+---
+
+## 11. Escala dos valores — intencional
+
+Os dois cenários passaram a interpretar um valor inteiro de formas diferentes, e a
+diferença é obrigatória, não descuido.
+
+| | Scenario A | Scenario B |
+|---|---|---|
+| Escala do valor | **centavos (10⁻²)** | **10⁻¹⁸** |
+| tCeBM é | **nota Zeto** (token de privacidade, Paladin) | **ERC-20** |
+| Teto por movimento | `2⁶⁴ − 1` no circuito de **lock** | nenhum |
+
+### O que foi medido
+
+O Zeto usa circuitos distintos para operações distintas, e as faixas deles não são as
+mesmas. Medido em stack ao vivo, com identidade nova a cada ponto:
+
+| Circuito | Teto |
+|---|---|
+| **mint** | `2¹⁰⁰ − 1` = 1267650600228229401496703205375 |
+| **lock** | `2⁶⁴ − 1` = 18446744073709551615 |
+
+A diferença é de **2³⁶ — cerca de 69 bilhões de vezes**. E a nota que excede o teto do
+lock **é cunhada normalmente**: ela existe na carteira e só se revela inutilizável quando
+algo tenta travá-la, momento em que a transação não é recusada e sim nunca montada
+(`Zeto_94`, `CheckHashes_92`, `PD012618`), deixando quem chamou esperando.
+
+A 10⁻¹⁸, o maior valor travável no Scenario A seria **18,45 unidades monetárias**. Daí a
+escala de centavos — que coincide com a unidade menor que a ISO 4217 dá às moedas do
+piloto e usa 5×10⁻¹⁶ do teto.
+
+O Scenario B **não tem Zeto** — não há adapter, só o relay Cacti, e seus tokens são
+ERC-20 sem circuito ZK. Portanto não tem esse teto, e as 18 casas ali são legítimas.
+
+### Não convergir
+
+Igualar as escalas quebraria um dos dois lados: levar A para 18 casas o trava, e levar B
+para centavos descartaria precisão que os pools da AMM produzem por construção — um swap
+já deixou saldo de `3,959753632757569189`.
+
+O que **deve** permanecer em passo é a regra de entrada, não a escala:
+`packages/ui/src/lib/amount.ts` existe nos dois cenários no mesmo caminho, e `diff` entre
+os dois arquivos é a forma de conferir. Ver ADR-009.
+
+---
+
+## 12. Proposta de FX — convergir
+
+A proposta de FX de A passou a aceitar valores decimais (convertidos para unidades-base
+antes do envio); a de B continua exigindo inteiro em unidades-base.
+
+Hoje é inofensivo: num build de B a página **não é roteada** — ela vive em
+`scenarioAChildren`, o caminho vestigial do FXAgreement, que é dead code em B por decisão
+anterior e preservado por causa da fusão futura dos cenários.
+
+Converge quando a fusão acontecer, ou antes disso se a tela de B voltar a ser roteada.
+Enquanto ninguém a alcança, mexer nela seria alargar um PR sem ganho.
 
 ---
 

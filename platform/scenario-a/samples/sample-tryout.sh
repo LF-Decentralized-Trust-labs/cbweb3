@@ -205,6 +205,22 @@ poll_onboarding() {
   die "[$label] onboarding not OK after 3 attempts (last status=$st)"
 }
 
+# base DECIMAL — scale a currency figure to base units (ADR-009): hundredths.
+#
+# Every amount below is written as the operator would type it and scaled here, rather
+# than as a raw integer. Before ADR-009 the two were the same thing; now they are not,
+# and a literal 1000 in this file would mean 1000 wei — 1e-15 tokens, an amount the
+# portal cannot even express, since its smallest input is one minor unit (0.01).
+#
+# The scale is hundredths, not 10^-18, and that is bounded by measurement: the Zeto
+# LOCK circuit refuses a note value at or above 2^64 (2^64-1 locks, 2^64 hangs), so at
+# 18 decimals the largest lockable amount would be 18.45 currency units. Tokenising
+# 500.00 at that scale is what wedged an earlier run of this script.
+base() { python3 -c "
+import sys
+from decimal import Decimal
+print(int(Decimal(sys.argv[1]) * (10 ** 2)))" "$1"; }
+
 # issue BANK_URL BANK_TOK CB_URL TRE_TOK AMOUNT LABEL — reserve issuance in THREE steps:
 #   1) request deposit (bank), 2) approve (treasury — only flips status to APPROVED),
 #   3) fiat-exchange (treasury — the step that actually MINTS fCeBM on Besu).
@@ -271,20 +287,20 @@ poll_onboarding cb1 "$CB1" "$CB1_TOK"
 poll_onboarding cb2 "$CB2" "$CB2_TOK"
 
 # ═══════════════════════════════ ISSUANCE (reserve / fCeBM) ════════════════════
-step "Issue 1000000 BRL to Itaú (treasury Brazil approves)"
+step "Issue 1000.00 BRL to Itaú (treasury Brazil approves)"
 BR_TRE_TOK=$(login "$BR_CB" "$BR_TRE_USER" "$BR_TRE_PASS")
-issue "$ITAU" "$ITAU_TOK" "$BR_CB" "$BR_TRE_TOK" 1000000 "Itau/BRL"
+issue "$ITAU" "$ITAU_TOK" "$BR_CB" "$BR_TRE_TOK" "$(base 1000.00)" "Itau/BRL"
 
-step "Issue 500000000 CRC to cb1 (treasury Costa Rica approves)"
+step "Issue 5000.00 CRC to cb1 (treasury Costa Rica approves)"
 CR_TRE_TOK=$(login "$CR_CB" "$CR_TRE_USER" "$CR_TRE_PASS")
-issue "$CB1" "$CB1_TOK" "$CR_CB" "$CR_TRE_TOK" 500000000 "cb1/CRC"
+issue "$CB1" "$CB1_TOK" "$CR_CB" "$CR_TRE_TOK" "$(base 5000.00)" "cb1/CRC"
 
 # ═══════════════════════════════ TOKENIZATION (tCeBM / Zeto) ═══════════════════
-step "Tokenize 50000 BRL with Itaú (treasury Brazil approves)"
-tokenize "$ITAU" "$ITAU_TOK" "$BR_CB" "$BR_TRE_TOK" 50000 "Itau/BRL"
+step "Tokenize 500.00 BRL with Itaú (treasury Brazil approves)"
+tokenize "$ITAU" "$ITAU_TOK" "$BR_CB" "$BR_TRE_TOK" "$(base 500.00)" "Itau/BRL"
 
-step "Tokenize 250000 CRC with cb1 (treasury Costa Rica approves)"
-tokenize "$CB1" "$CB1_TOK" "$CR_CB" "$CR_TRE_TOK" 250000 "cb1/CRC"
+step "Tokenize 2500.00 CRC with cb1 (treasury Costa Rica approves)"
+tokenize "$CB1" "$CB1_TOK" "$CR_CB" "$CR_TRE_TOK" "$(base 2500.00)" "cb1/CRC"
 
 # ═══════════════════════════════ BALANCES ══════════════════════════════════════
 step "Check balances for both commercial banks"
@@ -294,7 +310,13 @@ call GET "$CB1/api/v1/token/fiat-balance" "$CB1_TOK"; ok "cb1 fiat (fCeBM) balan
 call GET "$CB1/api/v1/token/balance" "$CB1_TOK";      ok "cb1 token (tCeBM) balance: $(printf '%s' "$BODY" | jget balance)"
 
 # ═══════════════════════════════ FX AGREEMENT (propose) ════════════════════════
-step "Itaú creates cross-spoke FX agreement (BRL 1000 -> CRC 5000)"
+step "Itaú creates cross-spoke FX agreement (BRL 100.20 -> CRC 501.00)"
+# Deliberately fractional. Before ADR-009 no amount with a subunit could be proposed
+# at all, and this pair is the invariant the whole change turns on: the FX leg and the
+# HTLC leg that settles it must carry the SAME figure, or a proposal stops matching
+# its own settlement by a factor of 10^18.
+FX_ORIGIN=$(base 100.20)   # BRL
+FX_COUNTER=$(base 501.00)  # CRC — 100.20 x 5, so the rate below stays exact
 EXPIRY=$(( $(date +%s) + 86400 ))
 call POST "$ITAU/api/v1/payments/fx/agreements" "$ITAU_TOK" "{
   \"counterparty_b\":\"$ID_CB1\",
@@ -305,8 +327,8 @@ call POST "$ITAU/api/v1/payments/fx/agreements" "$ITAU_TOK" "{
   \"dest_spoke_id\":\"spoke-costa-rica\",
   \"source_receiver\":\"$ID_BRADESCO\",
   \"dest_receiver\":\"$ID_CB2\",
-  \"origin_amount\":\"1000\",
-  \"counter_amount\":\"5000\",
+  \"origin_amount\":\"$FX_ORIGIN\",
+  \"counter_amount\":\"$FX_COUNTER\",
   \"origin_currency\":\"BRL\",
   \"counter_currency\":\"CRC\",
   \"rate\":\"5\",
@@ -369,9 +391,9 @@ done
 # 1) Source leg — Itaú locks the origin amount (BRL) to the source receiver (Bradesco).
 #    This mints the secret + hashLock: tokens are escrowed privately on Zeto with a public
 #    HTLC coordination record on the source Besu chain.
-step "Itaú locks the source leg (1000 BRL → Bradesco)"
+step "Itaú locks the source leg (100.20 BRL → Bradesco) — same figure as the FX leg"
 call POST "$ITAU/api/v1/htlc/lock" "$ITAU_TOK" \
-  "{\"receiver\":\"$ID_BRADESCO\",\"amount\":\"1000\",\"agreement_id\":\"$TRADE_ID\"}"
+  "{\"receiver\":\"$ID_BRADESCO\",\"amount\":\"$FX_ORIGIN\",\"agreement_id\":\"$TRADE_ID\"}"
 CONTRACT_ID=$(printf '%s' "$BODY" | jget contract_id)
 HASH_LOCK=$(printf '%s' "$BODY" | jget hash_lock)
 SECRET=$(printf '%s' "$BODY" | jget secret)
@@ -384,9 +406,9 @@ ok "source HTLC state=$(printf '%s' "$BODY" | jget state) counterparty_locked=$(
 
 # 2) Destination leg — cb1 locks the counter amount (CRC) to the destination
 #    receiver (cb2) using the SAME hashLock, so a single secret unlocks both legs.
-step "cb1 locks the destination leg with the same hash (5000 CRC → cb2)"
+step "cb1 locks the destination leg with the same hash (501.00 CRC → cb2)"
 call POST "$CB1/api/v1/htlc/lock-with-hash" "$CB1_TOK" \
-  "{\"hash_lock\":\"$HASH_LOCK\",\"receiver\":\"$ID_CB2\",\"amount\":\"5000\",\"agreement_id\":\"$TRADE_ID\"}"
+  "{\"hash_lock\":\"$HASH_LOCK\",\"receiver\":\"$ID_CB2\",\"amount\":\"$FX_COUNTER\",\"agreement_id\":\"$TRADE_ID\"}"
 DEST_CONTRACT_ID=$(printf '%s' "$BODY" | jget contract_id)
 [[ -n $DEST_CONTRACT_ID ]] || die "destination lock returned no contract_id: $BODY"
 ok "destination locked (contract_id=$DEST_CONTRACT_ID htlc_tx=$(printf '%s' "$BODY" | jget htlc_tx_hash))"
@@ -428,7 +450,7 @@ done
 # its fCeBM by the same amount — it must never mint more of the token being redeemed.
 # (Scenario A mints fCeBM on approval, so it does not share the scenario-B redeem bug
 # where the redeemed token was re-minted and the balance went UP.)
-REDEEM_AMT=5000
+REDEEM_AMT=$(base 5.00)
 
 step "Snapshot Itaú balances before the redeem"
 call GET "$ITAU/api/v1/token/balance" "$ITAU_TOK";      T_BEFORE=$(printf '%s' "$BODY" | jget balance)
