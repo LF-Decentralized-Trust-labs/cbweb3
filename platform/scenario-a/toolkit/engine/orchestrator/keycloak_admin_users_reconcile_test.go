@@ -90,7 +90,10 @@ func TestReconcileScript_CreatesRoleUserPasswordAndGrant(t *testing.T) {
 		"create roles -r cb-realm -s name=ROLE_ADMISSION",
 		"create users -r cb-realm -s username=adm@cb.test",
 		"emailVerified=true",
-		"set-password -r cb-realm --username adm@cb.test --new-password s3cret",
+		// The password is deliberately absent from this line: it travels in KC_CLI_PASSWORD, set
+		// per command from a variable the exec forwards. keycloak_secret_exposure_test.go owns
+		// that rule; what this test still asserts is that the account gets a password AT ALL.
+		`KC_CLI_PASSWORD="$KC_OP_PW_0" /opt/keycloak/bin/kcadm.sh set-password -r cb-realm --username adm@cb.test`,
 		"add-roles -r cb-realm --uusername adm@cb.test --rolename ROLE_ADMISSION",
 	} {
 		if !strings.Contains(script, want) {
@@ -114,7 +117,7 @@ func TestCheck_UnreachableKeycloakConverges(t *testing.T) {
 	s := &reconcileAdminUsersStep{
 		name: StepReconcileAdminUsers, entityPrefix: "cb", kcAdminPass: "pw",
 		realms: []KeycloakRealmPlan{{Realm: "cb-realm", Users: govAndAdmission}},
-		dockerExecCmd: func(context.Context, string, string) ([]byte, error) {
+		dockerExecCmd: func(context.Context, string, string, []string) ([]byte, error) {
 			return nil, errors.New("container not running")
 		},
 	}
@@ -132,7 +135,7 @@ func TestCheck_NoDeclaredUsersNeverShellsIn(t *testing.T) {
 	s := &reconcileAdminUsersStep{
 		name: StepReconcileAdminUsers, entityPrefix: "cb", kcAdminPass: "pw",
 		realms: []KeycloakRealmPlan{{Realm: "cb-realm"}},
-		dockerExecCmd: func(context.Context, string, string) ([]byte, error) {
+		dockerExecCmd: func(context.Context, string, string, []string) ([]byte, error) {
 			calls++
 			return nil, nil
 		},
@@ -155,7 +158,7 @@ func TestRun_ConvergesEveryRealmThatDeclaresUsers(t *testing.T) {
 			{Realm: "noc", Users: []KeycloakUserPlan{{Username: "noc@cb.test", Password: "x", Roles: []string{"ROLE_NOC_ADMIN"}}}},
 			{Realm: "empty"},
 		},
-		dockerExecCmd: func(_ context.Context, _, script string) ([]byte, error) {
+		dockerExecCmd: func(_ context.Context, _, script string, _ []string) ([]byte, error) {
 			for _, r := range []string{"cb-realm", "noc", "empty"} {
 				if strings.Contains(script, "-r "+r+" ") {
 					realmsTouched = append(realmsTouched, r)
