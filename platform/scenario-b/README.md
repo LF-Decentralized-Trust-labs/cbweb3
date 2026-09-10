@@ -465,13 +465,19 @@ make scenario-b.down-relayer   # Stop the relay
 
 ### NOC
 
+The `make noc.*` targets went with the legacy path. The NOC control plane is an
+`observe`-mode entity like any other, so it is stood up by `apply` from its own
+manifest — Keycloak, Postgres, the backend and the portal are steps of that apply, not
+separate commands:
+
 ```bash
-make noc.setup-keycloak        # Configure NOC Keycloak client
-make noc.up                    # Start the NOC portal + backend + agents
-make noc.setup-agents          # Register the monitoring agents
-make noc.down                  # Stop the NOC stack
-make noc.logs                  # Tail NOC logs
+cd samples && ./deploy-all-with-noc.sh
 ```
+
+That runs the normal `deploy-all.sh` flow and then applies `brazil/noc-brazil.yaml`
+against the spoke's NOC bundle. The spoke's own `found` already starts the noc-agent
+that reports into it. Ports are fixed at 8090 (backend) and 3030 (portal), so one host
+carries one NOC; a second needs another host — see `deploy-lnet/`.
 
 ### FX Rate Feeder
 
