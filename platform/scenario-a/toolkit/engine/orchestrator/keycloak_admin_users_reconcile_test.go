@@ -83,7 +83,7 @@ func TestParseAdminUserRoles_TiesRolesToTheirUser(t *testing.T) {
 }
 
 func TestReconcileScript_CreatesRoleUserPasswordAndGrant(t *testing.T) {
-	script := adminUsersReconcileScript(keycloakAdminCLI, "cb-realm", "pw",
+	script := adminUsersReconcileScript(keycloakAdminCLI, "cb-realm",
 		[]KeycloakUserPlan{{Username: "adm@cb.test", Password: "s3cret", Roles: []string{"ROLE_ADMISSION"}}})
 
 	for _, want := range []string{

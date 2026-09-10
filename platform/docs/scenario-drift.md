@@ -494,6 +494,47 @@ Enquanto ninguém a alcança, mexer nela seria alargar um PR sem ganho.
 
 ---
 
+## 13. Autenticação do kcadm — convergida por cópia deliberada
+
+Os dois cenários fazem `docker exec … bash -c` num script que começa por
+`kcadm.sh config credentials`. B parou de mandar o segredo do administrador em argv; A
+fazia o mesmo até a auditoria de guardas encontrá-lo (`docs/guard-parity.md`).
+
+A regra agora é a mesma nos dois — prefixar `KC_CLI_PASSWORD="$KC_BOOTSTRAP_ADMIN_PASSWORD"`
+e não passar `--password` —, mas o código é **cópia deliberada**, não biblioteca
+compartilhada, e mora em lugares diferentes porque os caminhos de provisionamento
+diferem:
+
+| | Scenario A | Scenario B |
+|---|---|---|
+| Helper | `toolkit/engine/orchestrator/keycloak_admin_users_reconcile.go` (`kcadmLogin`) | `toolkit/engine/orchestrator/keycloak_provision.go` (`kcadmLogin`) |
+| Guarda | `keycloak_secret_exposure_test.go` (Check e Run do passo de reconcile) | `keycloak_secret_exposure_test.go` (os três modos de provisionamento) |
+| Por que difere o local | A provisiona o realm por **importação**; o único script kcadm do caminho de apply é o de reconcile de usuários | B provisiona o realm **por script**, então o login está no provisionamento |
+
+Consequência prática: alterar a regra num cenário não altera o outro, e o par de testes
+é o que impede a divergência silenciosa. Se um dia houver biblioteca compartilhada de
+toolkit, este é candidato natural.
+
+**Ainda divergente de propósito? Não.** Esta linha está convergida; fica registrada para
+que ninguém "conserte" a duplicação apagando um dos lados.
+
+---
+
+## 14. Senha de operador em argv — lacuna comum, não deriva
+
+Registrada aqui porque uma leitura da seção 13 sugere que o assunto está fechado, e não
+está: **os dois cenários** continuam passando a senha de cada operador em argv, via
+`set-password --new-password`.
+
+- A: `toolkit/engine/orchestrator/keycloak_admin_users_reconcile.go`
+- B: `toolkit/engine/orchestrator/step_found_spoke.go`
+
+Não é diferença entre cenários, então não é deriva — é a mesma exposição nos dois, e a
+guarda de segredo em argv não a cobre em nenhum (ela verifica o segredo de administrador).
+Fica nomeada para não ser redescoberta como "assimetria".
+
+---
+
 ## Decisão pendente
 
 O finding pede para "decidir a linhagem canônica e convergir, ou documentar a divergência

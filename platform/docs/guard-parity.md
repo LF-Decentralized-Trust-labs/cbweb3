@@ -48,15 +48,130 @@ Só o nível *mutação* autoriza dizer que uma guarda guarda.
 | Guarda | Scenario B | Scenario A | Situação |
 |---|---|---|---|
 | Limite de log de container | `composetemplate/log_policy_test.go` | `orchestrator/provisioning_log_policy_test.go` | **convergida** (caminhos diferentes) |
-| Segredo em argv | `orchestrator/keycloak_secret_exposure_test.go` | — | **lacuna em A** |
+| Segredo em argv | `orchestrator/keycloak_secret_exposure_test.go` | `orchestrator/keycloak_secret_exposure_test.go` | **convergida** — o defeito estava presente em A e foi corrigido; ver abaixo |
 | Deriva de literal de imagem | — | 3 testes (`TestNoImagePinLiteralsInThisPackage`, `TestDefaultImagePinsComeFromTheOrchestratorConstants`, `TestFrontendComposeEnv_PerEntityImageTag`) | **lacuna em B** — a deriva corre nos dois sentidos |
-| Pré-requisitos do Keycloak | 18 testes | 6 testes | **parcial** |
+| Pré-requisitos do Keycloak | `orchestrator/keycloak_provision_prereq_test.go` | — | **lacuna em A**, mas por um motivo estrutural — ver abaixo |
 | Portas efêmeras | 4 testes | os mesmos 4 | **convergida** |
 | Limite DNS de 63 caracteres | 4 testes | 1 teste | **parcial** — falta em A o equivalente a `TestProxyUpstreamsFitDNSLabel` |
 | Recusas codificadas | 3 arquivos | — | **lacuna em A**, com ressalva importante abaixo |
 
-Todas as linhas acima estão no nível **fonte**. Nenhuma foi verificada por mutação ainda —
-esse é o passo 2 do card e o trabalho real que resta.
+As linhas acima descrevem *onde* cada guarda está. Todas as sete foram desde então
+verificadas por mutação — a tabela do passo 2, logo abaixo, é o que autoriza dizer que
+elas guardam.
+
+---
+
+## Passo 2 — as sete verificadas por mutação
+
+Cada linha quebra o que a guarda protege, restaurando o comportamento *anterior* à
+correção, e confirma que a guarda falha. Todas conferidas por código de saída.
+
+| Guarda | Mutação aplicada | Resultado |
+|---|---|---|
+| Limite de log de container | teto de log removido do template renderizado | **detectou** nos dois cenários |
+| Portas efêmeras | porta fixa reintroduzida no range efêmero | **detectou** nos dois cenários |
+| Limite DNS de 63 caracteres | nome de container acima do rótulo DNS | **detectou** nos dois cenários |
+| Segredo em argv (B) | `kcadmLogin` volta a interpolar `--password <segredo>` | **detectou** — as duas asserções, nos três modos (`found-hub`, `found-spoke`, `join`) |
+| Literal de imagem (A) | `hyperledger/besu:25.8.0` plantado em `engine/apply` | **detectou** |
+| Pré-requisitos do Keycloak (B) | o caminho `join` deixa de emitir `update realms -s sslRequired=NONE` | **detectou**, e só o subteste `join` falhou — exatamente a regressão histórica |
+| Recusas codificadas (B) | `trustRejectionCodes` reduzido a `RELAY_SIGNATURE_INVALID` | **detectou** (5 testes) — mas ver a ressalva abaixo |
+
+Nenhuma das sete é decorativa. Isso responde à pergunta que precedia qualquer port:
+copiar para A uma guarda de B não copia algo quebrado.
+
+### Ressalva: a guarda de recusas codificadas é mais estreita do que aparenta
+
+A mutação foi detectada por `__tests__/trust-errors.test.ts`. O outro arquivo,
+`__tests__/auth.interceptor.test.ts`, **passou** com a classificação reduzida — ou seja,
+o teste do interceptor não cobre os códigos irmãos, só o caminho principal. A guarda que
+efetivamente guarda é a do classificador; a do interceptor não a substitui.
+
+---
+
+## O defeito de segredo em argv está presente em Scenario A
+
+Este é o achado mais concreto da auditoria, e muda o enquadramento da linha "Segredo em
+argv": não é só que A não tem o teste — é que A faz hoje o que B corrigiu.
+
+`scenario-a/toolkit/engine/orchestrator/keycloak_admin_users_reconcile.go` interpola o
+segredo de administrador do Keycloak em `--password` **duas vezes**, no caminho de leitura
+(linha 44, o `Check` do passo) e no de escrita (linha 59):
+
+```go
+fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password %[2]s …",
+    kc, adminPassword)
+```
+
+O script inteiro é um argumento de `docker exec … bash -c`, então o valor cai em três
+listas de processos: a do container, a do host e a do próprio toolkit. É a mesma exposição
+que B removeu.
+
+**A correção de B era portável sem adaptação, e foi portada.** O motivo pelo qual B pôde
+parar de mandar o valor é que ele já está dentro do container, em
+`KC_BOOTSTRAP_ADMIN_PASSWORD`. Em A esse mesmo nome já era definido —
+`step_provision_keycloak.go:146` o passa ao container, e
+`provisioning/templates/entity-keycloak/keycloak-compose.yaml:44` o exige. Os dois cenários
+também fixam a mesma imagem, `quay.io/keycloak/keycloak:26.0`, então a verificação que B
+fez contra ela vale para A.
+
+### O que foi feito
+
+1. **A guarda primeiro, contra o código com defeito.** `keycloak_secret_exposure_test.go`
+   foi portado para A e falhou nas quatro asserções — segredo embutido e `--password`
+   presente, nos dois scripts. Essa execução vermelha é a verificação por mutação desta
+   linha: o alvo não precisou ser mutado, já estava no estado anterior.
+2. **A correção.** Um `kcadmLogin(kc)` em A, com a mesma forma de B, e os dois construtores
+   de script (`adminUsersReadScript`, `adminUsersReconcileScript`) deixaram de receber o
+   segredo — a assinatura mudou, então o compilador impede o retorno do padrão.
+3. **O campo `kcAdminPass` ficou no passo, de propósito.** A asserção de valor só significa
+   algo se o passo tiver um segredo para embutir; removê-lo tornaria o teste vago.
+
+Suíte completa do toolkit de A verde por código de saída. A cópia deliberada está
+registrada em [`docs/scenario-drift.md`](scenario-drift.md) §13.
+
+**Uma agravante que o inventário inicial não tinha:** em A a exposição acontecia também no
+`Check` do passo, que roda em **todo** apply. Um apply que converge e não muda nada pagava
+a exposição do mesmo jeito.
+
+### Uma exposição que nenhum dos dois cobre
+
+Ao verificar isso apareceu um terceiro caso, e ele não é lacuna de paridade — é lacuna nos
+dois: a senha de *cada operador* também vai em argv, via `set-password --new-password`,
+em `scenario-a/.../keycloak_admin_users_reconcile.go:69` e
+`scenario-b/.../step_found_spoke.go:568`. A guarda de B verifica só o segredo de
+administrador, então ela passa apesar disso. Fica registrado aqui porque é o tipo de coisa
+que uma auditoria de paridade não encontra por construção: comparar dois lados não revela
+o que falta em ambos.
+
+---
+
+## Pré-requisitos do Keycloak: a contagem 18 × 6 era a métrica errada
+
+A versão anterior desta tabela dizia "18 testes contra 6". Contar testes compara volume,
+não cobertura, e aqui esconde a única diferença que importa: **os dois cenários provisionam
+o Keycloak por caminhos diferentes.**
+
+- **A provisiona por realm importado.** O grosso dos seus testes gira em torno de
+  `RenderRealmJSON` — origens sem curinga, `sslRequired` conforme o ambiente, papéis e
+  segredos no documento. São guardas sobre um *documento*.
+- **B provisiona por script kcadm.** Seus testes giram em torno de um *script* montado por
+  concatenação: mensagens de asserção, predicados contra saída real do kcadm, e o elo entre
+  os dois que `keycloak_provision_prereq_test.go` fecha.
+
+Consequência: a maioria das guardas de B não tem sentido em A, porque A não monta esse
+script no caminho de provisionamento. `TestKeycloakProvisioning_SetsWhatItsOwnAssertionsDemand`
+protege o script contra afirmar um estado que ele próprio não estabelece — e o script de
+provisionamento de A não afirma estado nenhum: não há um único `exit 1` de asserção em
+`step_provision_keycloak.go`.
+
+Isso não é ausência de risco, é risco de outra forma. A pergunta certa para A não é
+"faltam 12 testes de Keycloak", e sim: **um apply de A que deixe o realm incompleto
+reporta sucesso?** Pelo caminho de importação, provavelmente sim. Isso merece um card
+próprio, e não é o port de nada.
+
+O caminho onde A *sim* monta script é `keycloak_admin_users_reconcile.go` — o mesmo da
+seção anterior, e ali a paridade é direta: A tem 7 testes contra 6 de B para o mesmo passo,
+com nomes quase idênticos. Essa metade já está convergida.
 
 ---
 
@@ -123,6 +238,33 @@ certifica nada, inclusive a si mesma.
 E uma terceira, específica do Zeto, registrada no ADR-009: **use identidade nova a cada
 ponto de medição**, ou a seleção de notas contamina o resultado.
 
+O passo 2 acrescentou mais quatro, todas vindas de falsos "a guarda NÃO detectou" que
+custaram tempo nesta mesma auditoria. As quatro têm a mesma forma: **a mutação não chegou
+ao alvo, e o verde foi lido como veredito.**
+
+**Provar que a mutação se aplicou, antes de ler o resultado.** O harness usado aqui
+(`mutate.py`) aborta com `MUTACAO-NAO-APLICADA` quando o padrão não casa. Sem isso, uma
+substituição que não casou é indistinguível de uma guarda que detectou nada.
+
+**Mutar o código, não o comentário.** A primeira tentativa contra
+`keycloak_secret_exposure_test.go` trocou a primeira ocorrência de `config credentials` no
+arquivo — que está num comentário, 29 linhas acima do código. A guarda passou, corretamente,
+e o registro inicial foi "não detectou".
+
+**`go test` sem `-count=1` responde do cache.** Várias destas guardas leem YAML *fora* do
+próprio pacote. O cache do Go não observa esses arquivos, então mutar o manifesto e
+reexecutar devolve o PASS anterior. Todo resultado desta auditoria foi obtido com
+`-count=1`.
+
+**Uma mutação que não compila não é uma detecção.** A primeira tentativa contra o caminho
+`join` do Keycloak deixou um `Fprintf` com argumento sobrando; o pacote falhou a build. A
+suíte fica vermelha sem que a guarda tenha opinado — o mesmo erro de forma que a regra
+"nunca mutar para uma deleção" descreve.
+
+E uma armadilha adjacente, que não chegou a produzir um erro registrado só porque foi
+conferida: **um `-run` que não casa com teste nenhum sai 0.** Um filtro com nome errado
+produz sucesso silencioso.
+
 ---
 
 ## Estado dos gates de CI
@@ -146,10 +288,19 @@ lembrete de que este documento inteiro é feito do tipo de leitura que produz es
 
 ## O que falta
 
-1. **Passo 2 do card, o trabalho real:** quebrar o que cada guarda protege e confirmar que
-   ela falha. Nenhuma das sete passou disso ainda.
-2. **Medir a consequência real da lacuna de recusas codificadas em A** antes de portar.
-3. **Decidir o sentido inverso:** as três guardas de literal de imagem vão para B, ou a
-   ausência é deliberada?
-4. **Detalhar a linha do Keycloak** — 18 contra 6 é diferença grande demais para uma
-   célula de tabela.
+1. ~~**Passo 2 do card:** quebrar o que cada guarda protege e confirmar que ela falha.~~
+   **Feito** — as sete estão na tabela acima.
+2. ~~**Corrigir a exposição de segredo em argv em A**, portando junto o teste de B.~~
+   **Feito** — ver a seção acima.
+3. **Medir a consequência real da lacuna de recusas codificadas em A** antes de portar —
+   o proxy de A converte o não-200 em vez de repassá-lo, então o sintoma de B (ejeção para
+   a tela de login) pode simplesmente não se reproduzir.
+4. **Decidir o sentido inverso:** as três guardas de literal de imagem vão para B, ou a
+   ausência é deliberada e vai para `docs/scenario-drift.md`?
+5. **Abrir card próprio para a asserção de estado final do Keycloak em A** — o script de
+   provisionamento de A não afirma nada, então um realm incompleto reporta sucesso. Não é
+   port de guarda; é defeito de outra natureza.
+6. **Senha de operador em argv nos dois cenários** (`set-password --new-password`) —
+   lacuna comum, fora do escopo de paridade, mas encontrada por ela. Nomeada em
+   [`docs/scenario-drift.md`](scenario-drift.md) §14 para não ser redescoberta como
+   assimetria.
