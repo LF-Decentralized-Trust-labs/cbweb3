@@ -88,6 +88,31 @@ func isSupportedKeyProvider(uri string) bool {
 // Validate checks a single manifest and returns all findings (errors +
 // warnings), collected in one pass (FR-011). A manifest is valid when the
 // returned Result has no errors; warnings do not make it invalid.
+// dnsLabelMax is the hard limit on one DNS label (RFC 1035 §2.3.4). Docker's embedded resolver
+// enforces it: a longer name is refused outright, so the caller never even gets a connection
+// error to explain the failure.
+const dnsLabelMax = 63
+
+// longestAliasSuffix is the longest suffix the toolkit appends to an entity's network prefix
+// when it declares a proxy alias — "-noc-backend" and "-api-gateway", both 12 octets.
+//
+// The prefix is sanitizePrefix(metadata.name), which substitutes characters without changing
+// length, so the budget below is a bound on metadata.name itself.
+//
+// This number is held against the templates by TestMaxMetadataNameLenMatchesTheLongestAlias in
+// engine/orchestrator, which reads the suffixes out of the compose files. A new, longer service
+// suffix tightens the budget and fails there rather than silently shrinking the margin.
+const longestAliasSuffix = len("-noc-backend")
+
+// MaxMetadataNameLen is the longest metadata.name that still yields a resolvable proxy alias.
+//
+// PR #226 moved the proxy's upstreams onto short aliases and described the result as short
+// whatever the entity is called. It was not so by construction: nothing rejected a long name,
+// and the only protection was a spot-check of four names chosen by hand. A 60-character name
+// passed validation and produced an alias Docker's resolver refuses — the same 502 that PR
+// closed, with nothing reporting it.
+const MaxMetadataNameLen = dnsLabelMax - longestAliasSuffix
+
 func Validate(pd *ParticipantDeployment) Result {
 	var r Result
 	if pd == nil {
@@ -111,6 +136,15 @@ func Validate(pd *ParticipantDeployment) Result {
 	// metadata.name
 	if pd.Metadata.Name == "" {
 		r.AddError("metadata.name", "required field is missing")
+	} else if n := len(pd.Metadata.Name); n > MaxMetadataNameLen {
+		// Refused here, before anything is created. An apply that fails halfway leaves
+		// containers behind; a manifest rejected at validation leaves nothing.
+		r.AddError("metadata.name", fmt.Sprintf(
+			"is %d octets; the limit is %d. The toolkit derives every proxy alias from this name "+
+				"(longest suffix %q), and a DNS label stops at %d octets (RFC 1035) — a longer name "+
+				"produces an alias Docker's resolver refuses, so the portals answer 502 against "+
+				"containers that are running and healthy",
+			n, MaxMetadataNameLen, "-noc-backend", dnsLabelMax))
 	}
 
 	spec := pd.Spec
