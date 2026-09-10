@@ -373,15 +373,8 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 
 	// Per-host reverse proxy (soft): route this CB's portals + api-gateway by path on :80.
 	if proxyEnabled {
-		steps = append(steps, newProxyStep(m.Spec.Proxy, fHost, m.Spec.LauncherPort, []string{net}, []ProxyRoute{
-			{Segment: "governance", Upstream: prefix + "-governance-frontend:80"},
-			{Segment: "treasury", Upstream: prefix + "-treasury-frontend:80"},
-			{Segment: "supervisor", Upstream: prefix + "-supervisor-frontend:80"},
-			// The NOC portal is co-located on the entity network (built here); its backend
-			// route (/a/noc-api/) is written separately by the observe deployment.
-			{Segment: nocProxyPortalSegment, Upstream: prefix + "-noc-frontend:80"},
-			{Segment: "api", Upstream: prefix + "-api-gateway:8080", IsAPI: true},
-		}, ""))
+		steps = append(steps, newProxyStep(m.Spec.Proxy, fHost, m.Spec.LauncherPort, []string{net},
+			centralBankProxyRoutes(prefix), ""))
 	}
 	return steps
 }
@@ -878,10 +871,8 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 
 	// Per-host reverse proxy (soft): route this bank's portal + api-gateway by path on :80.
 	if proxyEnabled {
-		steps = append(steps, newProxyStep(m.Spec.Proxy, fHost, m.Spec.LauncherPort, []string{net}, []ProxyRoute{
-			{Segment: "bank", Upstream: prefix + "-bank-frontend:80"},
-			{Segment: "api", Upstream: prefix + "-api-gateway:8080", IsAPI: true},
-		}, ""))
+		steps = append(steps, newProxyStep(m.Spec.Proxy, fHost, m.Spec.LauncherPort, []string{net},
+			commercialBankProxyRoutes(prefix), ""))
 	}
 	return steps
 }

@@ -4,13 +4,28 @@ name: Toolkit CI
 permissions:
   contents: read
 
-# The provisioning trees are in the trigger because several toolkit tests are gates
+# The trees below the toolkit are in the trigger because several toolkit tests are gates
 # over THEM, not over Go code: composetemplate's TestShippedTemplatesCarryNoCredentialDefaults
 # rejects a credential default in a shipped compose template, and the log-policy guards
 # read ../../../provisioning/templates the same way. Without these paths the check that
 # stops a shared hardcoded password reaching production would run only when someone
 # edited Go — so the change that introduces the credential is exactly the change that
 # skips the gate.
+#
+# samples/ and deploy-lnet/ are here for the same reason and were missing until the guard
+# audit measured it (docs/guard-parity.md). The ephemeral-port guards and the DNS-label
+# guards read manifests from both trees, and the mutations that prove those guards work
+# are edits to exactly those files: a PR that put a Besu RPC port inside the kernel's
+# ephemeral range, or an entity name past the 63-octet label, would have skipped the only
+# gate that catches it.
+#
+# The service Dockerfiles are here for the third case: dockerfile_hardening_test.go reads
+# backend/services/*/Dockerfile and rejects a stage that runs as root. Only the Dockerfiles
+# are listed, not the whole backend tree — the guard reads nothing else there, and widening
+# it would run the toolkit matrix on every backend PR for no added coverage.
+#
+# The rule this encodes: if a test reads a path, that path belongs in the trigger. Adding
+# a guard that reads a new tree means adding the tree here, or the guard is decorative.
 on:
   push:
     branches: [main, develop]
@@ -19,6 +34,11 @@ on:
       - "scenario-b/toolkit/**"
       - "scenario-a/provisioning/**"
       - "scenario-b/provisioning/**"
+      - "scenario-a/samples/**"
+      - "scenario-b/samples/**"
+      - "deploy-lnet/**"
+      - "scenario-a/backend/services/*/Dockerfile"
+      - "scenario-b/backend/services/*/Dockerfile"
       - ".github/workflows/toolkit.yml"
   pull_request:
     branches: [main, develop]
@@ -27,6 +47,11 @@ on:
       - "scenario-b/toolkit/**"
       - "scenario-a/provisioning/**"
       - "scenario-b/provisioning/**"
+      - "scenario-a/samples/**"
+      - "scenario-b/samples/**"
+      - "deploy-lnet/**"
+      - "scenario-a/backend/services/*/Dockerfile"
+      - "scenario-b/backend/services/*/Dockerfile"
       - ".github/workflows/toolkit.yml"
   workflow_dispatch:
 

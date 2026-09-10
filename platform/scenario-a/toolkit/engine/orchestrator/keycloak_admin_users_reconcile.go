@@ -37,12 +37,37 @@ import (
 // keycloakAdminCLI is kcadm inside the Keycloak container image.
 const keycloakAdminCLI = "/opt/keycloak/bin/kcadm.sh"
 
+// kcadmLogin returns the `config credentials` command both scripts start with, authenticating
+// WITHOUT putting the admin secret in any argv.
+//
+// The script is one argument to `docker exec … bash -c`, so a secret interpolated into it lands in
+// three process lists: the container's (the shell's argv and the kcadm JVM's own), the host's (the
+// script is an argument to the docker client) and the toolkit's. Passing it as --password exposed
+// it in all three, on every apply — the read script runs from the step's Check, so even a converged
+// entity that changes nothing paid the exposure.
+//
+// Nothing needs to be shipped in: the value is already inside the container, in Keycloak's own
+// KC_BOOTSTRAP_ADMIN_PASSWORD, set by provisioning/templates/entity-keycloak/keycloak-compose.yaml.
+// kcadm reads its password from KC_CLI_PASSWORD when the flag is absent.
+//
+// The assignment is a per-command prefix rather than a script-wide export so it reaches kcadm and
+// nothing else, and so a script that drops this helper cannot keep authenticating by accident.
+//
+// Scenario B reached this first (engine/orchestrator/keycloak_provision.go) and verified it against
+// quay.io/keycloak/keycloak:26.0, the image this scenario also pins: with the variable set and no
+// flag, login succeeds; with it unset and no flag, kcadm fails with "Console is not active, but
+// password is required" and exit 1 — so the `|| exit 1` here still breaks on a failed login.
+func kcadmLogin(kc string) string {
+	return fmt.Sprintf(
+		`KC_CLI_PASSWORD="$KC_BOOTSTRAP_ADMIN_PASSWORD" %s config credentials `+
+			`--server http://localhost:8080 --realm master --user admin`, kc)
+}
+
 // adminUsersReadScript reports which realm roles each declared user currently holds, one block per
 // user, so a user that does not exist is distinguishable from one that exists without its roles.
-func adminUsersReadScript(kc, realm, adminPassword string, users []KeycloakUserPlan) string {
+func adminUsersReadScript(kc, realm string, users []KeycloakUserPlan) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password %[2]s >/dev/null 2>&1 || exit 1\n",
-		kc, adminPassword)
+	fmt.Fprintf(&b, "%s >/dev/null 2>&1 || exit 1\n", kcadmLogin(kc))
 	for _, u := range users {
 		// `|| true` per user: a missing user makes get-roles exit non-zero, and that is an answer
 		// — it holds nothing — not a reason to abandon the sweep.
@@ -54,10 +79,9 @@ func adminUsersReadScript(kc, realm, adminPassword string, users []KeycloakUserP
 
 // adminUsersReconcileScript creates any missing realm role, user, password and grant. Every command
 // tolerates "already exists", so it is safe to run on a realm that is already correct.
-func adminUsersReconcileScript(kc, realm, adminPassword string, users []KeycloakUserPlan) string {
+func adminUsersReconcileScript(kc, realm string, users []KeycloakUserPlan) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password %[2]s || exit 1\n",
-		kc, adminPassword)
+	fmt.Fprintf(&b, "%s || exit 1\n", kcadmLogin(kc))
 	for _, r := range declaredRealmRoles(users) {
 		fmt.Fprintf(&b, "%[1]s create roles -r %[2]s -s name=%[3]s || true\n", kc, realm, r)
 	}
@@ -154,8 +178,11 @@ func usersFromRealmPlans(plans []KeycloakRealmPlan) map[string][]KeycloakUserPla
 
 // reconcileAdminUsersStep converges the declared operator accounts on every run.
 type reconcileAdminUsersStep struct {
-	name          string
-	entityPrefix  string
+	name         string
+	entityPrefix string
+	// kcAdminPass is deliberately still held after the scripts stopped carrying it: the exposure
+	// guard in keycloak_secret_exposure_test.go can only prove the secret is not embedded if the
+	// step actually has one to embed. Removing it would make that assertion vacuous.
 	kcAdminPass   string
 	realms        []KeycloakRealmPlan
 	dockerExecCmd func(ctx context.Context, container, script string) ([]byte, error)
@@ -182,7 +209,7 @@ func (s *reconcileAdminUsersStep) Check(ctx context.Context) (bool, error) {
 	}
 	for realm, users := range byRealm {
 		out, err := s.dockerExecCmd(ctx, s.container(),
-			adminUsersReadScript(keycloakAdminCLI, realm, s.kcAdminPass, users))
+			adminUsersReadScript(keycloakAdminCLI, realm, users))
 		if err != nil {
 			return false, nil
 		}
@@ -196,7 +223,7 @@ func (s *reconcileAdminUsersStep) Check(ctx context.Context) (bool, error) {
 func (s *reconcileAdminUsersStep) Run(ctx context.Context) error {
 	for realm, users := range usersFromRealmPlans(s.realms) {
 		if _, err := s.dockerExecCmd(ctx, s.container(),
-			adminUsersReconcileScript(keycloakAdminCLI, realm, s.kcAdminPass, users)); err != nil {
+			adminUsersReconcileScript(keycloakAdminCLI, realm, users)); err != nil {
 			return fmt.Errorf("reconcile admin users in realm %s: %w", realm, err)
 		}
 	}

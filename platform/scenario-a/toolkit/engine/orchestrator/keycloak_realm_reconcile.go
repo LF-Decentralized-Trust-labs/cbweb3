@@ -69,23 +69,6 @@ func jsonOriginArray(values []string) (string, error) {
 	return string(encoded), nil
 }
 
-// realmKcadmLogin is the `config credentials` line both scripts start with, authenticating
-// WITHOUT putting the admin secret in any argv: the script is one argument to
-// `docker exec … bash -c`, so an interpolated secret lands in the container's process list, the
-// host's and the toolkit's. The value is already inside the container as
-// KC_BOOTSTRAP_ADMIN_PASSWORD, and kcadm reads its password from KC_CLI_PASSWORD when the flag
-// is absent (verified against quay.io/keycloak/keycloak:26.0, the image this scenario pins).
-//
-// Written here rather than shared because the identical helper in
-// keycloak_admin_users_reconcile.go arrives with PR #234, which is in review as this lands. When
-// both are on develop these two must become one call; the duplication is temporary and is not a
-// second opinion about the rule.
-func realmKcadmLogin(kc string) string {
-	return fmt.Sprintf(
-		`KC_CLI_PASSWORD="$KC_BOOTSTRAP_ADMIN_PASSWORD" %s config credentials `+
-			`--server http://localhost:8080 --realm master --user admin`, kc)
-}
-
 // realmStateScript prints the realm's current state in labelled lines, one fact per line.
 //
 // One `--fields` call per attribute rather than one call returning several: kcadm's CSV gives no
@@ -93,7 +76,7 @@ func realmKcadmLogin(kc string) string {
 // unambiguity is worth the round-trips.
 func realmStateScript(kc string, plan KeycloakRealmPlan) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s >/dev/null 2>&1 || exit 1\n", realmKcadmLogin(kc))
+	fmt.Fprintf(&b, "%s >/dev/null 2>&1 || exit 1\n", kcadmLogin(kc))
 	fmt.Fprintf(&b, "echo \"SSL $(%[1]s get realms/%[2]s --fields %[3]s --format csv --noquotes)\"\n",
 		kc, plan.Realm, realmSSLField)
 	fmt.Fprintf(&b, "echo \"LIFESPAN $(%[1]s get realms/%[2]s --fields %[3]s --format csv --noquotes)\"\n",
@@ -119,7 +102,7 @@ func realmReconcileScript(kc string, plan KeycloakRealmPlan) (string, error) {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s || exit 1\n", realmKcadmLogin(kc))
+	fmt.Fprintf(&b, "%s || exit 1\n", kcadmLogin(kc))
 	fmt.Fprintf(&b, "%[1]s update realms/%[2]s -s %[3]s=%[4]s -s %[5]s=%[6]d || exit 1\n",
 		kc, plan.Realm, realmSSLField, sslRequiredFor(plan.Environment),
 		realmLifespanField, accessTokenLifespanSeconds)
