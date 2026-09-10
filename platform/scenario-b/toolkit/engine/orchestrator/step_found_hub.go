@@ -261,8 +261,21 @@ func (c HubConfig) buildImage(ctx context.Context, image, dockerfileRel, context
 const accessTokenLifespanSeconds = 300
 
 // buildBackendImage builds the api-gateway image (context: scenario-b/backend).
+// buildBackendImage builds every image hub-backend.compose.yaml runs.
+//
+// Both, not just the gateway: compose would otherwise try to PULL cbweb3b/auth:local, a tag
+// that exists only where somebody built it. Same reasoning as start-spoke-backend, which builds
+// its three for the multi-VM case.
 func (c HubConfig) buildBackendImage(ctx context.Context) error {
-	return c.buildImage(ctx, hubBackendImage, "backend/services/api-gateway/Dockerfile", "backend")
+	for _, b := range []struct{ image, dockerfile, context string }{
+		{hubAuthImage, "backend/services/auth/Dockerfile", "backend"},
+		{hubBackendImage, "backend/services/api-gateway/Dockerfile", "backend"},
+	} {
+		if err := c.buildImage(ctx, b.image, b.dockerfile, b.context); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // provisionKeycloakRealm creates (idempotently) the realm + client with a fixed
@@ -353,6 +366,7 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"GATEWAY_URL":   fmt.Sprintf("http://localhost:%d", c.RPCPort+8000),
 		"BACKEND_IMAGE": hubBackendImage,
 		// compliance (hub self-registration of spokes on the IdentityRegistry)
+		"AUTH_IMAGE":                 hubAuthImage,
 		"COMPLIANCE_IMAGE":           hubComplianceImage,
 		"COMPLIANCE_GRPC_ADDR":       e + "-hub-compliance:9093",
 		"HUB_CHAIN_ID":               itoa(int(c.ChainID)),
@@ -568,8 +582,11 @@ func FoundHubSteps(c HubConfig) []Step {
 		{
 			Name: "build-hub-backend-image",
 			Check: func(ctx context.Context) (bool, error) {
-				// imageExists (not an inline inspect) so --rebuild reaches this gate too.
-				return imageExists(ctx, c.Runner, hubBackendImage), nil
+				// BOTH images, or a host that has the gateway but not auth skips the step and
+				// `compose up` fails pulling a local-only tag. imageExists (not an inline
+				// inspect) so --rebuild reaches this gate too.
+				return imageExists(ctx, c.Runner, hubBackendImage) &&
+					imageExists(ctx, c.Runner, hubAuthImage), nil
 			},
 			Run: func(ctx context.Context) error { return c.buildBackendImage(ctx) },
 		},
@@ -609,12 +626,12 @@ func FoundHubSteps(c HubConfig) []Step {
 				if err := c.buildImage(ctx, hubComplianceImage, "backend/services/compliance/Dockerfile", "backend"); err != nil {
 					return err
 				}
-				// Build the auth image here too (shared): the hub does not run auth,
-				// but every spoke/bank backend does, and images are built once on the
-				// hub host before spokes/banks start.
-				if err := c.buildImage(ctx, hubAuthImage, "backend/services/auth/Dockerfile", "backend"); err != nil {
-					return err
-				}
+				// The auth image used to be built here too, "because the hub does not run
+				// auth but every spoke/bank does". Both halves of that stopped being true:
+				// the hub runs one now (ADR-011), and start-spoke-backend builds its own
+				// three for the separate-daemon case. It is built by
+				// build-hub-backend-image, next to the gateway it ships with, and gated by
+				// that step's Check.
 				return compose("entity-compliance")(ctx)
 			},
 		},
