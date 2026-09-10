@@ -43,6 +43,7 @@ export {
 export { cn } from "./lib/utils";
 export { getLauncherUrl, goToLauncher } from "./lib/launcher";
 export { loginErrorMessage, LOGIN_ERROR_COPY } from "./lib/login-errors";
+export { apiErrorMessage, REQUEST_ERROR_COPY } from "./lib/request-errors";
 export {
   parseAmount,
   parseBaseUnits,

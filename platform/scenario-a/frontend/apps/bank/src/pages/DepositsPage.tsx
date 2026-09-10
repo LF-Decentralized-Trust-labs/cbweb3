@@ -2,6 +2,7 @@
 
 import {
   amountRefusalMessage,
+  apiErrorMessage,
   Badge,
   Button,
   Card,
@@ -88,7 +89,7 @@ export function DepositsPage() {
       setAmount("0");
       setConfirmRequest(false);
     } catch (submitError) {
-      toast.error(submitError instanceof Error ? submitError.message : "Unable to submit issuance request");
+      toast.error(apiErrorMessage(submitError, "Unable to submit issuance request"));
     }
   };
 

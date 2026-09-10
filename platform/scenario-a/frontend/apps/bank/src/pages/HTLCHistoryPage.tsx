@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  apiErrorMessage,
   Badge,
   Button,
   Card,
@@ -72,7 +73,7 @@ export function HTLCHistoryPage() {
       setLocks(response.locks);
       setTotal(response.total);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to load settlement history.");
+      toast.error(apiErrorMessage(error, "Unable to load settlement history."));
     } finally {
       setLoading(false);
     }

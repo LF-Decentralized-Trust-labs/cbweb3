@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import type { AsyncStatus, DepositRecord, EscrowRecord, RedeemRecord } from "../types";
 import { paymentApi } from "../services/api";
+import { apiErrorMessage } from "@cbweb3/ui";
 
 type PaymentState = {
   deposits: DepositRecord[];
@@ -25,8 +26,6 @@ type PaymentState = {
   requestEscrow: (amount: string) => Promise<string>;
   requestRedeem: (amount: string) => Promise<string>;
 };
-
-const getErrorMessage = (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback);
 
 export const usePaymentStore = create<PaymentState>((set, get) => ({
   deposits: [],
@@ -64,7 +63,7 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
         status: "idle",
       });
     } catch (error) {
-      set({ status: "error", error: getErrorMessage(error, "Unable to load payment data") });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to load payment data") });
     }
   },
   registerDeposit: async (amount) => {
@@ -75,7 +74,7 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
       set({ status: "idle" });
       return response.deposit_id;
     } catch (error) {
-      const message = getErrorMessage(error, "Unable to register deposit");
+      const message = apiErrorMessage(error, "Unable to register deposit");
       set({ status: "error", error: message });
       throw new Error(message);
     }
@@ -88,7 +87,7 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
       set({ status: "idle" });
       return response.escrow_id;
     } catch (error) {
-      const message = getErrorMessage(error, "Unable to request escrow");
+      const message = apiErrorMessage(error, "Unable to request escrow");
       set({ status: "error", error: message });
       throw new Error(message);
     }
@@ -101,7 +100,7 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
       set({ status: "idle" });
       return response.redeem_id;
     } catch (error) {
-      const message = getErrorMessage(error, "Unable to request redeem");
+      const message = apiErrorMessage(error, "Unable to request redeem");
       set({ status: "error", error: message });
       throw new Error(message);
     }
