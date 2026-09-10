@@ -159,15 +159,33 @@ Uma nota de método, porque custou uma leitura errada aqui: `docker exec … | t
 `exit=0` na linha que tinha de falhar. Os números acima vêm de `docker exec …; echo $?`, sem
 pipeline no meio.
 
-### Uma exposição que nenhum dos dois cobre
+### Uma exposição que nenhum dos dois cobria — fechada depois
 
-Ao verificar isso apareceu um terceiro caso, e ele não é lacuna de paridade — é lacuna nos
-dois: a senha de *cada operador* também vai em argv, via `set-password --new-password`,
-em `scenario-a/.../keycloak_admin_users_reconcile.go:69` e
-`scenario-b/.../step_found_spoke.go:568`. A guarda de B verifica só o segredo de
-administrador, então ela passa apesar disso. Fica registrado aqui porque é o tipo de coisa
-que uma auditoria de paridade não encontra por construção: comparar dois lados não revela
-o que falta em ambos.
+Ao verificar isso apareceu um terceiro caso, e ele não era lacuna de paridade — era lacuna
+nos dois: a senha de *cada operador* também ia em argv, via `set-password --new-password`. A
+guarda de B verificava só o segredo de administrador, então passava apesar disso. É o tipo de
+coisa que uma auditoria de paridade não encontra por construção: comparar dois lados não
+revela o que falta em ambos.
+
+**Corrigido nos dois cenários**, com a mesma forma do segredo de administrador — porque o
+kcadm oferece o mesmo mecanismo: `set-password --help` diz que, sem `--new-password`, ele lê
+`KC_CLI_PASSWORD`. A diferença é de onde vem o valor. O segredo de administrador já está
+dentro do container; uma senha de operador não, então é encaminhada só para aquele exec com
+`docker exec -e NOME` — a forma de passagem, que põe no argv do docker apenas o nome.
+
+Medido contra `quay.io/keycloak/keycloak:26.0`, a imagem que os dois fixam:
+
+| Condição | Resultado |
+|---|---|
+| `set-password` sem a flag, valor só no ambiente | exit 0 |
+| o operador autentica depois com essa senha | HTTP 200 |
+| senha errada | HTTP 401 |
+| variável ausente | exit 1 — falha, não define senha vazia |
+
+Guardas novas nos dois lados, cinco mutações, todas detectam: repor `--new-password`,
+passar `-e NOME=valor` em vez de `-e NOME`, e deixar de encaminhar as variáveis.
+
+Detalhe de implementação e a razão de não ser deriva: em `docs/scenario-drift.md` §14.
 
 ---
 
@@ -517,7 +535,6 @@ dispara só a asserção de **forma**; a de **valor** exige interpolar o segredo
 5. **Abrir card próprio para a asserção de estado final do Keycloak em A** — o script de
    provisionamento de A não afirma nada, então um realm incompleto reporta sucesso. Não é
    port de guarda; é defeito de outra natureza.
-6. **Senha de operador em argv nos dois cenários** (`set-password --new-password`) —
-   lacuna comum, fora do escopo de paridade, mas encontrada por ela. Nomeada em
-   [`docs/scenario-drift.md`](scenario-drift.md) §14 para não ser redescoberta como
-   assimetria.
+6. ~~**Senha de operador em argv nos dois cenários** (`set-password --new-password`).~~
+   **Feito** — corrigida nos dois, com guardas e medição ao vivo. Ver a seção acima e
+   [`docs/scenario-drift.md`](scenario-drift.md) §14.

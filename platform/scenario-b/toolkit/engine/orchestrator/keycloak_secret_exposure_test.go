@@ -25,10 +25,10 @@ package orchestrator
 
 import (
 	"context"
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/exec"
+	"slices"
 	"strings"
 	"testing"
-
-	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/exec"
 )
 
 // sentinelAdminPassword is resolved through resolveInfraSecret's own first branch —
@@ -144,5 +144,91 @@ func keycloakProvisioningModes() []struct {
 				}
 			},
 		},
+	}
+}
+
+// The second exposure on this path, and the one the guards above do not cover.
+//
+// The admin secret was taken out of argv; each OPERATOR's password stayed in, as
+// `set-password --new-password <value>`. It lands in two world-readable places: the kcadm JVM's
+// argv inside the container, and — because the whole script is one argument to
+// `docker exec … bash -c` — the docker client's argv on the host. `ps` shows both to any user.
+//
+// The guard-parity audit (docs/guard-parity.md) recorded this as a gap in BOTH scenarios, which is
+// what a parity comparison cannot find by construction: it is not drift, it is the same hole on
+// each side. This file's twin in Scenario A carries the same two assertions.
+//
+// Verified against quay.io/keycloak/keycloak:26.0: set-password with no flag and the value only in
+// the environment succeeds, the operator then authenticates with it (HTTP 200), a wrong password is
+// refused (401), and with the variable absent the command exits 1 rather than quietly setting an
+// empty password.
+
+const sentinelOperatorPassword = "s3ntinel-operator-must-not-appear"
+
+// operatorScript renders the users half of the provisioning script for one operator whose password
+// is the sentinel, plus the environment the exec would carry.
+func operatorScript(t *testing.T) (script string, env []string) {
+	t.Helper()
+	users := []AdminUser{{Username: "gov@cb.test", Password: sentinelOperatorPassword, Role: "GOVERNANCE"}}
+	var b strings.Builder
+	appendKeycloakUsers(&b, "kcadm.sh", "cbweb3", users)
+	return b.String(), operatorPasswordEnv(users)
+}
+
+func TestKeycloakProvisioning_NeverEmbedsAnOperatorPassword(t *testing.T) {
+	script, _ := operatorScript(t)
+	if strings.Contains(script, sentinelOperatorPassword) {
+		t.Errorf("the provisioning script embeds an operator password. The script is one argument "+
+			"to `docker exec`, so the value shows up in `ps` on the host and in the container. Set "+
+			"KC_CLI_PASSWORD for that one command instead.\n%s", script)
+	}
+}
+
+// The shape, which the value check cannot give: a script that stopped passing --new-password and
+// also stopped setting any password would satisfy the test above and leave the operator locked out.
+func TestKeycloakProvisioning_SetsOperatorPasswordsFromTheEnvironment(t *testing.T) {
+	script, env := operatorScript(t)
+
+	if strings.Contains(script, "--new-password") {
+		t.Error("the provisioning script still passes --new-password; kcadm reads KC_CLI_PASSWORD " +
+			"when the flag is absent (its own --help says so)")
+	}
+	want := `KC_CLI_PASSWORD="$` + operatorPasswordVar(0) + `"`
+	if !strings.Contains(script, want) {
+		t.Errorf("the set-password command has no %s prefix, so it would prompt or fail:\n%s", want, script)
+	}
+	if len(env) != 1 || !strings.HasPrefix(env[0], operatorPasswordVar(0)+"=") {
+		t.Errorf("the exec environment does not carry %s; the password would be empty and the "+
+			"operator could not sign in: %v", operatorPasswordVar(0), env)
+	}
+}
+
+// The artefact `ps` actually prints. The assertions above read the script and the environment;
+// neither would notice a secret that moved into a docker argument — which is the obvious way to
+// write this, and the reason the guard exists.
+func TestDockerExecArgs_CarryNamesNeverValues(t *testing.T) {
+	_, env := operatorScript(t)
+	args := dockerExecArgs("sc-b-keycloak", "echo hello", env)
+	joined := strings.Join(args, " ")
+
+	if strings.Contains(joined, sentinelOperatorPassword) {
+		t.Errorf("the docker argument vector carries an operator password:\n\t%s", joined)
+	}
+	name := operatorPasswordVar(0)
+	if !slices.Contains(args, name) {
+		t.Errorf("the docker argument vector does not forward %s (%v); the variable would be unset "+
+			"inside the container and the password empty", name, args)
+	}
+	if strings.Contains(joined, name+"=") {
+		t.Errorf("%s is passed as `-e NAME=value`; use the pass-through form `-e NAME`", name)
+	}
+	if !slices.Contains(args, "sc-b-keycloak") || !slices.Contains(args, "bash") {
+		t.Errorf("the argument vector lost the container or the shell: %v", args)
+	}
+}
+
+func TestDockerExecArgs_NoEnvIsThePlainForm(t *testing.T) {
+	if args := dockerExecArgs("sc-b-keycloak", "echo hello", nil); slices.Contains(args, "-e") {
+		t.Errorf("an exec with no environment emitted -e: %v", args)
 	}
 }
