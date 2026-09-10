@@ -33,7 +33,7 @@ type HubConfig struct {
 
 	GenesisDir     string // legacy; node state now lives in named volumes
 	ValidatorCount int    // QBFT validators (default 1)
-	BesuImage      string // besu image for genesis generation (default hyperledger/besu:25.8.0)
+	BesuImage      string // besu image for genesis generation (defaults to DefaultBesuImage)
 
 	// Compose interpolation for the hub template (rendered into HubEnvFile before
 	// start-besu-hub). Node state is seeded into the `<VolumePrefix>_*` volumes.
@@ -75,7 +75,7 @@ func (c *HubConfig) WithDefaults() {
 		c.ValidatorCount = 1
 	}
 	if c.BesuImage == "" {
-		c.BesuImage = "hyperledger/besu:25.8.0"
+		c.BesuImage = DefaultBesuImage
 	}
 	if c.GenesisDir == "" {
 		c.GenesisDir = filepath.Join(c.OutDir, "genesis")

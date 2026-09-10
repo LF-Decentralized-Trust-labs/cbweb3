@@ -80,10 +80,14 @@ func templateServiceSuffixes(t *testing.T) map[string]string {
 // Every container name the toolkit will generate for a checked-in manifest must fit a
 // DNS label. Covers the samples and the deploy-lnet manifests: an over-long name is a
 // deploy-time failure in either.
-func TestGeneratedContainerNamesFitDNSLabel(t *testing.T) {
-	suffixes := templateServiceSuffixes(t)
-
-	entities := map[string]string{} // entity name -> where it is declared
+// declaredEntityNames is every metadata.name a checked-in manifest declares, mapped to the
+// manifest it came from: the set of entity names a deploy can actually produce. Shared with
+// proxy_dns_label_test.go, which prices the same names against the proxy's upstreams.
+//
+// An empty result is a failure, not a skip — a guard that checked nothing must say so.
+func declaredEntityNames(t *testing.T) map[string]string {
+	t.Helper()
+	entities := map[string]string{}
 	for name, m := range sampleManifests(t) {
 		if m.Metadata.Name != "" {
 			entities[m.Metadata.Name] = name
@@ -98,6 +102,12 @@ func TestGeneratedContainerNamesFitDNSLabel(t *testing.T) {
 	if len(entities) == 0 {
 		t.Fatal("no manifest declared metadata.name — the guard checked nothing")
 	}
+	return entities
+}
+
+func TestGeneratedContainerNamesFitDNSLabel(t *testing.T) {
+	suffixes := templateServiceSuffixes(t)
+	entities := declaredEntityNames(t)
 
 	for entity, where := range entities {
 		// entity is the manifest's metadata.name; see orchestrator.go, which does

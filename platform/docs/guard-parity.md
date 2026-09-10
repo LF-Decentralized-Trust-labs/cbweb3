@@ -49,10 +49,10 @@ Só o nível *mutação* autoriza dizer que uma guarda guarda.
 |---|---|---|---|
 | Limite de log de container | `composetemplate/log_policy_test.go` | `orchestrator/provisioning_log_policy_test.go` | **convergida** (caminhos diferentes) |
 | Segredo em argv | `orchestrator/keycloak_secret_exposure_test.go` | `orchestrator/keycloak_secret_exposure_test.go` | **convergida** — o defeito estava presente em A e foi corrigido; ver abaixo |
-| Deriva de literal de imagem | — | 3 testes (`TestNoImagePinLiteralsInThisPackage`, `TestDefaultImagePinsComeFromTheOrchestratorConstants`, `TestFrontendComposeEnv_PerEntityImageTag`) | **lacuna em B** — a deriva corre nos dois sentidos |
+| Deriva de literal de imagem | `orchestrator/image_pins_test.go` | `apply/image_pins_test.go` + `orchestrator/step_start_frontend_stack_test.go` | **convergida** — B tinha o pin copiado em quatro passos; ver abaixo |
 | Pré-requisitos do Keycloak | `orchestrator/keycloak_provision_prereq_test.go` | — | **lacuna em A**, mas por um motivo estrutural — ver abaixo |
 | Portas efêmeras | 4 testes | os mesmos 4 | **convergida** |
-| Limite DNS de 63 caracteres | 4 testes | 1 teste | **parcial** — falta em A o equivalente a `TestProxyUpstreamsFitDNSLabel` |
+| Limite DNS de 63 caracteres | `apply/container_name_dns_test.go` + `orchestrator/proxy_dns_label_test.go` | os mesmos dois arquivos | **convergida** — ver abaixo, o port não foi linha a linha |
 | Recusas codificadas | 3 arquivos | — | **lacuna em A**, com ressalva importante abaixo |
 
 As linhas acima descrevem *onde* cada guarda está. Todas as sete foram desde então
@@ -142,6 +142,65 @@ em `scenario-a/.../keycloak_admin_users_reconcile.go:69` e
 administrador, então ela passa apesar disso. Fica registrado aqui porque é o tipo de coisa
 que uma auditoria de paridade não encontra por construção: comparar dois lados não revela
 o que falta em ambos.
+
+---
+
+## O sentido inverso: o pin do Besu em B
+
+A linha de literal de imagem era a única lacuna em B, e era real. A centralizou o pin numa
+constante (`DefaultBesuImage`) e guardou contra literais reaparecerem; B tinha
+`"hyperledger/besu:25.8.0"` escrito em quatro passos — `step_found_hub`, `step_found_spoke`,
+`step_join` e `step_genesis` — sem nada ligando as cópias.
+
+**Nenhum gate de CI cobria isso.** O workflow `toolchain-pins` existe e tem self-test, mas
+verifica só a versão do Alpine. O pin do Besu não era verificado em lugar nenhum.
+
+Este projeto já pagou por uma cópia esquecida: o pin chegou ao toolkit e não à antiga
+árvore `deploy/local`, nada falhou, e os dois stacks rodaram versões diferentes do Besu até
+alguém reparar. Quatro cópias num só toolkit são a mesma armadilha, mais perto.
+
+O que foi feito em B: `engine/orchestrator/image_pins.go` passa a ser o único lugar
+autorizado a escrever a referência, os quatro passos leem a constante, e
+`image_pins_test.go` faz a varredura do pacote isentando esse arquivo pelo nome.
+Verificado por mutação — um literal plantado no pacote derruba a guarda.
+
+**Uma diferença deliberada no port:** A guarda dois pins, Besu e Paladin. B guarda só o
+Besu, porque B não roda Paladin — seu template `entity-besu` declara um serviço que o
+toolkit nunca sobe (`docs/scenario-drift.md`). Um needle de Paladin em B não guardaria nada
+e sugeriria que B o executa.
+
+---
+
+## Limite DNS: o que A não tinha não era o teste de B
+
+A linha dizia "4 testes contra 1". Errado nos dois números: A já tinha dois dos três
+(`TestGeneratedContainerNamesFitDNSLabel` e `TestEntityNameHeadroomIsStated`), e o terceiro
+de B vive noutro arquivo (`proxy_dns_label_test.go`), que a contagem não alcançou.
+
+O port também **não foi linha a linha, de propósito**. A versão de B afirma o limite para
+nomes de entidade que ninguém implantou — o nome de país ISO mais longo incluído. Rodar essa
+forma em A **falha**: `cbweb3-central-bank-saint-vincent-and-the-grenadines-governance-frontend`
+tem 72 octetos. Mas isso não relata nada novo: `TestEntityNameHeadroomIsStated` de A já diz,
+pelo outro lado, que `metadata.name` cabe até **35 octetos**, e esse nome tem 45. Um segundo
+teste vermelho sobre uma hipótese que o primeiro já precifica é ruído — e um teste vermelho
+sobre o qual ninguém pode agir acaba desativado.
+
+O que A realmente não tinha é o **elo entre o proxy e os containers**. O proxy resolve cada
+upstream pela rede da entidade, e são duas condições, nenhuma verificada:
+
+1. todo upstream cabe num rótulo DNS, para as entidades **de fato declaradas** nos
+   manifestos versionados;
+2. todo upstream nomeia um container que os templates realmente criam — um rename deixa o
+   proxy discando um nome que não resolve, com exatamente o mesmo sintoma (502 contra um
+   stack saudável).
+
+A segunda é a que pega um rename, que é como este defeito costuma chegar. As duas foram
+verificadas por mutação: renomear um upstream para `-governance-spa` e alongar um nome de
+container derrubam a guarda correspondente.
+
+Para isso as duas listas de rota saíram de literais em `orchestrator.go` para
+`centralBankProxyRoutes` / `commercialBankProxyRoutes` em `proxy.go` — sem mudança de
+comportamento; é o que torna a guarda possível.
 
 ---
 
@@ -295,8 +354,8 @@ lembrete de que este documento inteiro é feito do tipo de leitura que produz es
 3. **Medir a consequência real da lacuna de recusas codificadas em A** antes de portar —
    o proxy de A converte o não-200 em vez de repassá-lo, então o sintoma de B (ejeção para
    a tela de login) pode simplesmente não se reproduzir.
-4. **Decidir o sentido inverso:** as três guardas de literal de imagem vão para B, ou a
-   ausência é deliberada e vai para `docs/scenario-drift.md`?
+4. ~~**Decidir o sentido inverso:** as guardas de literal de imagem vão para B?~~
+   **Feito** — foram, com o pin centralizado numa constante. Ver a seção acima.
 5. **Abrir card próprio para a asserção de estado final do Keycloak em A** — o script de
    provisionamento de A não afirma nada, então um realm incompleto reporta sucesso. Não é
    port de guarda; é defeito de outra natureza.

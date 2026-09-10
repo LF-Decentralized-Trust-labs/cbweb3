@@ -83,7 +83,7 @@ func joinWaitSyncTimeout() time.Duration {
 
 func (c *JoinConfig) WithDefaults() {
 	if c.BesuImage == "" {
-		c.BesuImage = "hyperledger/besu:25.8.0"
+		c.BesuImage = DefaultBesuImage
 	}
 	if c.VolumePrefix == "" {
 		c.VolumePrefix = c.BankID
