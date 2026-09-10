@@ -31,10 +31,11 @@ A wholesale CBDC interoperability model built around a dedicated **international
 Scenario B models a hub-and-spoke wholesale CBDC ecosystem centred on an **international hub**:
 
 - **Hub** (chain 1337) — an independent Besu QBFT network operating the FX liquidity pool. It hosts the AMM, the FX agreement contract, the liquidity/pair/currency registries, and hub-wrapped tokens (W-tCeBM). The `SpokeBridge` that moves value between a spoke and the hub is deployed spoke-side, not on the hub.
-- **Spoke-A** (chain 1338) — operated by **Central-Bank-A** with commercial bank **Bank-A**.
-- **Spoke-B** (chain 1339) — operated by **Central-Bank-B** with commercial bank **Bank-B**.
+- **Sovereign spokes** — one per jurisdiction, each founded by its own central bank on its own Besu QBFT network, with its commercial banks joining as non-validating full nodes.
 
-Each spoke runs its own Besu QBFT network and a full backend service stack; the four entities also peer on the hub network. Cross-currency settlement works as **lock → mint (bridge in) → swap on the AMM → burn → unlock (bridge out)**, coordinated by the backend orchestrator and observed by a Cacti relay.
+The number of spokes is not fixed: the toolkit founds and joins them from manifests, so the topology is whatever the manifests declare. The default sample bring-up (`samples/deploy-all.sh`) is the hub plus two spokes — `spoke-brl` (1338) and `spoke-ars` (1339), forming the BRL↔ARS corridor — with two commercial banks each; `samples/deploy-three.sh` adds `spoke-cop` (1340). See [`samples/README.md`](samples/README.md) for the authoritative list.
+
+Each spoke runs its own Besu QBFT network and a full backend service stack; every entity also peers on the hub network. Cross-currency settlement works as **lock → mint (bridge in) → swap on the AMM → burn → unlock (bridge out)**, coordinated by the backend orchestrator and observed by a Cacti relay.
 
 ### Key Capabilities
 
@@ -50,11 +51,11 @@ Each spoke runs its own Besu QBFT network and a full backend service stack; the 
 | **Manual FX oracle** — `ManualOracle` rate feed, fed locally by a mock rate feeder | Implemented |
 | **Identity & compliance** — on-chain `IdentityRegistry`, PKI certificates, Keycloak OIDC, KYC/AML gate at the API gateway | Implemented |
 | **NOC** — Network Operations Center portal + backend + monitoring agents for the hub and both spokes | Implemented |
-| **Privacy on the spokes** — Paladin/Zeto ZKP execution for confidential intra-spoke tCeBM transfers | Implemented (spokes only) |
+| **Privacy on the spokes** — Paladin/Zeto ZKP execution for confidential intra-spoke tCeBM transfers | **Not deployed** — no bring-up path starts a Paladin node (see [Privacy](#privacy)) |
 
 **Not part of Scenario B today:**
 
-- **No privacy on the hub.** The hub is a plaintext Besu QBFT network; hub-side value is held as wrapped tCeBM (W-tCeBM) ERC-20. Paladin/Zeto runs on the spokes only.
+- **No ZKP privacy layer, on the hub or the spokes.** Every network in the scenario is a plaintext Besu QBFT chain; hub-side value is held as wrapped tCeBM (W-tCeBM) ERC-20. The `provisioning/paladin/` tree and the Paladin service in `entity-besu.compose.yaml` are unused — see [Privacy](#privacy).
 - **No staging/production environment.** Scenario B ships a local Docker Compose deployment only; the provisioning toolkit (below) targets self-managed multi-host deployments, not a hosted environment.
 
 ---
@@ -70,8 +71,7 @@ The scenario is organized in layers:
 | **Microservices** | Auth (gRPC), Compliance (gRPC), Payment Orchestrator (gRPC), FX, Ledger Gateway |
 | **Interoperability** | Cacti HTLC/event relay, SpokeBridge, cross-currency swap orchestrator + rollback coordinator |
 | **FX** | AutomatedMarketMaker, ManualOracle, FXAgreement, PairRegistry, LiquidityCommitRegistry, CurrencyRegistry, circuit breaker |
-| **Privacy (spokes only)** | Paladin Core, Zeto Domain (ZKP tokens) |
-| **Blockchain** | Besu QBFT networks (hub: chain 1337, spoke-a: chain 1338, spoke-b: chain 1339) |
+| **Blockchain** | Besu QBFT networks — one hub plus one per sovereign spoke (see [Besu Networks](#besu-networks)) |
 
 ---
 
@@ -91,9 +91,10 @@ for the authoritative list and where each floor is enforced.
 | **openssl** | 3.x | PKI certificate generation |
 | **k6** | 0.50 | Performance suite only (`make scenario-b.perf-baseline`) |
 
-> **Note:** The full stack runs ~35 containers (hub, two spokes, Paladin nodes, shared infra,
-> per-entity backend stacks). Allocate at least 12 GB RAM and 4 CPUs to Docker; 16 GB and 8
-> CPUs recommended.
+> **Note:** The full sample stack runs the hub plus three spokes, each entity carrying its
+> own Besu node, Postgres, Redis, Keycloak and backend stack — several dozen containers, and
+> the count scales with the number of entities in your manifests. Allocate at least 12 GB RAM
+> and 4 CPUs to Docker; 16 GB and 8 CPUs recommended.
 
 All commands below are run from the `scenario-b/` directory.
 
@@ -119,7 +120,7 @@ This target runs, in order:
 
 A perf-lean variant without the NOC portal is available as `cd samples && ./deploy-all.sh`.
 
-Once complete, the four entities (central-bank-a + bank-a on spoke-a, central-bank-b + bank-b on spoke-b) are running with their full service stacks.
+Once complete, every entity declared in the manifests — the hub, each central bank and each commercial bank — is running with its full service stack.
 
 ---
 
@@ -219,17 +220,9 @@ scenario-b/
 │   └── hub-and-spoke/      Cross-network interop
 │       ├── cacti/          Cacti-based event/HTLC relay
 │       ├── ccip/           CCIP experiments
-│       └── noc/            NOC agent configs (hub, spoke-a, spoke-b)
-├── deploy/
-│   └── local/              Docker Compose infrastructure
-│       ├── hub-besu/       Besu nodes for the hub (chain 1337)
-│       ├── spoke-besu-a/   Besu nodes for spoke-a (chain 1338)
-│       ├── spoke-besu-b/   Besu nodes for spoke-b (chain 1339)
-│       ├── paladin/        Privacy nodes (Zeto) — spokes only
-│       ├── keycloak/       OIDC identity provider
-│       ├── postgres/       Multi-database init
-│       ├── compose.yml     Shared infrastructure compose
-│       └── compose.noc.yml NOC stack compose
+│       └── noc/            NOC agent configs (one per network)
+├── deploy/                 README only — the legacy `deploy/local` tree was removed;
+│                           the toolkit is the only bring-up path
 ├── make/                   Modular Makefile includes
 ├── toolkit/                Declarative provisioning toolkit (Go: cmd/cbweb3b + engine/*)
 ├── provisioning/           Provisioning assets (schema/v1 + compose templates)
@@ -320,10 +313,10 @@ All backend services are written in **Go** and communicate via **gRPC** internal
 | **payments** | — | **Not implemented** — reserved directory, zero Go files |
 | **fx** | — | **Not implemented** — reserved directory, zero Go files |
 | **ledger-gateway** | — | **Not implemented** — reserved directory, zero Go files |
-| **noc-agent** | — | Per-network monitoring agent (hub, spoke-a, spoke-b) |
+| **noc-agent** | — | Per-network monitoring agent (one per network: the hub and each spoke) |
 | **noc-backend** | REST | NOC portal backend |
 
-Each entity (bank-a, bank-b, central-bank-a, central-bank-b) runs its own isolated instance of the core services with dedicated Docker networks.
+Every entity runs its own isolated instance of the core services on its own Docker network.
 
 ---
 
@@ -333,31 +326,58 @@ The local deployment uses Docker Compose for all infrastructure components, rend
 
 ### Besu Networks
 
-| Network | Chain ID | Nodes | Docker Network |
-|---------|----------|-------|----------------|
-| hub | 1337 | hub-validator + one peer per entity (central-bank-a, bank-a, central-bank-b, bank-b) | `hub_besu_network` |
-| spoke-a | 1338 | central-bank-a, bank-a | `spoke_a_besu_network` |
-| spoke-b | 1339 | central-bank-b, bank-b | `spoke_b_besu_network` |
+One network per spoke, plus the hub. The founding central bank is the sole QBFT
+validator on its spoke; commercial banks join as non-validating full nodes and also
+peer on the hub network.
 
-### Shared Services
+| Network | Chain ID | Founding entity | Brought up by |
+|---------|----------|-----------------|---------------|
+| hub | 1337 | `hub-cbweb3` (hub validator) | both scripts |
+| spoke-brl | 1338 | `central-bank-brazil` | both scripts |
+| spoke-ars | 1339 | `central-bank-argentina` | both scripts |
+| spoke-cop | 1340 | `central-bank-colombia` | `deploy-three.sh` only |
 
-| Service | Container | Port | Purpose |
-|---------|-----------|------|---------|
-| Keycloak | `cbweb3-keycloak` | 8081 | OIDC identity provider (one realm per entity + a NOC realm; an optional `mlp` realm under `ENABLE_MLP=true`) |
-| PostgreSQL | `cbweb3-postgres` | 5432 | 6 databases (four entities + MLP + Keycloak) |
-| Redis | `cbweb3-redis` | 6379 | Cache/session store (4 logical DBs) |
+The chain IDs and spoke ids above are those of the sample manifests, not constants of
+the scenario — a different manifest set founds a different topology. `samples/README.md`
+is the authoritative record of what the samples stand up.
 
-### Paladin Privacy Nodes (spokes only)
+Docker networks are created **per entity**, not per spoke: each entity's compose gets a
+network named `<net-prefix>_net`, where the prefix comes from that entity's manifest.
+Entities reach each other over the peered Besu networks, not by sharing one Docker network.
 
-Each spoke runs Paladin nodes providing Zeto ZKP support for privacy-preserving intra-spoke tCeBM transfers. The hub network does not run Paladin. (The spoke compose files currently define more Paladin nodes than the spoke has Besu validators — e.g. `spoke-a` defines `cb`, `bank-a`, and a residual `bank-c` node; the extra node is legacy topology and is not required by the two-entity spoke model.)
+### Per-entity Services
+
+The toolkit provisions infrastructure **per entity**, not as a shared tier: each entity
+gets its own Postgres, Redis and Keycloak container, named
+`<prefix>-<entity>-postgres`, `<prefix>-<entity>-redis` and `<prefix>-<entity>-keycloak`
+(see [`provisioning/templates/entity-infra.compose.yaml`](provisioning/templates/entity-infra.compose.yaml)
+and [`entity-keycloak.compose.yaml`](provisioning/templates/entity-keycloak.compose.yaml)).
+Host ports are allocated per entity by the manifest.
+
+### Privacy
+
+Scenario B deploys **no Paladin node**. The only compose template that declares a
+Paladin service is `provisioning/templates/entity-besu.compose.yaml`, which no toolkit
+code path renders — the bring-up uses `entity-besu-founder.compose.yaml` and
+`entity-besu-join.compose.yaml`, neither of which contains one. Privacy on the hub-and-spoke
+value path therefore rests on the hub/spoke split and the `SpokeBridge`, not on ZKP
+tokens. Zeto/Noto privacy tokens are a Scenario A capability.
 
 ### NOC Stack
 
-The NOC stack (`provisioning/templates/noc-stack.compose.yaml`, with `noc-agent.compose.yaml` per network) runs a dedicated Postgres, the NOC backend, the NOC portal, and one monitoring agent per network (hub, spoke-a, spoke-b).
+The NOC stack (`provisioning/templates/noc-stack.compose.yaml`, with `noc-agent.compose.yaml` per network) runs a dedicated Postgres, the NOC backend, the NOC portal, and one monitoring agent per network — the hub and each spoke.
 
 ---
 
 ## Port Reference
+
+> **These tables describe the retired two-spoke reference deployment, not what the
+> toolkit stands up.** Host ports are now allocated per entity by the manifest, so the
+> authoritative values for a given stack are in that stack's manifests under
+> [`samples/`](samples/) — and `cbweb3b apply` prints every endpoint it brings up when it
+> finishes. The tables are kept only as a rough guide to the port ranges in use; treat a
+> mismatch with your manifest as the table being wrong. Aligning them with the toolkit's
+> allocation is tracked separately.
 
 ### API Gateways (REST) and gRPC services
 
@@ -445,13 +465,19 @@ make scenario-b.down-relayer   # Stop the relay
 
 ### NOC
 
+The `make noc.*` targets went with the legacy path. The NOC control plane is an
+`observe`-mode entity like any other, so it is stood up by `apply` from its own
+manifest — Keycloak, Postgres, the backend and the portal are steps of that apply, not
+separate commands:
+
 ```bash
-make noc.setup-keycloak        # Configure NOC Keycloak client
-make noc.up                    # Start the NOC portal + backend + agents
-make noc.setup-agents          # Register the monitoring agents
-make noc.down                  # Stop the NOC stack
-make noc.logs                  # Tail NOC logs
+cd samples && ./deploy-all-with-noc.sh
 ```
+
+That runs the normal `deploy-all.sh` flow and then applies `brazil/noc-brazil.yaml`
+against the spoke's NOC bundle. The spoke's own `found` already starts the noc-agent
+that reports into it. Ports are fixed at 8090 (backend) and 3030 (portal), so one host
+carries one NOC; a second needs another host — see `deploy-lnet/`.
 
 ### FX Rate Feeder
 

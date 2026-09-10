@@ -966,7 +966,7 @@ make deploy.up-hub-besu
 
 #### Validator Configuration
 
-The sandbox uses a **single-validator** Hub topology (`NODES=1` in `deploy/local/hub-besu/.env.network`, see [research.md Decision 3](../../specs/001-hub-network-isolation/research.md)). A single validator is sufficient for prototype and integration testing: the sole node acts as both bootnode and validator, producing 2-second QBFT blocks.
+The sandbox uses a **single-validator** Hub topology — [`provisioning/templates/hub.compose.yaml`](../../provisioning/templates/hub.compose.yaml) declares one `hub-validator` service (the `NODES=1` setting in `deploy/local/hub-besu/.env.network` this used to cite went with that removed tree, and the `001-hub-network-isolation` spec it referenced for Decision 3 is not in the tree either). A single validator is sufficient for prototype and integration testing: the sole node acts as both bootnode and validator, producing 2-second QBFT blocks.
 
 **For production deployments**, the single-validator topology is explicitly not recommended. Production requires a Byzantine-fault-tolerant validator set with **n ≥ 3f+1** nodes, where `f` is the maximum number of faulty nodes you wish to tolerate. Minimum practical configuration for 1 fault tolerance: **4 validators**. Additional steps for a multi-validator Hub:
 

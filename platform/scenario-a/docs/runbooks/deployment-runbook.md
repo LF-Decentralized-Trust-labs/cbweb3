@@ -189,6 +189,13 @@ The command runs **Spoke-A** followed by **Spoke-B** in sequence, then starts th
 
 ### Detailed phases
 
+> **Esta seção descreve o caminho removido.** Os alvos `make deploy.up-*`,
+> `make dev.up-<entidade>` e `make spoke-all` citados abaixo **não existem mais**, e os
+> arquivos sob `deploy/local/` que ela referencia foram apagados junto com eles. A seção
+> é mantida como registro da sequência de fases — útil para entender o que o toolkit faz
+> em cada etapa —, não como instrução executável. Para subir um stack, use
+> `cd samples && ./deploy-all.sh`.
+
 Each spoke goes through the same phases. The numbers below correspond to the internal `make` calls.
 
 #### Phase 1 — PKI (idempotent)
@@ -363,7 +370,7 @@ make pki.check-commercial-banks
 - [ ] All 6 API gateways return 200 on `/healthz`
 - [ ] Besu spoke-a (chain 1338) is producing blocks
 - [ ] Besu spoke-b (chain 1339) is producing blocks
-- [ ] Contracts deployed (addresses in `deploy/local/paladin/spoke-a/.deployed-addrs.env`)
+- [ ] Contracts deployed (addresses in `<SPOKE_DATA_DIR>/.deployed-addrs.env`, the entity data dir the manifest declares)
 - [ ] Paladin nodes responding (check logs via `docker logs`)
 - [ ] Cacti relay running
 
@@ -635,7 +642,7 @@ docker logs cbweb3-api-gateway-bank-a --tail 50
 make deploy.validate-backend-bank-a
 ```
 
-Check that contract addresses were synced: `deploy/local/paladin/spoke-a/.deployed-addrs.env`.
+Check that contract addresses were synced: `<SPOKE_DATA_DIR>/.deployed-addrs.env`.
 
 ### Regenerate PKI
 

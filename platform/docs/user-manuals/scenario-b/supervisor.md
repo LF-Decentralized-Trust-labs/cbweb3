@@ -103,9 +103,10 @@ the portal establishes the session, displays a confirmation toast, and
 redirects to the Dashboard. A short-lived access token is renewed automatically
 for the duration of the session; closing the tab ends the session.
 
-> **Privileged environment.** This login is connected to the platform's
-> production identity provider. Credentials are institution-issued and
-> supervised. Do not share your credentials.
+> **Privileged environment.** This login authenticates against the Keycloak
+> realm of the stack the portal is deployed against — which in a test or demo
+> deployment is not a production identity provider. Credentials are
+> institution-issued and supervised. Do not share your credentials.
 
 **Session security features (configured in Settings):**
 

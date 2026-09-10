@@ -387,8 +387,8 @@ rm -rf ./cbweb3-data
   production key providers (real KMS) and certificate sources (real CA) are not
   yet implemented; promoting to production will require different manifest values,
   not engine changes.
-- **Reference network untouched.** This toolkit does not modify or depend on
-  `deploy/local` or `make/*.mk`; they remain the sample reference network.
+- **No legacy bring-up.** The `deploy/local` tree was removed; this toolkit is the
+  only path that stands a stack up, and it does not depend on `make/*.mk`.
 
 ---
 

@@ -33,7 +33,7 @@
 
 This Test Execution Plan establishes the formal quality assurance strategy for the CBWeb3 platform — a regional prototype for wholesale CBDC settlement between jurisdictions in Latin America and the Caribbean. The plan validates functional and non-functional integrity across the three-tier testing hierarchy (unit, integration, end-to-end), covering the hub-and-spoke DLT architecture, atomic cross-spoke settlement via HTLC, the Paladin/Zeto privacy layer, and the Hyperledger Cacti relay.
 
-The complete test case catalog is maintained in [`scenario-a/tests/TEST-CATALOG.md`](../../tests/TEST-CATALOG.md).
+The complete test case catalog is maintained in [`scenario-a/tests/TEST-CATALOG.md`](../tests/TEST-CATALOG.md).
 
 ---
 
@@ -376,7 +376,7 @@ Before any integration, E2E, or performance suite may execute:
 1. Besu RPC endpoints return `eth_syncing = false` and block heights are advancing on both spokes
 2. Cacti relay returns 200 OK health with active WebSocket subscriptions to both spoke networks
 3. `GET /healthz` returns 200 OK on all 6 API gateways
-4. Contract addresses are present in `deploy/local/paladin/spoke-{a,b}/.deployed-addrs.env`
+4. Contract addresses are present in each entity's `<SPOKE_DATA_DIR>/.deployed-addrs.env`
 5. All 6 entities are registered in the IdentityRegistry with `Verified` status
 
 ---
@@ -583,7 +583,7 @@ This bundle is stored as a CI artifact and retained for technical validation by 
 
 ## Scenario B — Extensions
 
-> **Status: Implemented — work in progress.** Scenario B is functional but not 100% complete. The dedicated test documentation lives in [`scenario-b/docs/test-execution-plan.md`](../../../scenario-b/docs/test-execution-plan.md) and [`scenario-b/tests/TEST-CATALOG.md`](../../../scenario-b/tests/TEST-CATALOG.md).
+> **Status: Implemented — work in progress.** Scenario B is functional but not 100% complete. The dedicated test documentation lives in [`scenario-b/docs/test-execution-plan.md`](../../scenario-b/docs/test-execution-plan.md) and [`scenario-b/tests/TEST-CATALOG.md`](../../scenario-b/tests/TEST-CATALOG.md).
 
 Scenario B (AMM hub, cooperative liquidity, SpokeBridge) has been implemented. The test suite in `scenario-b/contracts/test/` covers 22 Foundry test files. Key additions relative to Scenario A:
 
