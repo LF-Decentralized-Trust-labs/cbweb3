@@ -1,8 +1,18 @@
-# hub-backend template — the hub's api-gateway only. The hub runs its compliance
-# service separately (entity-compliance.compose.yaml) for spoke self-registration
-# + sovereign currency registration, and needs no auth/login (the swap's auth
-# happens on the CB + commercial-bank gateways). Spoke/bank entities use the
-# 3-service entity-backend.compose.yaml instead.
+# hub-backend template — the hub's api-gateway and its auth service. The hub runs its
+# compliance service separately (entity-compliance.compose.yaml) for spoke self-registration
+# + sovereign currency registration. Spoke/bank entities use entity-backend.compose.yaml,
+# which carries all three.
+#
+# This file used to say the hub "needs no auth/login", because a swap authenticates on the CB
+# and commercial-bank gateways rather than here. That was a real decision, and the rest of the
+# tree had already left it behind: found-hub provisions spec.adminUsers into the hub realm, the
+# sample manifest declares two of them, and the realm carries a hub-backend client with a
+# secret. So the hub created operator accounts, served a governance portal, and answered every
+# login with 503 AUTH_SERVICE_UNAVAILABLE — correctly, since there was nobody to ask.
+#
+# Reversed deliberately; see docs/decisions/ADR-011. The guards in
+# toolkit/engine/orchestrator/hub_auth_test.go keep the three halves agreeing, because each was
+# individually defensible and only their combination was wrong.
 # Container log rotation, applied to every service in this file.
 #
 # Without it Docker's json-file driver has no size cap and no rotation: the
@@ -39,6 +49,9 @@ services:
       # Compliance gRPC + internal-relay secret drive the spoke self-registration
       # endpoint (POST /internal/v1/spokes/register).
       COMPLIANCE_GRPC_ADDR: "${COMPLIANCE_GRPC_ADDR:-localhost:9093}"
+      # Without this the gateway has nobody to ask and answers AUTH_SERVICE_UNAVAILABLE to
+      # every credential — which is what the hub did until ADR-011.
+      AUTH_GRPC_ADDR: "${CONTAINER_PREFIX:?}-${ENTITY:?}-auth:9091"
       INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:-}"
       # Browser CORS: the hub governance portal calls this gateway with credentials,
       # so its exact origin must be allowed ("*" is invalid with credentials).
@@ -54,6 +67,47 @@ services:
       - "host.docker.internal:host-gateway"
     ports:
       - "${GATEWAY_PORT:?}:8080"
+    networks:
+      - entity_net
+    restart: always
+
+  # The hub's auth service. Same shape as entity-backend's, minus what the hub has no use for:
+  # no KMS seed (the hub onboards nobody) and no per-service signing key (it runs one signer).
+  auth:
+    logging: *cbweb3_logging
+    image: "${AUTH_IMAGE:-cbweb3b/auth:local}"
+    container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-auth"
+    environment:
+      AUTH_GRPC_PORT: "9091"
+      # The hub's compliance service already runs, from entity-compliance.compose.yaml.
+      COMPLIANCE_GRPC_ADDR: "${COMPLIANCE_GRPC_ADDR:-localhost:9093}"
+      INTERNAL_JWT_ISSUER: "identity-internal"
+      KEYCLOAK_BASE_URL: "http://${CONTAINER_PREFIX:?}-${ENTITY:?}-keycloak:8080"
+      KEYCLOAK_REALM: "${KEYCLOAK_REALM:-cbweb3}"
+      # hub-backend, not spoke-backend: the realm provision-keycloak-hub creates names it that
+      # way, and the secret below is the one it recorded. A mismatch here authenticates nobody.
+      KEYCLOAK_CLIENT_ID: "${KEYCLOAK_CLIENT_ID:-hub-backend}"
+      KEYCLOAK_CLIENT_SECRET: "${KEYCLOAK_CLIENT_SECRET:?}"
+      KEYCLOAK_AUDIENCE: "${KEYCLOAK_AUDIENCE:-cbweb3-backend}"
+      REDIS_ADDR: "${CONTAINER_PREFIX:?}-${ENTITY:?}-redis:6379"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?}"
+      BLOCKCHAIN_CLIENT: "besu"
+      BESU_RPC_URL: "http://host.docker.internal:${ENTITY_RPC_PORT:?}"
+      BESU_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
+      PARTICIPANT_REGISTRY_ADDRESS: "${HUB_IDENTITY_REGISTRY_ADDRESS:-}"
+      # The hub's own signing identity, the same key its compliance service uses. It holds
+      # GOVERNANCE_ROLE on the hub registry.
+      CB_PRIVATE_KEY: "${HUB_ADMIN_PRIVATE_KEY:?}"
+      # R2-H-8 service-mesh mTLS — auth is a server (gateway→auth) and a client
+      # (auth→compliance). Opt-in via GRPC_MTLS_ENABLE; empty means plaintext, unchanged.
+      GRPC_MTLS_CERT_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/auth.crt}"
+      GRPC_MTLS_KEY_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/auth.key}"
+      GRPC_MTLS_CA_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/svc-ca.crt}"
+      GRPC_AUTHZ_ENFORCE: "${GRPC_AUTHZ_ENFORCE:-}"
+    volumes:
+      - "svc_tls:/svc-tls:ro"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - entity_net
     restart: always
