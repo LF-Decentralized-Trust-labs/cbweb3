@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  amountRefusalMessage,
   Badge,
   Button,
   Card,
@@ -10,6 +11,7 @@ import {
   CardTitle,
   Input,
   Label,
+  parseAmount,
   Table,
   TableBody,
   TableCell,
@@ -62,6 +64,18 @@ export function DepositsPage() {
   const walletAddress = profile?.wallet?.trim() ?? "";
 
   const [amount, setAmount] = useState("0");
+
+  // Parsed once and reused. The old guard, /^\d+(\.\d+)?$/, could not catch the
+  // real defect: `<input type="number">` in a pt-BR browser turns a typed
+  // "1.000,10" into "1.00010", which that regex accepts as a well-formed
+  // decimal — and displayToBase then faithfully settles 1.0001 instead of
+  // 1000.10. See @cbweb3/ui (lib/amount.ts) for the measurement.
+  const parsedAmount = useMemo(() => parseAmount(amount), [amount]);
+
+  // Shown on the confirmation card. A refused amount renders as "0" rather than
+  // as the mis-read figure displayToBase would produce for it: an operator must
+  // never be shown a plausible number for a value the form will not submit.
+  const amountForDisplay = parsedAmount.ok ? parsedAmount.canonical : "0";
   const [confirmRequest, setConfirmRequest] = useState(false);
   const [page, setPage] = useState(1);
 
@@ -90,13 +104,13 @@ export function DepositsPage() {
   const rangeEnd = Math.min(page * PAGE_SIZE, total);
 
   const onSubmit = async () => {
-    if (!/^\d+(\.\d+)?$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive number.");
+    if (!parsedAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedAmount.refusal));
       return;
     }
 
     try {
-      const depositId = await registerDeposit(displayToBase(amount, fDecimals));
+      const depositId = await registerDeposit(displayToBase(parsedAmount.canonical, fDecimals));
       toast.success(`Issuance request submitted: ${depositId}`);
       setAmount("0");
       setConfirmRequest(false);
@@ -106,8 +120,8 @@ export function DepositsPage() {
   };
 
   const onPrepareSubmit = () => {
-    if (!/^\d+(\.\d+)?$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive number.");
+    if (!parsedAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedAmount.refusal));
       return;
     }
     setConfirmRequest(true);
@@ -144,9 +158,9 @@ export function DepositsPage() {
             <Label htmlFor="deposit-amount">Amount ({fiatCurrencyLabel(fCeBMSymbol)})</Label>
             <Input
               id="deposit-amount"
-              type="number"
-              min="0"
-              step="any"
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
             />
@@ -167,7 +181,7 @@ export function DepositsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Confirm Issuance Request</CardTitle>
-            <CardDescription>{formatFiatDisplayUnits(amount, fDecimals, fCeBMSymbol)} will be submitted for central bank approval.</CardDescription>
+            <CardDescription>{formatFiatDisplayUnits(amountForDisplay, fDecimals, fCeBMSymbol)} will be submitted for central bank approval.</CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
             <Button onClick={() => void onSubmit()} disabled={status === "loading"}>

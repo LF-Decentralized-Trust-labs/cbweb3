@@ -24,7 +24,7 @@ jobs:
   # The self-test below runs first for the same reason the SPDX gate self-tests: a
   # check that cannot fail is worse than no check, because it gets quoted as evidence.
   build:
-    name: ${{ matrix.scenario }} — type-check and build
+    name: ${{ matrix.scenario }} — type-check, build and test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -59,6 +59,18 @@ jobs:
       # review-ready PR.
       - name: Build every app
         run: npm run build --workspaces --if-present
+
+      # Until this step existed, CI type-checked and built every app but never ran a
+      # single frontend test, so every suite in the repository was unexecuted — a
+      # regression that keeps the types valid passed green. The self-test runs first
+      # for the same reason the type-check and SPDX gates self-test: a gate is worth
+      # nothing until its failure path is shown to fail.
+      - name: Self-test the test gate (fail path must fail)
+        run: bash tools/check-frontend-tests.test.sh ${{ matrix.scenario }}
+        working-directory: .
+
+      - name: Run every test suite
+        run: npm run test --workspaces --if-present
 
   # The workspace build above does NOT cover the image build, and the difference is
   # not academic: it let a broken bank portal reach develop and block a bank join.

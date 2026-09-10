@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  amountRefusalMessage,
   Badge,
   Button,
   Card,
@@ -10,6 +11,7 @@ import {
   CardTitle,
   Input,
   Label,
+  parseBaseUnits,
   Table,
   TableBody,
   TableCell,
@@ -44,6 +46,12 @@ export function RedeemsPage() {
   const error = usePaymentStore((state) => state.error);
 
   const [amount, setAmount] = useState("0");
+
+  // Parsed once. This field carries whole base units, the same unit as the
+  // HTLC leg and the FX proposal, so the rule lives in @cbweb3/ui (lib/amount.ts)
+  // rather than in an inline regex — and the field is plain text, because
+  // <input type="number"> reads keystrokes through the browser locale.
+  const parsedAmount = useMemo(() => parseBaseUnits(amount), [amount]);
   const [confirmRequest, setConfirmRequest] = useState(false);
 
   useEffect(() => {
@@ -59,8 +67,8 @@ export function RedeemsPage() {
   );
 
   const onSubmit = async () => {
-    if (!/^\d+$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive integer.");
+    if (!parsedAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedAmount.refusal));
       return;
     }
 
@@ -79,8 +87,8 @@ export function RedeemsPage() {
   };
 
   const onPrepareSubmit = () => {
-    if (!/^\d+$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive integer.");
+    if (!parsedAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedAmount.refusal));
       return;
     }
     setConfirmRequest(true);
@@ -124,9 +132,9 @@ export function RedeemsPage() {
             <Label htmlFor="redeem-amount">Amount (tCeBM units)</Label>
             <Input
               id="redeem-amount"
-              type="number"
-              min="0"
-              step="1"
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
             />

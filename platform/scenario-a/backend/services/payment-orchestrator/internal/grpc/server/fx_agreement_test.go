@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -551,4 +552,122 @@ func TestFX_AcceptOnBehalf_ExemptFromOriginatorCheck(t *testing.T) {
 	if err != nil {
 		t.Errorf("on_behalf accept by originator bank: unexpected error: %v", err)
 	}
+}
+
+// The two parsers on origin_amount/counter_amount must agree.
+//
+// Validation used to use big.Rat and the on-chain conversion uses
+// big.Int.SetString(s, 10), which is strictly narrower. Everything in the gap —
+// "1000.10" above all, the value an operator actually types — passed validation
+// and was refused ~110 lines later by buildFXProposalParams, reaching the portal
+// as "invalid FX proposal params: invalid origin_amount: 1000.10".
+//
+// Asserting only InvalidArgument would not catch a regression here, because both
+// layers return InvalidArgument. The message is what says which layer answered,
+// so that is what this pins.
+func TestFX_Propose_AmountParsersAgree(t *testing.T) {
+	env := setupFXEnv(t, "")
+	ctx := context.Background()
+
+	// Every one of these is accepted by big.Rat and refused by the converter.
+	for _, amount := range []string{
+		"1000.10", // a decimal: the reported defect
+		"1000.00", // a decimal that happens to be whole
+		"0.5",
+		"0x10",  // hexadecimal — big.Rat reads 16
+		"1_000", // Go digit separator — big.Rat reads 1000
+		"1e3",   // scientific notation
+		"1/3",   // rational fraction, non-terminating
+		"+5",
+		"1,000", // refused by both, but must be named here
+	} {
+		t.Run("origin="+amount, func(t *testing.T) {
+			_, err := env.client.ProposeFXAgreement(ctx, &pb.ProposeFXAgreementRequest{
+				TradeId: "T-AMT-" + amount, Originator: "bank-a", CounterpartyB: "bank-b",
+				OriginAmount: amount, CounterAmount: "120", OriginCurrency: "USD",
+				CounterCurrency: "BRL", Rate: "1.2", ExpiryDate: uint64(time.Now().Add(time.Hour).Unix()),
+				SourceSpokeId: "spoke-a", DestSpokeId: "spoke-b",
+				SourceReceiver: "recv@spoke-a", DestReceiver: "recv@spoke-b",
+			})
+			if status.Code(err) != codes.InvalidArgument {
+				t.Fatalf("expected InvalidArgument, got %v", err)
+			}
+			msg := status.Convert(err).Message()
+			if !strings.Contains(msg, "origin_amount must be a positive integer in base units") {
+				t.Errorf("refused by the wrong layer: want the boundary message, got %q", msg)
+			}
+			if strings.Contains(msg, "invalid FX proposal params") {
+				t.Errorf("reached the on-chain converter before being refused: %q", msg)
+			}
+		})
+	}
+
+	// The reported case, reproduced exactly: a rate that IS consistent with the
+	// amounts, so nothing earlier can refuse them. 1000.10 x 5 = 5000.50.
+	//
+	// Before the fix this depended on deployment, and both outcomes were wrong.
+	// With Pente configured it reached buildFXProposalParams and came back as
+	// "invalid FX proposal params: invalid origin_amount: 1000.10" — the message
+	// the operator saw, naming neither the field's contract nor the layer. With
+	// Pente nil (this harness, and any deployment without the on-chain client)
+	// the whole block is skipped, so the decimal was accepted and PERSISTED,
+	// leaving a stored amount every other consumer reads as base-unit integer.
+	// Reverting the boundary makes this case return a nil error, which is what
+	// this assertion catches first.
+	t.Run("consistent rate still refused, and named at the boundary", func(t *testing.T) {
+		_, err := env.client.ProposeFXAgreement(ctx, &pb.ProposeFXAgreementRequest{
+			TradeId: "T-AMT-REPORTED", Originator: "bank-a", CounterpartyB: "bank-b",
+			OriginAmount: "1000.10", CounterAmount: "5000.50", OriginCurrency: "USD",
+			CounterCurrency: "BRL", Rate: "5", ExpiryDate: uint64(time.Now().Add(time.Hour).Unix()),
+			SourceSpokeId: "spoke-a", DestSpokeId: "spoke-b",
+			SourceReceiver: "recv@spoke-a", DestReceiver: "recv@spoke-b",
+		})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Fatalf("expected InvalidArgument, got %v", err)
+		}
+		msg := status.Convert(err).Message()
+		if !strings.Contains(msg, "origin_amount must be a positive integer in base units") {
+			t.Errorf("want the boundary message, got %q", msg)
+		}
+		if strings.Contains(msg, "invalid FX proposal params") {
+			t.Errorf("still refused by the on-chain converter: %q", msg)
+		}
+	})
+
+	// The counter leg is checked by the same rule.
+	t.Run("counter=1000.10", func(t *testing.T) {
+		_, err := env.client.ProposeFXAgreement(ctx, &pb.ProposeFXAgreementRequest{
+			TradeId: "T-AMT-COUNTER", Originator: "bank-a", CounterpartyB: "bank-b",
+			OriginAmount: "100", CounterAmount: "1000.10", OriginCurrency: "USD",
+			CounterCurrency: "BRL", Rate: "1.2", ExpiryDate: uint64(time.Now().Add(time.Hour).Unix()),
+			SourceSpokeId: "spoke-a", DestSpokeId: "spoke-b",
+			SourceReceiver: "recv@spoke-a", DestReceiver: "recv@spoke-b",
+		})
+		msg := status.Convert(err).Message()
+		if !strings.Contains(msg, "counter_amount must be a positive integer in base units") {
+			t.Errorf("want the boundary message for counter_amount, got %q", msg)
+		}
+	})
+
+	// A hex rate must not be readable as 16 either.
+	t.Run("rate=0x10", func(t *testing.T) {
+		_, err := env.client.ProposeFXAgreement(ctx, &pb.ProposeFXAgreementRequest{
+			TradeId: "T-AMT-RATE", Originator: "bank-a", CounterpartyB: "bank-b",
+			OriginAmount: "100", CounterAmount: "120", OriginCurrency: "USD",
+			CounterCurrency: "BRL", Rate: "0x10", ExpiryDate: uint64(time.Now().Add(time.Hour).Unix()),
+			SourceSpokeId: "spoke-a", DestSpokeId: "spoke-b",
+			SourceReceiver: "recv@spoke-a", DestReceiver: "recv@spoke-b",
+		})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Fatalf("expected InvalidArgument for a hex rate, got %v", err)
+		}
+	})
+
+	// Positive control: the integer form the rest of the stack already sends
+	// (sample-tryout, the k6 baseline, the HTLC legs) still proposes.
+	t.Run("integer amounts still accepted", func(t *testing.T) {
+		if tid := proposeValid(t, env, "T-AMT-OK"); tid == "" {
+			t.Fatal("valid integer propose returned no trade id")
+		}
+	})
 }

@@ -17,6 +17,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  baseToExactDisplay,
   displayToBase,
   formatCeBMDisplay,
   formatFiatDisplayUnits,
@@ -33,7 +34,8 @@ const FIAT_SYMBOL = "fCeBM_BRL";
 describe("formatFiatDisplayUnits", () => {
   it("renders what the operator typed, not zero", () => {
     // The exact failure a live stack showed: 1500 typed, "0 BRL" announced.
-    expect(formatFiatDisplayUnits("1500", DECIMALS, FIAT_SYMBOL)).toBe("1,500 BRL");
+    // Now rendered with the currency's minor units (two places, ISO 4217).
+    expect(formatFiatDisplayUnits("1500", DECIMALS, FIAT_SYMBOL)).toBe("1,500.00 BRL");
   });
 
   it("never renders 0 for a non-zero amount, at any decimals in use", () => {
@@ -46,13 +48,13 @@ describe("formatFiatDisplayUnits", () => {
   });
 
   it("keeps a fractional amount", () => {
-    expect(formatFiatDisplayUnits("0.5", DECIMALS, FIAT_SYMBOL)).toBe("0.5 BRL");
+    expect(formatFiatDisplayUnits("0.5", DECIMALS, FIAT_SYMBOL)).toBe("0.50 BRL");
     expect(formatFiatDisplayUnits("1,000.25", DECIMALS, FIAT_SYMBOL)).toBe("1,000.25 BRL");
   });
 
   it("still renders a genuine zero as zero", () => {
     // The input starts at "0"; the panel must not claim an amount before one is entered.
-    expect(formatFiatDisplayUnits("0", DECIMALS, FIAT_SYMBOL)).toBe("0 BRL");
+    expect(formatFiatDisplayUnits("0", DECIMALS, FIAT_SYMBOL)).toBe("0.00 BRL");
   });
 
   it("announces exactly what the submit path will send", () => {
@@ -82,6 +84,35 @@ describe("the base-unit variants are unchanged", () => {
   it("formatFiatUnits keeps taking base units", () => {
     // Balances and stored records arrive in base units and must keep formatting the same
     // way; the fix adds variants rather than changing these.
-    expect(formatFiatUnits("1500000000000000000000", DECIMALS, FIAT_SYMBOL)).toBe("1,500 BRL");
+    expect(formatFiatUnits("1500000000000000000000", DECIMALS, FIAT_SYMBOL)).toBe("1,500.00 BRL");
+  });
+});
+
+// Two-decimal display, and the two ways it could lie if written carelessly.
+describe("currency display precision", () => {
+  const DEC = 18;
+
+  it("shows exactly the currency's minor units", () => {
+    expect(formatFiatUnits("100200000000000000000", DEC, FIAT_SYMBOL)).toBe("100.20 BRL");
+  });
+
+  // The balance a live AMM swap left behind: 3.959753632757569189. Truncated, not
+  // rounded — a balance must never read as more than it is.
+  it("truncates rather than rounds", () => {
+    expect(formatFiatUnits("3959753632757569189", DEC, FIAT_SYMBOL)).toBe("3.95 BRL");
+  });
+
+  // Dust is still money. Rendering it as "0.00" would be the same class of defect
+  // as the 0 BRL confirmation this file was written for.
+  it("never shows a non-zero holding as zero", () => {
+    expect(formatFiatUnits("1000000000000", DEC, FIAT_SYMBOL)).toBe("< 0.01 BRL");
+    expect(formatFiatUnits("0", DEC, FIAT_SYMBOL)).toBe("0.00 BRL");
+  });
+
+  // Prefills feed an amount input, so they keep full precision: a truncated
+  // suggestion is a different transaction, not a different label.
+  it("keeps prefill values exact", () => {
+    expect(baseToExactDisplay("3959753632757569189", DEC)).toBe("3.959753632757569189");
+    expect(baseToExactDisplay("100200000000000000000", DEC)).toBe("100.2");
   });
 });

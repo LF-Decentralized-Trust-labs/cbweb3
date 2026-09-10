@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -1036,6 +1037,18 @@ func (s *paymentOrchestratorService) GetFiatBalance(ctx context.Context, _ *pb.G
 
 // --- FX Agreement Operations ---
 
+// decimalString is the only shape a rate may take. big.Rat.SetString on its own
+// also accepts 0x10, 1_000, 1e3 and 1/3 — forms nobody means as money, and not
+// something a settlement path should accept just because a client bypassed the
+// portal.
+var decimalString = regexp.MustCompile(`^\d+(\.\d+)?$`)
+
+// integerString is the canonical wire form of an amount. big.Int.SetString(s, 10)
+// is narrower than big.Rat but still takes a sign ("+5" is 5), so the boundary
+// applies this first: everything it accepts, the converter accepts, and there is
+// exactly one way to write a given amount.
+var integerString = regexp.MustCompile(`^\d+$`)
+
 func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req *pb.ProposeFXAgreementRequest) (*pb.ProposeFXAgreementResponse, error) {
 	if req.CounterpartyB == "" || req.OriginAmount == "" || req.CounterAmount == "" ||
 		req.OriginCurrency == "" || req.CounterCurrency == "" || req.Rate == "" || req.ExpiryDate == 0 {
@@ -1063,13 +1076,38 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 	if req.SourceSpokeId == req.DestSpokeId {
 		return nil, status.Error(codes.InvalidArgument, "source_spoke_id and dest_spoke_id must be different")
 	}
-	originRat, ok := new(big.Rat).SetString(req.OriginAmount)
-	if !ok || originRat.Sign() <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "origin_amount must be a positive decimal")
+	// Amounts are base-unit integers, because that is what the on-chain
+	// FXAgreement.propose takes (uint256) and what buildFXProposalParams below
+	// converts with big.Int.SetString(s, 10).
+	//
+	// This used to validate with big.Rat, which is a strictly wider parser, and
+	// the gap was not theoretical: "1000.10" passed here and was then refused
+	// ~110 lines later by the converter, surfacing to the operator as
+	// "invalid FX proposal params: invalid origin_amount: 1000.10" — a message
+	// that names neither the field's real contract nor the layer that rejected
+	// it. Parsing exactly what the converter parses is what keeps the refusal
+	// at the boundary, where it can be explained.
+	//
+	// big.Rat also accepted "0x10" (16), "1_000", "1e3" and "1/3". Those died
+	// at the converter too, so nothing reached a settlement path, but the API
+	// should not be depending on a second parser 110 lines away to refuse a hex
+	// literal in a money field.
+	originInt, ok := new(big.Int).SetString(req.OriginAmount, 10)
+	if !integerString.MatchString(req.OriginAmount) || !ok || originInt.Sign() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "origin_amount must be a positive integer in base units, with no decimal separator")
 	}
-	counterRat, ok := new(big.Rat).SetString(req.CounterAmount)
-	if !ok || counterRat.Sign() <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "counter_amount must be a positive decimal")
+	counterInt, ok := new(big.Int).SetString(req.CounterAmount, 10)
+	if !integerString.MatchString(req.CounterAmount) || !ok || counterInt.Sign() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "counter_amount must be a positive integer in base units, with no decimal separator")
+	}
+	originRat := new(big.Rat).SetInt(originInt)
+	counterRat := new(big.Rat).SetInt(counterInt)
+
+	// The rate genuinely is a decimal ("660.000000"), so big.Rat is the right
+	// parser — but only after the shape is checked, for the same reason as
+	// above: on its own it would take "0x10" as a rate of 16.
+	if !decimalString.MatchString(req.Rate) {
+		return nil, status.Error(codes.InvalidArgument, "rate must be a positive decimal")
 	}
 	rateRat, ok := new(big.Rat).SetString(req.Rate)
 	if !ok || rateRat.Sign() <= 0 {
