@@ -133,12 +133,27 @@ func RequireRelayAuthMigrating(cfg RelayAuthConfig) fiber.Handler {
 			// The signature verified — but a verified signature is reusable for the whole skew
 			// window, and on the transfer-limit routes reuse is the attack: a resent Restore credits
 			// a bank's daily allowance back. Admitted once, never again.
-			if !cfg.Replay.Admit(keyID, c.Get(relayauth.HeaderSignature), time.Now()) {
+			switch cfg.Replay.Admit(keyID, c.Get(relayauth.HeaderSignature), time.Now()) {
+			case relayauth.AdmissionRefused:
 				log.Printf("[relay-auth] replayed signature rejected for key-id=%q path=%s", keyID, c.Path())
 				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 					"error": "this relay signature has already been used; a request is authenticated once",
 					"code":  "RELAY_SIGNATURE_REPLAYED",
 				})
+			case relayauth.AdmissionDegraded:
+				// Admitted by this process's memory alone: a shared store is configured and did not
+				// answer, so a replay sent to another replica would go through. Tolerable on the
+				// settlement paths — failing them closed is a far larger outage than the window it
+				// shuts — and NOT tolerable on the routes below, where a replay is a compliance
+				// failure rather than a duplicated read.
+				if failClosedOnDegradedReplay(c.Path()) {
+					log.Printf("[relay-auth] refusing %s: replay protection degraded and this route "+
+						"must not fail open", c.Path())
+					return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+						"error": "replay protection is degraded and this route cannot be served without it; retry shortly",
+						"code":  "RELAY_REPLAY_STORE_UNAVAILABLE",
+					})
+				}
 			}
 			// Carry the identity forward. Verifying who is calling and then authorizing on a bank id
 			// read from the request body is how an authenticated peer ends up acting for another
@@ -178,3 +193,26 @@ func RequireRelayAuthMigrating(cfg RelayAuthConfig) fiber.Handler {
 		return c.Next()
 	}
 }
+
+// failClosedOnDegradedReplay reports whether a route must be refused when replay protection has
+// dropped to this process's own memory.
+//
+// The set is deliberately tiny, and the reason each member is in it has to be "a replay here is a
+// compliance failure", not "a replay here is untidy". Failing closed costs availability, and the
+// security review that produced this rule rejected doing it globally precisely on those grounds:
+// bridge-in, the delegated hub swap and the residue return must keep moving.
+//
+//   - transfer-limits/restore credits a bank's daily allowance back. Replayed, it lets that bank
+//     transact past the limit its central bank set, and the only trace is a log line.
+//
+// check-and-deduct is NOT here: it consumes allowance, so a replay is self-limiting in the safe
+// direction. Adding a route to this set is a decision with an availability cost; the guard in
+// relay_replay_failclosed_test.go pins that the other internal routes keep serving.
+func failClosedOnDegradedReplay(path string) bool {
+	return path == transferLimitRestorePath
+}
+
+// transferLimitRestorePath is the one route above. Kept as a constant next to the rule so the
+// string cannot drift from the router — services/remote_transfer_limit_checker.go calls the same
+// path on the peer side.
+const transferLimitRestorePath = "/internal/v2/transfer-limits/restore"
