@@ -46,8 +46,14 @@ const (
 	// does not yet exist, and its Check skips whenever Keycloak is up — so without this a role newly
 	// declared in spec.adminUsers never reaches an entity that is already provisioned.
 	StepReconcileAdminUsers = "reconcile-admin-users"
-	StepStartCBBackend      = "start-cb-backend"
-	StepStartCBFrontend     = "start-cb-frontend"
+	// StepReconcileKeycloakRealm converges what reconcile-admin-users does not: the realm's own
+	// settings (sslRequired, access-token lifespan) and each client's webOrigins and redirectUris.
+	// Same reason, one level out — `--import-realm` skips a realm that already exists, so a portal
+	// origin added to the manifest was written into the import volume, ignored by Keycloak, and
+	// reported as applied. Client secrets are deliberately not converged; see the step's file.
+	StepReconcileKeycloakRealm = "reconcile-keycloak-realm"
+	StepStartCBBackend         = "start-cb-backend"
+	StepStartCBFrontend        = "start-cb-frontend"
 	// Per-entity launcher (distributed A/B entry point). Runs in both modes.
 	StepStartLauncher = "start-launcher"
 	// Per-host reverse proxy (Caddy): one :80 entrypoint routing portals + api by path.
@@ -85,6 +91,7 @@ var CanonicalStepOrder = []string{
 	StepStartCBInfra,
 	StepProvisionKeycloak,
 	StepReconcileAdminUsers,
+	StepReconcileKeycloakRealm,
 	StepStartCBBackend,
 	StepStartCBFrontend,
 	StepRegisterRelay,

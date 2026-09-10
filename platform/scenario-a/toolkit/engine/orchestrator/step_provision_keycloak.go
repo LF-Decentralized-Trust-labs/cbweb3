@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -32,6 +33,9 @@ type provisionKeycloakStep struct {
 	hostPort      int
 	realms        []KeycloakRealmPlan
 	timeout       time.Duration
+	// healthy is the readiness probe, injected so the Check can be tested without a server.
+	// Defaults to httpHealthy.
+	healthy func(ctx context.Context, url string) bool
 }
 
 func newProvisionKeycloakStep(name string, p keycloakStepParams) Step {
@@ -48,6 +52,7 @@ func newProvisionKeycloakStep(name string, p keycloakStepParams) Step {
 		hostPort:      p.HostPort,
 		realms:        p.Realms,
 		timeout:       p.Timeout,
+		healthy:       httpHealthy,
 	}
 }
 
@@ -68,14 +73,45 @@ type keycloakStepParams struct {
 
 func (s *provisionKeycloakStep) Name() string { return s.name }
 
+// Check gates on the realms this step exists to create, not on the server being up.
+//
+// It used to probe /realms/master. That realm exists in every Keycloak, so the answer was
+// "satisfied" whenever the container was running — and on an entity that had already been
+// provisioned once, the step was skipped outright. A realm newly declared in the manifest
+// therefore never got imported, and the apply reported success. The same shape as the defect
+// reconcile-admin-users exists for, one level up: there it was a role that never reached an
+// upgraded entity, here it is a whole realm.
+//
+// Every declared realm must answer. One missing is the upgrade case — an entity provisioned
+// before a second realm was declared — and reporting satisfied there is what leaves it
+// permanently absent.
+//
+// Note what this does NOT catch, so nobody reads more into a green step than it says: a realm
+// that EXISTS but has drifted from the manifest. `--import-realm` skips a realm that is already
+// there, so a changed origin or token lifespan needs converging, not importing. That is
+// reconcile-keycloak-realm's job.
 func (s *provisionKeycloakStep) Check(ctx context.Context) (bool, error) {
-	return httpHealthy(ctx, s.readyURL()), nil
+	probe := s.healthy
+	if probe == nil {
+		probe = httpHealthy
+	}
+	// Nothing declared: fall back to proving the server is up rather than answering satisfied
+	// after checking nothing.
+	if len(s.realms) == 0 {
+		return probe(ctx, s.realmURL("master")), nil
+	}
+	for _, plan := range s.realms {
+		if !probe(ctx, s.realmURL(plan.Realm)) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
-// readyURL is the Keycloak readiness probe: a 200 on /realms/master means the
-// master realm is served and the server has finished booting (and importing).
-func (s *provisionKeycloakStep) readyURL() string {
-	return fmt.Sprintf("http://localhost:%d/realms/master", s.hostPort)
+// realmURL is the public endpoint of one realm. A 200 means Keycloak serves it, which for a
+// realm the toolkit declares means the import landed.
+func (s *provisionKeycloakStep) realmURL(realm string) string {
+	return fmt.Sprintf("http://localhost:%d/realms/%s", s.hostPort, realm)
 }
 
 func (s *provisionKeycloakStep) Run(ctx context.Context) error {
@@ -103,9 +139,13 @@ func (s *provisionKeycloakStep) Run(ctx context.Context) error {
 		return fmt.Errorf("compose up keycloak: %w\noutput:\n%s", err, out)
 	}
 
+	// Wait on the same condition the Check gates on — every declared realm served — rather
+	// than on the server answering at all. Waiting on master made this Run report success the
+	// moment the container booted, whether or not the import it had just seeded produced
+	// anything, which is the other half of the defect described above the Check.
 	deadline := time.Now().Add(s.timeout)
 	for time.Now().Before(deadline) {
-		if httpHealthy(ctx, s.readyURL()) {
+		if ok, err := s.Check(ctx); err == nil && ok {
 			return nil
 		}
 		select {
@@ -114,7 +154,24 @@ func (s *provisionKeycloakStep) Run(ctx context.Context) error {
 		case <-time.After(2 * time.Second):
 		}
 	}
-	return fmt.Errorf("keycloak readiness check timed out after %s", s.timeout)
+	// Name what is missing. "Keycloak timed out" reads as a slow container; "realm X is not
+	// served" points at the import, which is where the fault actually is when a realm JSON is
+	// malformed or the volume did not mount.
+	return fmt.Errorf("keycloak did not serve %s within %s: the container is up but the realm "+
+		"import did not produce them (check the container log for import errors, and that %s is mounted)",
+		strings.Join(s.declaredRealms(), ", "), s.timeout, s.importVolume())
+}
+
+// declaredRealms names the realms this step is responsible for, for error messages.
+func (s *provisionKeycloakStep) declaredRealms() []string {
+	if len(s.realms) == 0 {
+		return []string{"master"}
+	}
+	names := make([]string, 0, len(s.realms))
+	for _, plan := range s.realms {
+		names = append(names, plan.Realm)
+	}
+	return names
 }
 
 // importVolume is the named volume holding the rendered realm JSONs, mounted
