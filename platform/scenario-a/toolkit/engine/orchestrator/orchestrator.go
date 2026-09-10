@@ -767,6 +767,12 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		bankImageTag = bank + proxyImageVariant(fHost)
 	}
 
+	// One realm plan for the three steps that consume it, as in the found pipeline: the import
+	// and the two convergences must agree about what the bank's realm should contain.
+	bankRealms := []KeycloakRealmPlan{commercialBankRealmPlan(bank, m.Spec.AdminUsers, m.Spec.Environment,
+		splitOrigins(bankCORSOriginsFor(ports, frontendAdvertisedHost(m), proxyEnabled)))}
+	kcAdminPass := mustInfraSecret(dataDir, "KC_ADMIN_PASSWORD")
+
 	steps = append(steps,
 		newRenderBankEnvStep(bankEnvParams{
 			SpokeID: spokeID, BankCode: bank, Currency: b.Spec.Currency,
@@ -792,12 +798,20 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			ComposePath: filepath.Join(templatesDir, "entity-keycloak", "keycloak-compose.yaml"),
 			KCDBURL:     kcDBURL, KCUser: "default",
 			KCPassword:      mustInfraSecret(dataDir, "POSTGRES_PASSWORD"),
-			KCAdminPassword: mustInfraSecret(dataDir, "KC_ADMIN_PASSWORD"),
+			KCAdminPassword: kcAdminPass,
 			HostPort:        ports.Keycloak, Timeout: stackTO,
 			// Same origin list the bank's api-gateway receives as CORS_ALLOW_ORIGINS.
-			Realms: []KeycloakRealmPlan{commercialBankRealmPlan(bank, m.Spec.AdminUsers, m.Spec.Environment,
-				splitOrigins(bankCORSOriginsFor(ports, frontendAdvertisedHost(m), proxyEnabled)))},
+			Realms: bankRealms,
 		}),
+		// Join had no reconcile step at all, so everything the found pipeline converges for a
+		// central bank was first-apply-only for a bank: a role newly declared in spec.adminUsers,
+		// and the client origins that follow spec.frontendHost / spec.proxy. Both are
+		// manifest-driven, so the motivating case — a portal moves host, the manifest gains an
+		// origin, the apply reports success and the browser's calls are refused by CORS —
+		// reproduced on every commercial bank. Same two steps, same order, against the bank's
+		// own realm.
+		newReconcileAdminUsersStep(StepReconcileAdminUsers, prefix, kcAdminPass, bankRealms),
+		newReconcileKeycloakRealmStep(StepReconcileKeycloakRealm, prefix, kcAdminPass, bankRealms),
 		newStartBackendStackStep(StepStartBackend, backendStackParams{
 			SpokeID: spokeID, EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
 			// Mount the bank's <dataDir>/pki: gen-csr writes <bank>.csr here, which the

@@ -236,3 +236,45 @@ func TestReconcileKeycloakRealmIsInTheCanonicalFoundOrder(t *testing.T) {
 			StepReconcileKeycloakRealm, StepProvisionKeycloak)
 	}
 }
+
+// The convergence has to reach commercial banks, not only central banks.
+//
+// Join had zero reconcile steps: a bank's realm was imported once and then frozen, while its
+// declarations kept following the manifest — spec.adminUsers for the roles, and
+// spec.frontendHost / spec.proxy for the client's webOrigins and redirectUris. So the case this
+// whole change exists for (a portal moves host, the manifest gains an origin, the apply reports
+// success, the browser's calls are refused by CORS) reproduced on every bank, while the found
+// pipeline was covered. In the sample stacks that is two banks per central bank.
+func TestKeycloakConvergenceReachesCommercialBanks(t *testing.T) {
+	provision, users, realm := -1, -1, -1
+	for i, name := range CanonicalJoinStepOrder {
+		switch name {
+		case StepProvisionBankKeycloak:
+			provision = i
+		case StepReconcileAdminUsers:
+			users = i
+		case StepReconcileKeycloakRealm:
+			realm = i
+		}
+	}
+	if provision < 0 {
+		t.Fatalf("%s is not in CanonicalJoinStepOrder", StepProvisionBankKeycloak)
+	}
+	for _, tc := range []struct {
+		step  string
+		at    int
+		drift string
+	}{
+		{StepReconcileAdminUsers, users, "a role newly declared in spec.adminUsers never reaches a bank that is already provisioned"},
+		{StepReconcileKeycloakRealm, realm, "an origin added to the manifest reaches the import volume and stops there"},
+	} {
+		if tc.at < 0 {
+			t.Errorf("%s is not in CanonicalJoinStepOrder, so %s", tc.step, tc.drift)
+			continue
+		}
+		if tc.at < provision {
+			t.Errorf("%s must come after %s: there is no realm to converge before it exists",
+				tc.step, StepProvisionBankKeycloak)
+		}
+	}
+}

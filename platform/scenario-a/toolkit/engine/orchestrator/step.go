@@ -159,6 +159,12 @@ var CanonicalJoinStepOrder = []string{
 	StepRenderBankEnv,
 	StepStartBankInfra,
 	StepProvisionBankKeycloak,
+	// Both reconcile steps run in join too. The realm import is first-apply-only for a bank
+	// exactly as it is for a central bank, and a bank's realm carries the same drift-prone
+	// declarations: spec.adminUsers roles, and the client origins derived from
+	// spec.frontendHost / spec.proxy.
+	StepReconcileAdminUsers,
+	StepReconcileKeycloakRealm,
 	StepStartBackend,
 	StepStartBankFrontend,
 	StepCreatePenteJoin,

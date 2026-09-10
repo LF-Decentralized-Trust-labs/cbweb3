@@ -20,13 +20,14 @@ Both run idempotently (re-running `apply` resumes from the first incomplete step
 `start-besu → deploy-contracts → gen-tls → render-configs → register-nodes →
 start-paladin → create-zeto-token → onboard-registry → deploy-fiat-token →
 deploy-htlc → render-cb-env → start-cb-infra → provision-keycloak →
-start-cb-backend → start-cb-frontend → register-relay → start-launcher`
+reconcile-admin-users → reconcile-keycloak-realm → start-cb-backend →
+start-cb-frontend → register-relay → start-launcher`
 
 > The order above is `orchestrator.CanonicalStepOrder`, which
 > `TestCanonicalStepOrderMatchesExecution` locks to what `buildSteps` assembles.
 > `register-relay` runs **after** the frontend, not after `deploy-htlc`: the relay
 > is handed the CB coordinator endpoints, so those services must exist first.
-> `start-launcher` is soft. A manifest with `proxy: enable` appends an 18th step,
+> `start-launcher` is soft. A manifest with `proxy: enable` appends a 20th step,
 > `start-proxy` (also soft) — build the order for a given manifest with
 > `orchestrator.PlannedStepOrder(mode, proxyEnabled)`.
 
@@ -42,7 +43,8 @@ start-cb-backend → start-cb-frontend → register-relay → start-launcher`
 ### `join` (commercial bank) — ✅ provisioning complete
 `write-genesis → start-besu-join → wait-sync → gen-tls-join →
 render-config-join → start-paladin-join → register-paladin-node →
-render-bank-env → start-bank-infra → provision-bank-keycloak → start-backend →
+render-bank-env → start-bank-infra → provision-bank-keycloak →
+reconcile-admin-users → reconcile-keycloak-realm → start-backend →
 start-bank-frontend` then the **deferred tail**: `create-pente-context →
 deploy-fxa-pente → gen-csr → start-launcher`.
 

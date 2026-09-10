@@ -207,6 +207,105 @@ else
   REPORT+=("HARNESS  | A  segredo em argv, VALOR | padrão não casou"); fail=$((fail+1))
 fi
 
+# ------------------------------- 17-23. convergência do realm Keycloak (A, novas)
+# As guardas da convergência de realm: quatro do PR #236 (readiness, redirectUris, ordem
+# canônica, comparação por conjunto) e três das correções pedidas na review (criar o realm
+# que o import ignora, não chamar kcadm antes do servidor subir, convergir no join). A quinta
+# do PR — segredo em argv — já está nos casos 8 e 16.
+#
+# Registradas aqui porque o harness é o que torna a afirmação "estas guardas guardam"
+# reproduzível por quem revisa, em vez de uma tabela no corpo do PR.
+#
+# ATENÇÃO: run_case restaura com `git checkout --`, então o harness só verifica código
+# COMMITADO — rodá-lo sobre edições pendentes nos arquivos que ele muta as descarta.
+
+KCSTEP=scenario-a/toolkit/engine/orchestrator/step_provision_keycloak.go
+KCREC=scenario-a/toolkit/engine/orchestrator/keycloak_realm_reconcile.go
+KCORD=scenario-a/toolkit/engine/orchestrator/step.go
+
+# A gate volta para /realms/master — o realm que existe em todo Keycloak.
+run_case "A  readiness do Keycloak volta a olhar master" "$A" \
+  "TestProvisionKeycloak_UnimportedRealmIsNotSatisfied" "./engine/orchestrator/..." \
+  "$KCSTEP" \
+  '	for _, plan := range s.realms {
+		if !probe(ctx, s.realmURL(plan.Realm)) {' \
+  '	for _, plan := range s.realms {
+		_ = plan
+		if !probe(ctx, s.realmURL("master")) {'
+
+# O Run volta a só esperar: sem criar o realm que o import ignorou.
+run_case "A  Run deixa de criar o realm que o import ignora" "$A" \
+  "TestProvisionKeycloak_CreatesTheRealmTheImportSkipped" "./engine/orchestrator/..." \
+  "$KCSTEP" \
+  '		if !created && !time.Now().Before(graceOver) && s.serverUp(ctx) {' \
+  '		if false && !created && !time.Now().Before(graceOver) && s.serverUp(ctx) {'
+
+# kcadm chamado contra um container que ainda não responde.
+run_case "A  create do realm sem esperar o servidor subir" "$A" \
+  "TestProvisionKeycloak_DoesNotReachForKcadmBeforeTheServerAnswers" "./engine/orchestrator/..." \
+  "$KCSTEP" \
+  '		if !created && !time.Now().Before(graceOver) && s.serverUp(ctx) {' \
+  '		if !created && !time.Now().Before(graceOver) {'
+
+# Comparação de origens como SUBCONJUNTO de verdade (want ⊆ have, extras tolerados) —
+# a mutação que o PR registrou como tendo passado por estar errada na primeira tentativa.
+run_case "A  origens comparadas como subconjunto" "$A" \
+  "TestReconcileKeycloakRealm_UndeclaredOriginIsNotSatisfied" "./engine/orchestrator/..." \
+  "$KCREC" \
+  '	if len(have) != len(want) {
+		return false
+	}
+	h := append([]string(nil), have...)
+	w := append([]string(nil), want...)
+	sort.Strings(h)
+	sort.Strings(w)
+	for i := range h {
+		if h[i] != w[i] {
+			return false
+		}
+	}
+	return true' \
+  '	_ = sort.Strings
+	for _, wanted := range want {
+		found := false
+		for _, held := range have {
+			if held == wanted {
+				found = true
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true'
+
+# O reconcile deixa de escrever redirectUris: o Check continua exigindo, o Run não entrega.
+run_case "A  reconcile para de escrever redirectUris" "$A" \
+  "TestReconcileKeycloakRealm_RunSetsEverythingItChecks" "./engine/orchestrator/..." \
+  "$KCREC" \
+  '		fmt.Fprintf(&b, "%[1]s update clients/$KCID -r %[2]s -s '"'"'webOrigins=%[3]s'"'"' -s '"'"'redirectUris=%[4]s'"'"' || exit 1\n",
+			kc, plan.Realm, origins, redirects)' \
+  '		_ = redirects
+		fmt.Fprintf(&b, "%[1]s update clients/$KCID -r %[2]s -s '"'"'webOrigins=%[3]s'"'"' || exit 1\n",
+			kc, plan.Realm, origins)'
+
+# O passo sai da ordem canônica do found: nunca roda, e nenhum outro teste percebe.
+run_case "A  reconcile do realm fora da ordem do found" "$A" \
+  "TestReconcileKeycloakRealmIsInTheCanonicalFoundOrder" "./engine/orchestrator/..." \
+  "$KCORD" \
+  '	StepReconcileKeycloakRealm,
+	StepStartCBBackend,' \
+  '	StepStartCBBackend,'
+
+# A convergência sai do join: volta a valer só para banco central.
+run_case "A  join volta a não convergir nada" "$A" \
+  "TestKeycloakConvergenceReachesCommercialBanks" "./engine/orchestrator/..." \
+  "$KCORD" \
+  '	StepReconcileAdminUsers,
+	StepReconcileKeycloakRealm,
+	StepStartBackend,' \
+  '	StepStartBackend,'
+
 echo
 echo "================ VERIFICAÇÃO POR MUTAÇÃO ================"
 printf '%s\n' "${REPORT[@]}"
