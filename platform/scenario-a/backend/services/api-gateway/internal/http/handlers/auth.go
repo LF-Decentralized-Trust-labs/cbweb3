@@ -177,8 +177,9 @@ func setAuthCookies(c *fiber.Ctx, accessToken, refreshToken string, expiresIn, r
 // not what Fiber wrote, so it passes both before and after. logout_cookie_wire_test.go asserts
 // the Set-Cookie header instead, which is the only place the difference exists.
 //
-// The NOC backend already did it this way (noc-backend/internal/api/auth.go); this gateway is
-// the half that had not caught up. Both scenarios carry the same fix — the same hole was on
+// The NOC backend already did it this way, and already tested it
+// (noc-backend/internal/api/auth_test.go, TestLogout_ExpiresEveryAuthCookie); this gateway is
+// the half that had not caught up on either. Both scenarios carry the same fix — the same hole was on
 // each side, so it is not drift.
 func clearAuthCookies(c *fiber.Ctx, secure bool) {
 	past := time.Now().Add(-time.Hour)

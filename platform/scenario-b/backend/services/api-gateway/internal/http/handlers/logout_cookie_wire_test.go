@@ -30,7 +30,14 @@ import (
 // survived a test suite in the first place. Measured against Fiber v2.52.9.
 //
 // The NOC backend already does it this way (noc-backend/internal/api/auth.go), in both
-// scenarios. This gateway was the half that never caught up.
+// scenarios, and already guards it: TestLogout_ExpiresEveryAuthCookie in that package's
+// auth_test.go checks each cookie BY NAME, that the value is emptied, and that the expiry is in
+// the past. This gateway was the half that never caught up — on the code and on the guard.
+//
+// The assertions below are that test's, restated for this handler's shape. An earlier draft of
+// this branch also added a second guard to the NOC, on the false premise that it had none; the
+// existing one is stronger, and a weaker duplicate beside it is what later gets mistaken for
+// the coverage.
 
 // logoutSetCookies runs clearAuthCookies through a real Fiber app and returns the Set-Cookie
 // headers exactly as a browser would receive them.
