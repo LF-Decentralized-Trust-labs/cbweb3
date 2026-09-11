@@ -154,7 +154,13 @@ async function main(): Promise<void> {
 
   // Liveness / readiness
   app.get("/api/v1/health", (_req: Request, res: Response) => {
-    res.json({ status: "ok", uptime: process.uptime() });
+    // The chain scan is the relay's actual job, and "the process is up" says nothing about it:
+    // through the LNET outage this probe answered ok for three days while no spoke was being
+    // scanned. Serving the watermarks here replaces a two-reading manual procedure against a
+    // Docker volume with one curl, and gives a dashboard something worth alerting on —
+    // secondsSinceAdvance, which separates catching up from stopped.
+    const scan = relay.getScanLiveness();
+    res.json({ status: "ok", uptime: process.uptime(), scan });
   });
 
   // ── Spoke registration (RL-1) ────────────────────────────────────────────

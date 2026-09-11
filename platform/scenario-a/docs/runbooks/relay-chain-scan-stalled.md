@@ -35,7 +35,41 @@ The watermark is the relay's block cursor. If it does not move while the chain
 produces blocks, the relay is not scanning.
 
 ```bash
-# on the relay host
+curl -s http://<relay-host>:4000/api/v1/health | python3 -m json.tool
+```
+
+```json
+{
+  "status": "ok",
+  "scan": [
+    { "spokeId": "spoke-costa-rica", "watermark": 76018, "head": 81244,
+      "blocksBehind": 5226, "secondsSinceAdvance": 259200 }
+  ]
+}
+```
+
+**`secondsSinceAdvance` is the field to read**, not `blocksBehind`. A relay thousands of
+blocks behind and advancing is catching up after downtime and needs nothing. One a few
+blocks behind that has not moved in an hour is this outage. `status: "ok"` means the
+process is alive and says nothing about the scan — through the LNET incident it answered
+ok for three days.
+
+A `watermark` of `null` means that spoke has never been scanned, which is not the same as
+zero.
+
+The relay also reports its own stall, once, when the scan has stood still for ten minutes
+while the chain moved on:
+
+```
+[spoke-x] chain scan has not advanced for 259200s while the chain moved on: watermark
+76018, head 81244 (5226 blocks behind). Nothing on this spoke is being observed, so no
+lock or claim reaches the journal and no PvP here can pair.
+```
+
+<details>
+<summary>On a relay too old to serve <code>scan</code> in its health response</summary>
+
+```bash
 CACTI=$(docker ps --format '{{.Names}}' | grep -i cacti | grep -v liquidity | head -1)
 VOL=$(docker inspect "$CACTI" \
   --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')
@@ -48,6 +82,7 @@ done
 ```
 
 Two identical readings on a live chain means stalled.
+</details>
 
 ## Which stall is it
 

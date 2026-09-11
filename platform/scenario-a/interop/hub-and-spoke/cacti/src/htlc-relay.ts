@@ -242,6 +242,29 @@ const MAX_EVENTS = 10_000;
  */
 const MAX_BLOCK_RANGE = 5_000;
 
+/** One spoke's chain-scan liveness, as served by GET /api/v1/health. */
+export interface ScanLiveness {
+  spokeId: string;
+  /** Last block the scan has processed; null when this spoke has never been scanned. */
+  watermark: number | null;
+  /** Last block seen on the chain; null before the first successful poll. */
+  head: number | null;
+  blocksBehind: number | null;
+  /** Seconds since the watermark last moved; null before the first advance. */
+  secondsSinceAdvance: number | null;
+}
+
+/**
+ * How long a spoke's chain scan may stand still, while the chain is producing blocks, before
+ * the relay says so at error level.
+ *
+ * Time, not block distance: a relay 5,000 blocks behind and advancing is catching up, which is
+ * normal after downtime, while one three blocks behind and frozen is the outage. Ten minutes is
+ * far longer than any legitimate pause at the 3s default poll interval, and short enough that
+ * an operator hears about it the same morning rather than three days later.
+ */
+const SCAN_STALL_ERROR_AFTER_MS = 10 * 60 * 1000;
+
 export class HtlcRelay {
   private readonly fxProposalEvents: FXProposalEvent[] = [];
   private readonly fxAcceptanceEvents: FXAcceptanceEvent[] = [];
@@ -265,6 +288,16 @@ export class HtlcRelay {
   /** The lifecycle signal, captured in start() and reused by runtime addSpoke() calls. */
   private signal?: AbortSignal;
 
+  // Chain-scan liveness, per spoke. The watermark is the one number that told the truth during
+  // the LNET outage — the relay logged busily for three days while this stood still — and it
+  // was reachable only by reading a JSON file out of a Docker volume, twice, thirty seconds
+  // apart. Kept here so it can be served, and so the relay can notice its own stall.
+  private readonly chainHeads = new Map<string, number>();
+  private readonly watermarkAdvancedAt = new Map<string, number>();
+  // Spokes already reported as stalled. The condition persists until the scan moves, and an
+  // error repeated every poll interval is an error nobody reads.
+  private readonly stallReported = new Set<string>();
+
   constructor(
     private readonly spokes: SpokeDep[],
     private readonly protoPath: string,
@@ -280,6 +313,34 @@ export class HtlcRelay {
   ) {}
 
   // ── Public accessors (used by REST API) ────────────────────────────────
+
+  /**
+   * Chain-scan liveness per spoke: where the scan is, where the chain is, and how long since
+   * the scan last moved.
+   *
+   * `blocksBehind` alone does not separate the two states that matter. A relay 5,000 blocks
+   * behind and advancing is catching up; one three blocks behind and frozen for an hour is the
+   * outage that presented as "PvP stopped working". `secondsSinceAdvance` is what tells them
+   * apart, and it is the field to alert on.
+   *
+   * A spoke that has never scanned reports a null watermark rather than 0 — unknown is not
+   * zero, and zero reads as healthy.
+   */
+  getScanLiveness(): ScanLiveness[] {
+    const now = Date.now();
+    return this.spokes.map((spoke) => {
+      const watermark = this.relayStore.getWatermark(spoke.id);
+      const head = this.chainHeads.get(spoke.id);
+      const advancedAt = this.watermarkAdvancedAt.get(spoke.id);
+      return {
+        spokeId: spoke.id,
+        watermark: watermark ?? null,
+        head: head ?? null,
+        blocksBehind: watermark !== undefined && head !== undefined ? Math.max(0, head - watermark) : null,
+        secondsSinceAdvance: advancedAt === undefined ? null : Math.floor((now - advancedAt) / 1000),
+      };
+    });
+  }
 
   // Lock/settle events are served from the durable seq journal, not the in-memory ring: the
   // caller (Go poller) passes the last seq it processed and receives events with a greater seq.
@@ -434,6 +495,8 @@ export class HtlcRelay {
         const latestBlock = typeof latestResp.block === "object" && latestResp.block !== null
           ? Number((latestResp.block as Record<string, unknown>)["number"] ?? 0)
           : 0;
+        this.chainHeads.set(spoke.id, latestBlock);
+        this.reportScanStallIfAny(spoke.id, latestBlock);
         if (latestBlock < fromBlock) {
           // Head is behind our resume point: either the chain has not produced new blocks yet, or
           // (after a reset the genesis guard did not catch) the watermark is ahead of the chain.
@@ -555,7 +618,14 @@ export class HtlcRelay {
         // hold was on the BLOCK, so it froze every unrelated event after it, locks included,
         // and starved the journal that was doing the real work (finding R2-H-11 still holds —
         // the watermark means delivered; delivered simply no longer involves a network call).
+        const previousWatermark = this.relayStore.getWatermark(spoke.id);
         await this.relayStore.setWatermark(spoke.id, toBlock);
+        if (previousWatermark === undefined || toBlock > previousWatermark) {
+          this.watermarkAdvancedAt.set(spoke.id, Date.now());
+          if (this.stallReported.delete(spoke.id)) {
+            this.log.info(`[${spoke.id}] chain scan is advancing again (watermark ${toBlock})`);
+          }
+        }
         fromBlock = toBlock + 1;
         failures = 0;
       } catch (err) {
@@ -588,6 +658,32 @@ export class HtlcRelay {
    * from the new genesis instead of stalling with head permanently below watermark (R2-H-11).
    * Returns the block to resume from (unchanged unless a reset was detected).
    */
+  /**
+   * Say, once, when this spoke's scan has stopped while its chain has not.
+   *
+   * This is the sentence that was missing for three days on LNET. The relay was logging
+   * continuously and answering its health probe the whole time; what it had stopped doing was
+   * advancing, and nothing said so. Reported once per stall — repeating it every poll interval
+   * would bury it in the same noise that hid the original.
+   */
+  private reportScanStallIfAny(spokeId: string, head: number): void {
+    if (this.stallReported.has(spokeId)) return;
+    const advancedAt = this.watermarkAdvancedAt.get(spokeId);
+    if (advancedAt === undefined) return; // never scanned yet — not a stall
+    const stillMs = Date.now() - advancedAt;
+    if (stillMs < SCAN_STALL_ERROR_AFTER_MS) return;
+    const watermark = this.relayStore.getWatermark(spokeId);
+    if (watermark === undefined || head <= watermark) return; // nothing new to scan
+
+    this.stallReported.add(spokeId);
+    this.log.error(
+      `[${spokeId}] chain scan has not advanced for ${Math.floor(stillMs / 1000)}s while the ` +
+      `chain moved on: watermark ${watermark}, head ${head} (${head - watermark} blocks behind). ` +
+      `Nothing on this spoke is being observed, so no lock or claim reaches the journal and no ` +
+      `PvP here can pair. See docs/runbooks/relay-chain-scan-stalled.md`,
+    );
+  }
+
   private async reconcileSpokeChain(
     connector: PluginLedgerConnectorBesu,
     spoke: SpokeDep,

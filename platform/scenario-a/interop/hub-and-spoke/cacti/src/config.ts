@@ -19,7 +19,14 @@ export interface SpokeConfig {
   htlcAddress: string;
   /** Internal api-gateway URL for polling FX agreements (e.g. "http://host:18080"). */
   internalApiUrl: string;
-  /** gRPC target for this spoke's payment-orchestrator (e.g. "host:19094"). Each spoke stores its own endpoint; the relay routes by dest_spoke_id. */
+  /**
+   * gRPC target for this spoke's payment-orchestrator — the founding central bank's (e.g.
+   * "host:19094"). Used to forward FX AGREEMENT actions, which are spoke-level objects in a
+   * shared Pente group, so reaching the CB reaches the spoke.
+   *
+   * Not a settlement path. An HTLC leg is settled by its owner, via transferLocked on the
+   * owner's own Paladin node; the relay journals the claim and the owner acts on it.
+   */
   grpcEndpoint: string;
 }
 

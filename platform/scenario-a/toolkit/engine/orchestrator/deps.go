@@ -251,8 +251,19 @@ type SpokeInfo struct {
 	GRPCEndpoint string `json:"grpc_endpoint"`
 	// InternalApiURL is the spoke coordinator's (central bank) api-gateway base URL. The relay
 	// polls {InternalApiURL}/internal/v1/payments/fx/agreements for the CB's aggregate of its
-	// banks' on-chain FX agreements. GRPCEndpoint is the CB payment-orchestrator (for the
-	// on_behalf mirror of the destination leg).
+	// banks' on-chain FX agreements.
+	//
+	// GRPCEndpoint is the CB payment-orchestrator, and it forwards FX AGREEMENT actions only —
+	// propose/accept/reject/cancel/settle. That works because an FX agreement is a spoke-level
+	// object in a shared Pente group: the CB receives it and every bank in the spoke sees it.
+	//
+	// It is NOT how an HTLC leg is settled, and must not be used for one. A leg is settled by
+	// transferLocked on its owner's own Paladin node, over locked Zeto states local to that
+	// node, so no other entity can perform it — and this endpoint could not reach the owner
+	// anyway, since a commercial bank's join registers nothing and an inter-bank leg lives on a
+	// commercial bank's orchestrator. The relay used to push SettleHTLC here; it answered
+	// NOT_FOUND 167,360 times on LNET and froze two spokes' chain scans for three days. The
+	// claim now goes to the durable journal and each entity settles its own leg from it.
 	InternalApiURL string `json:"internal_api_url"`
 }
 
