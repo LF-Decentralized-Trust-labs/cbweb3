@@ -135,3 +135,39 @@ func TestProxyUpstreamsAreEntityUnique(t *testing.T) {
 	// to be distinct from every entity's too.
 	record("hub", HubConfig{NetPrefix: "hub"}.ProxyRoutes())
 }
+
+// The observe stack is the fourth route set, added after PR #226 migrated the other three off
+// container names. Its own budget is looser — the NOC prefix carries no entity role — but "looser"
+// is not "checked", and being unchecked is how the CB path ended up 68 octets long.
+func TestObserveProxyUpstreamsFitDNSLabel(t *testing.T) {
+	// Built the way engine/apply builds it: the container prefix carries "sc-b-cbweb3-" and the
+	// network prefix does not (apply.go:125-126). That 12-octet difference is what the alias
+	// saves, and a test that set both to the same string would prove nothing.
+	for _, prefix := range []string{
+		"noc-brazil",
+		"noc-dominican-republic",
+		"noc-saint-vincent-and-the-grenadines",
+	} {
+		noc := ObserveConfig{ContainerPrefix: "sc-b-cbweb3-" + prefix, NetPrefix: prefix, ProxyEnabled: true}
+		assertUpstreamsResolvable(t, "observe/"+prefix, noc.ProxyRoutes())
+	}
+}
+
+// The upstreams must be the network ALIASES the template declares, not the container names.
+// A container name here repeats the prefix and grows with it; that is the defect PR #226 fixed
+// three times over and left standing here.
+func TestObserveProxyUpstreamsAreAliasesNotContainerNames(t *testing.T) {
+	const prefix = "noc-brazil"
+	const containerPrefix = "sc-b-cbweb3-" + prefix
+	noc := ObserveConfig{ContainerPrefix: containerPrefix, NetPrefix: prefix, ProxyEnabled: true}
+
+	for _, r := range noc.ProxyRoutes() {
+		host, _, _ := strings.Cut(r.Upstream, ":")
+		for _, containerName := range []string{containerPrefix + "-noc-portal", containerPrefix + "-noc-backend"} {
+			if host == containerName {
+				t.Errorf("segment %q dials the container name %q; use the network alias the "+
+					"template declares, so the name does not grow with the prefix", r.Segment, host)
+			}
+		}
+	}
+}

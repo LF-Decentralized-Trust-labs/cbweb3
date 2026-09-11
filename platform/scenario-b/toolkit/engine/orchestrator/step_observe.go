@@ -121,6 +121,28 @@ func (c *ObserveConfig) WithDefaults() {
 }
 
 // ComposeEnv is the process env the noc-stack template resolves its ${...} from.
+// ProxyRoutes is the observe stack's route set, alongside SpokeConfig's, JoinConfig's and
+// HubConfig's. A method rather than a literal at the call site so a guard can evaluate it for a
+// prefix nobody has deployed — the bound has to hold for the next NOC, not the two that exist.
+//
+// The upstreams are network ALIASES, not container names. A DNS label stops at 63 octets
+// (RFC 1035); a container name repeats the prefix and grows with it, which is what took the
+// Costa Rica portals down. PR #226 moved the CB, bank and hub route sets off container names and
+// left this one behind — the observe stack has its own template and its own network, so nothing
+// about that fix reached it.
+func (c ObserveConfig) ProxyRoutes() []ProxyRoute {
+	return []ProxyRoute{
+		{Segment: nocProxyPortalSegment, Upstream: c.nocPortalAlias() + ":80"},
+		{Segment: nocProxyAPISegment, Upstream: c.nocBackendAlias() + ":8080"},
+	}
+}
+
+// The aliases noc-stack.compose.yaml declares. TestComposeAliasesMatchProxyRoutes holds the two
+// halves together: change one without the other and the route renders, the apply succeeds, and
+// the portal answers 502.
+func (c ObserveConfig) nocPortalAlias() string  { return c.NetPrefix + "-noc-portal" }
+func (c ObserveConfig) nocBackendAlias() string { return c.NetPrefix + "-noc-backend" }
+
 func (c ObserveConfig) ComposeEnv() []string {
 	vars := map[string]string{
 		"CONTAINER_PREFIX":  c.ContainerPrefix,
@@ -347,10 +369,7 @@ func nocProxyStep(c ObserveConfig) Step {
 		SiteHost: c.FrontendHost,
 		Fragment: nocProxyFragment,
 		Networks: []string{c.nocNetName()},
-		Routes: []ProxyRoute{
-			{Segment: nocProxyPortalSegment, Upstream: c.ContainerPrefix + "-noc-portal:80"},
-			{Segment: nocProxyAPISegment, Upstream: c.ContainerPrefix + "-noc-backend:8080"},
-		},
+		Routes:   c.ProxyRoutes(),
 	})
 	step.Name = "start-noc-proxy"
 	step.Deps = []string{"start-noc-stack"}

@@ -133,6 +133,13 @@ func (g *guardRunner) Run(_ context.Context, _ string, args ...string) ([]byte, 
 	return nil, nil
 }
 
+// RunWithEnv satisfies exec.CommandRunner. This double does not exercise the environment path —
+// only the Keycloak operator-password steps use it — so the environment is dropped rather than
+// recorded. A double that starts asserting on secrets must record it instead.
+func (g *guardRunner) RunWithEnv(ctx context.Context, _ []string, name string, args ...string) ([]byte, error) {
+	return g.Run(ctx, name, args...)
+}
+
 func TestEnsureIdentityDirUnchanged_RefusesWhenDockerCannotBeAsked(t *testing.T) {
 	err := ensureIdentityDirUnchanged(context.Background(),
 		&guardRunner{failPS: true}, "sc-b-bank-itau", "bank-itau", "/repo/data/bank-itau/pki")

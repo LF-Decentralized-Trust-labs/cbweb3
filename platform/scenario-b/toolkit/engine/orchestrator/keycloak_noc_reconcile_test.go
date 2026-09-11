@@ -33,6 +33,13 @@ func (r *reconcileRunner) Run(_ context.Context, name string, args ...string) ([
 	return nil, nil
 }
 
+// RunWithEnv satisfies exec.CommandRunner. This double does not exercise the environment path —
+// only the Keycloak operator-password steps use it — so the environment is dropped rather than
+// recorded. A double that starts asserting on secrets must record it instead.
+func (r *reconcileRunner) RunWithEnv(ctx context.Context, _ []string, name string, args ...string) ([]byte, error) {
+	return r.Run(ctx, name, args...)
+}
+
 func TestNOCOriginsAlreadyRegistered_TrueWhenAllPresent(t *testing.T) {
 	r := &reconcileRunner{readOut: "http://localhost:21145,http://localhost:3030\n"}
 	ok, err := nocOriginsAlreadyRegistered(context.Background(), r, "kc", keycloakAdminCLI, "cbweb3",

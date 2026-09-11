@@ -5,6 +5,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -77,6 +78,24 @@ func adminUsersReadScript(kc, realm string, users []KeycloakUserPlan) string {
 	return b.String()
 }
 
+// operatorPasswordVar is the environment variable one operator's password travels in.
+//
+// Indexed rather than derived from the username: a username is an email address, and @ and . are
+// not valid in a shell variable name. The index is the operator's position in the same slice the
+// script is generated from, so the name in the script and the value in the environment cannot
+// drift — one loop over one list produces both.
+func operatorPasswordVar(i int) string { return fmt.Sprintf("KC_OP_PW_%d", i) }
+
+// operatorPasswordEnv pairs each operator's variable with its value, as "NAME=value" for os/exec.
+// Only the NAMES reach docker's argv — dockerExecArgs derives them from these pairs.
+func operatorPasswordEnv(users []KeycloakUserPlan) []string {
+	env := make([]string, 0, len(users))
+	for i, u := range users {
+		env = append(env, operatorPasswordVar(i)+"="+u.Password)
+	}
+	return env
+}
+
 // adminUsersReconcileScript creates any missing realm role, user, password and grant. Every command
 // tolerates "already exists", so it is safe to run on a realm that is already correct.
 func adminUsersReconcileScript(kc, realm string, users []KeycloakUserPlan) string {
@@ -85,13 +104,25 @@ func adminUsersReconcileScript(kc, realm string, users []KeycloakUserPlan) strin
 	for _, r := range declaredRealmRoles(users) {
 		fmt.Fprintf(&b, "%[1]s create roles -r %[2]s -s name=%[3]s || true\n", kc, realm, r)
 	}
-	for _, u := range users {
+	for i, u := range users {
 		// emailVerified/firstName/lastName are required by Keycloak 26's declarative user profile
 		// for the password grant to work, exactly as the realm import sets them.
 		fmt.Fprintf(&b, "%[1]s create users -r %[2]s -s username=%[3]s -s enabled=true -s emailVerified=true -s email=%[3]s -s firstName=%[3]s -s lastName=Operator || true\n",
 			kc, realm, u.Username)
-		fmt.Fprintf(&b, "%[1]s set-password -r %[2]s --username %[3]s --new-password %[4]s || true\n",
-			kc, realm, u.Username, u.Password)
+		// The password is NOT written here. `--new-password <value>` puts it in the kcadm JVM's
+		// argv inside the container and, because this whole script is one argument to
+		// `docker exec … bash -c`, in the docker client's argv on the host too — `ps` shows both
+		// to any user on the machine. kcadm reads KC_CLI_PASSWORD when the flag is absent (its own
+		// `set-password --help` says so), and a per-command prefix puts the value in that one
+		// process's environment instead of anyone's argv.
+		//
+		// The value reaches the container through `docker exec -e <name>` (operatorPasswordEnv +
+		// dockerExecArgs), the pass-through form, which names the variable without its value.
+		//
+		// Same rule as Scenario B's keycloak_operator_password.go — a deliberate copy, since the
+		// two toolkits share no library; see docs/scenario-drift.md §14.
+		fmt.Fprintf(&b, "KC_CLI_PASSWORD=\"$%[4]s\" %[1]s set-password -r %[2]s --username %[3]s || true\n",
+			kc, realm, u.Username, operatorPasswordVar(i))
 		for _, r := range u.Roles {
 			fmt.Fprintf(&b, "%[1]s add-roles -r %[2]s --uusername %[3]s --rolename %[4]s || true\n",
 				kc, realm, u.Username, r)
@@ -183,9 +214,11 @@ type reconcileAdminUsersStep struct {
 	// kcAdminPass is deliberately still held after the scripts stopped carrying it: the exposure
 	// guard in keycloak_secret_exposure_test.go can only prove the secret is not embedded if the
 	// step actually has one to embed. Removing it would make that assertion vacuous.
-	kcAdminPass   string
-	realms        []KeycloakRealmPlan
-	dockerExecCmd func(ctx context.Context, container, script string) ([]byte, error)
+	kcAdminPass string
+	realms      []KeycloakRealmPlan
+	// dockerExecCmd runs script in container with env ("NAME=value" pairs) available to it. Only
+	// the NAMES reach docker's argv; see dockerExecArgs.
+	dockerExecCmd func(ctx context.Context, container, script string, env []string) ([]byte, error)
 }
 
 func newReconcileAdminUsersStep(name, entityPrefix, kcAdminPass string, realms []KeycloakRealmPlan) Step {
@@ -208,8 +241,9 @@ func (s *reconcileAdminUsersStep) Check(ctx context.Context) (bool, error) {
 		return true, nil
 	}
 	for realm, users := range byRealm {
+		// The read script sets no password, so it needs no operator secret in its environment.
 		out, err := s.dockerExecCmd(ctx, s.container(),
-			adminUsersReadScript(keycloakAdminCLI, realm, users))
+			adminUsersReadScript(keycloakAdminCLI, realm, users), nil)
 		if err != nil {
 			return false, nil
 		}
@@ -223,13 +257,39 @@ func (s *reconcileAdminUsersStep) Check(ctx context.Context) (bool, error) {
 func (s *reconcileAdminUsersStep) Run(ctx context.Context) error {
 	for realm, users := range usersFromRealmPlans(s.realms) {
 		if _, err := s.dockerExecCmd(ctx, s.container(),
-			adminUsersReconcileScript(keycloakAdminCLI, realm, users)); err != nil {
+			adminUsersReconcileScript(keycloakAdminCLI, realm, users),
+			operatorPasswordEnv(users)); err != nil {
 			return fmt.Errorf("reconcile admin users in realm %s: %w", realm, err)
 		}
 	}
 	return nil
 }
 
-func dockerExecScript(ctx context.Context, container, script string) ([]byte, error) {
-	return exec.CommandContext(ctx, "docker", "exec", container, "bash", "-c", script).CombinedOutput()
+func dockerExecScript(ctx context.Context, container, script string, env []string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "docker", dockerExecArgs(container, script, env)...)
+	// The values live here, in the child's environment, and nowhere else. os/exec passes an
+	// environment through a private channel, not through the argument vector `ps` prints.
+	cmd.Env = append(os.Environ(), env...)
+	return cmd.CombinedOutput()
+}
+
+// dockerExecArgs builds the docker argument vector for one exec.
+//
+// Split out from dockerExecScript so the argument vector can be asserted directly: it is the
+// artefact that ends up in `ps`, and a test that can only see the script would not notice a
+// secret that moved from the script into an argument.
+//
+// `-e NAME` is the pass-through form: docker copies the value from its own environment. The more
+// commonly shown `-e NAME=value` also works, and is exactly the mistake this guards against — it
+// moves the secret from the script into the docker client's argv, one step to the left.
+func dockerExecArgs(container, script string, env []string) []string {
+	args := []string{"exec"}
+	for _, pair := range env {
+		name, _, found := strings.Cut(pair, "=")
+		if !found || name == "" {
+			continue
+		}
+		args = append(args, "-e", name)
+	}
+	return append(args, container, "bash", "-c", script)
 }

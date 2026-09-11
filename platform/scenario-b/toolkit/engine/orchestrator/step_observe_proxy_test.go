@@ -122,10 +122,14 @@ func TestNocProxyStep_WritesFragmentAndAttachesNocNet(t *testing.T) {
 		t.Fatalf("noc fragment not written: %v", err)
 	}
 	fs := string(frag)
-	if !strings.Contains(fs, "handle_path /b/noc/* {\n\treverse_proxy sc-b-cbweb3-noc-brazil-noc-portal:80\n}") {
+	// The upstreams are the network ALIASES the noc-stack template declares, not the container
+	// names. They drop the "sc-b-cbweb3-" the container prefix carries, which is the 12 octets
+	// that keep the name inside a DNS label as the deployment name grows. The alias and the
+	// template are held together by TestComposeAliasesMatchProxyRoutes.
+	if !strings.Contains(fs, "handle_path /b/noc/* {\n\treverse_proxy noc-brazil-noc-portal:80\n}") {
 		t.Errorf("missing NOC portal route:\n%s", fs)
 	}
-	if !strings.Contains(fs, "handle_path /b/noc-api/* {\n\treverse_proxy sc-b-cbweb3-noc-brazil-noc-backend:8080\n}") {
+	if !strings.Contains(fs, "handle_path /b/noc-api/* {\n\treverse_proxy noc-brazil-noc-backend:8080\n}") {
 		t.Errorf("missing NOC backend route:\n%s", fs)
 	}
 	var connected bool

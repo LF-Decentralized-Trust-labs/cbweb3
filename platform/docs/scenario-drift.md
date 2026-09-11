@@ -520,18 +520,45 @@ que ninguém "conserte" a duplicação apagando um dos lados.
 
 ---
 
-## 14. Senha de operador em argv — lacuna comum, não deriva
+## 14. Senha de operador em argv — era lacuna comum, agora convergida por cópia
 
-Registrada aqui porque uma leitura da seção 13 sugere que o assunto está fechado, e não
-está: **os dois cenários** continuam passando a senha de cada operador em argv, via
-`set-password --new-password`.
+Registrada originalmente porque uma leitura da seção 13 sugeria que o assunto estava
+fechado, e não estava: **os dois cenários** passavam a senha de cada operador em argv, via
+`set-password --new-password`. Não era diferença entre cenários — era a mesma exposição nos
+dois, que é justamente o que uma comparação de paridade não acha por construção.
 
-- A: `toolkit/engine/orchestrator/keycloak_admin_users_reconcile.go`
-- B: `toolkit/engine/orchestrator/step_found_spoke.go`
+**Corrigida nos dois, e a regra é cópia deliberada**, pelo mesmo motivo da seção 13: os dois
+toolkits não partilham biblioteca.
 
-Não é diferença entre cenários, então não é deriva — é a mesma exposição nos dois, e a
-guarda de segredo em argv não a cobre em nenhum (ela verifica o segredo de administrador).
-Fica nomeada para não ser redescoberta como "assimetria".
+| | Scenario A | Scenario B |
+|---|---|---|
+| Helpers | `orchestrator/keycloak_admin_users_reconcile.go` | `orchestrator/keycloak_operator_password.go` |
+| Nomes | `operatorPasswordVar`, `operatorPasswordEnv`, `dockerExecArgs` | os mesmos três |
+| Guardas | `keycloak_secret_exposure_test.go` | `keycloak_secret_exposure_test.go` |
+| Como o valor chega ao exec | campo `dockerExecCmd(…, env)` do passo | `exec.CommandRunner.RunWithEnv` |
+
+A regra, idêntica nos dois: o script escreve `KC_CLI_PASSWORD="$KC_OP_PW_<n>"` como prefixo
+de comando e **não** passa `--new-password`; o valor viaja no ambiente do processo filho, e
+ao docker vai só o **nome**, via `docker exec -e NAME` (forma de passagem, não `-e NAME=valor`).
+
+Por que o prefixo resolve: um argumento é legível por qualquer utilizador através do `ps`;
+um ambiente não. E por que `-e NAME` e não `-e NAME=valor`: a segunda forma tira o segredo
+do script e põe-no no argv do próprio cliente docker — a mesma exposição um passo à esquerda.
+
+**Ainda divergente de propósito? Não.** Convergida. Fica registada para que ninguém "conserte"
+a duplicação apagando um dos lados.
+
+### Uma diferença de implementação que não é deriva de comportamento
+
+Em A o passo já injetava o exec por um campo de função, então bastou dar-lhe um parâmetro de
+ambiente. Em B o exec passa por `exec.CommandRunner`, cuja interface só tinha `Run`; ganhou
+`RunWithEnv` nas três implementações (real, fake, dry). Método na interface em vez de
+interface opcional com type assertion: um runner que se esquecesse de implementá-la seguiria
+em silêncio pelo caminho do argv, que é o defeito a chegar sem avisar.
+
+Efeito colateral bem-vindo em B: `realRunner` compõe o erro com `strings.Join(args, " ")`, ou
+seja, um `docker exec` falhado imprimia o script inteiro — com as senhas dentro. Agora os
+argumentos levam só nomes.
 
 ---
 

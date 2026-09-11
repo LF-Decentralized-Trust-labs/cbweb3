@@ -33,13 +33,20 @@ PY
 # case <label> <module-dir> <test-regex> <package> <file> <old> <new>
 run_case() {
   local label="$1" mod="$2" re="$3" pkg="$4" file="$5" old="$6" new="$7"
+  # Snapshot the file as it is NOW, not as HEAD has it. `git checkout -- <file>` was the obvious
+  # restore and it is wrong: it discards uncommitted work in the file being mutated. It silently
+  # destroyed a half-finished fix twice before this was written — once in a frontend store, once
+  # in the very file whose guard was being verified.
+  local snapshot; snapshot=$(mktemp)
+  cp "$file" "$snapshot"
+  restore() { cp "$snapshot" "$file"; rm -f "$snapshot"; }
   if ! apply "$file" "$old" "$new"; then
     REPORT+=("HARNESS  | $label | o padrão da mutação não casou — caso abortado")
-    fail=$((fail+1)); return
+    restore; fail=$((fail+1)); return
   fi
   local out rc
   out=$( (cd "$mod" && go test -count=1 "$pkg" -run "$re") 2>&1 ); rc=$?
-  git checkout -- "$file" 2>/dev/null || rm -f "$file"
+  restore
   if grep -qE "build failed|cannot use|undefined:|too many arguments" <<<"$out"; then
     REPORT+=("INCONCL. | $label | a mutação não compila — não é detecção")
     fail=$((fail+1)); return
@@ -163,6 +170,7 @@ run_case "A  upstream do proxy longo demais" "$A" \
 
 # ------------------------------------------------ 14. recusas codificadas (B, vitest)
 TRUST=scenario-b/frontend/apps/bank/src/services/api/trust-errors.ts
+SNAP_TRUST=$(mktemp); cp "$TRUST" "$SNAP_TRUST"
 if apply "$TRUST" 'const trustRejectionCodes: ReadonlySet<string> = new Set([
   RELAY_SIGNATURE_INVALID,
   RELAY_SIGNATURE_REQUIRED,' 'const trustRejectionCodes: ReadonlySet<string> = new Set([
@@ -171,12 +179,45 @@ if apply "$TRUST" 'const trustRejectionCodes: ReadonlySet<string> = new Set([
 const unusedCodes = new Set([
   RELAY_SIGNATURE_REQUIRED,'; then
   out=$( (cd scenario-b/frontend/apps/bank && npx vitest run src/services/api/__tests__/trust-errors.test.ts) 2>&1 ); rc=$?
-  git checkout -- "$TRUST"
+  cp "$SNAP_TRUST" "$TRUST"; rm -f "$SNAP_TRUST"
   if [ $rc -ne 0 ]; then REPORT+=("DETECTOU | B  recusas codificadas reduzidas a um código | exit=$rc"); pass=$((pass+1))
   else REPORT+=("PASSOU   | B  recusas codificadas reduzidas a um código | exit=0 — A GUARDA NÃO GUARDA"); fail=$((fail+1)); fi
 else
   REPORT+=("HARNESS  | B  recusas codificadas | o padrão da mutação não casou"); fail=$((fail+1))
 fi
+
+# --------------------------------- 17-19. senha de OPERADOR fora do argv (A e B)
+# A irmã do segredo de administrador, e a lacuna que estava nos DOIS cenários — o que uma
+# comparação de paridade não acha por construção. Ver docs/scenario-drift.md §14.
+
+run_case "A  volta o --new-password no set-password" "$A" \
+  "TestKeycloakReconcile_" "./engine/orchestrator/..." \
+  scenario-a/toolkit/engine/orchestrator/keycloak_admin_users_reconcile.go \
+  'fmt.Fprintf(&b, "KC_CLI_PASSWORD=\"$%[4]s\" %[1]s set-password -r %[2]s --username %[3]s || true\n",
+			kc, realm, u.Username, operatorPasswordVar(i))' \
+  '_ = i
+		fmt.Fprintf(&b, "%[1]s set-password -r %[2]s --username %[3]s --new-password %[4]s || true\n",
+			kc, realm, u.Username, u.Password)'
+
+run_case "B  volta o --new-password no set-password" "$B" \
+  "OperatorPassword" "./engine/orchestrator/..." \
+  scenario-b/toolkit/engine/orchestrator/step_found_spoke.go \
+  'fmt.Fprintf(b, "(KC_CLI_PASSWORD=\"$%[4]s\" %[1]s set-password -r %[2]s --username %[3]s || kcw '"'"'set operator password'"'"')",
+			kc, realm, u.Username, operatorPasswordVar(i))' \
+  '_ = i
+		fmt.Fprintf(b, "(%[1]s set-password -r %[2]s --username %[3]s --new-password %[4]s || kcw '"'"'set operator password'"'"')",
+			kc, realm, u.Username, u.Password)'
+
+# A senha sai do script mas entra no argv do docker: a forma `-e NOME=valor`, que é a que quase
+# todo exemplo mostra. É a mesma exposição um passo à esquerda, e é o caso que um teste que só
+# lê o script não veria.
+for pair in "A|$A|scenario-a/toolkit/engine/orchestrator/keycloak_admin_users_reconcile.go" \
+            "B|$B|scenario-b/toolkit/engine/orchestrator/keycloak_operator_password.go"; do
+  IFS='|' read -r sc mod file <<<"$pair"
+  run_case "$sc  docker recebe -e NOME=valor em vez de -e NOME" "$mod" \
+    "TestDockerExecArgs" "./engine/orchestrator/..." "$file" \
+    'args = append(args, "-e", name)' 'args = append(args, "-e", pair)'
+done
 
 # ------------------------------------- 15-16. segredo em argv, asserção de VALOR
 # Os casos 7-8 acima exercitam só a asserção de FORMA: escrevem o texto literal
@@ -185,9 +226,10 @@ fi
 # que é o que a asserção de valor existe para pegar.
 
 KCB=scenario-b/toolkit/engine/orchestrator/keycloak_provision.go
+SNAP_KCB=$(mktemp); cp "$KCB" "$SNAP_KCB"
 if python3 "$HARNESS_DIR/mut_b_value.py" "$KCB"; then
   out=$( (cd "$B" && go test -count=1 ./engine/orchestrator/... -run "TestKeycloakProvisioning_NeverEmbedsTheAdminSecret") 2>&1 ); rc=$?
-  git checkout -- "$KCB"
+  cp "$SNAP_KCB" "$KCB"; rm -f "$SNAP_KCB"
   if grep -q "build failed" <<<"$out"; then REPORT+=("INCONCL. | B  segredo em argv, VALOR | a mutação não compila"); fail=$((fail+1))
   elif [ $rc -ne 0 ]; then REPORT+=("DETECTOU | B  segredo em argv, asserção de VALOR | exit=$rc"); pass=$((pass+1))
   else REPORT+=("PASSOU   | B  segredo em argv, asserção de VALOR | exit=0 — A GUARDA NÃO GUARDA"); fail=$((fail+1)); fi
@@ -197,9 +239,11 @@ fi
 
 KCA=scenario-a/toolkit/engine/orchestrator/keycloak_admin_users_reconcile.go
 RTA=scenario-a/toolkit/engine/orchestrator/keycloak_admin_users_reconcile_test.go
+SNAP_KCA=$(mktemp); cp "$KCA" "$SNAP_KCA"
+SNAP_RTA=$(mktemp); cp "$RTA" "$SNAP_RTA"
 if python3 "$HARNESS_DIR/mut_a_value.py" "$KCA" "$RTA"; then
   out=$( (cd "$A" && go test -count=1 ./engine/orchestrator/... -run "TestKeycloakReconcile_NeverEmbedsTheAdminSecret") 2>&1 ); rc=$?
-  git checkout -- "$KCA" "$RTA"
+  cp "$SNAP_KCA" "$KCA"; cp "$SNAP_RTA" "$RTA"; rm -f "$SNAP_KCA" "$SNAP_RTA"
   if grep -q "build failed" <<<"$out"; then REPORT+=("INCONCL. | A  segredo em argv, VALOR | a mutação não compila"); fail=$((fail+1))
   elif [ $rc -ne 0 ]; then REPORT+=("DETECTOU | A  segredo em argv, asserção de VALOR | exit=$rc"); pass=$((pass+1))
   else REPORT+=("PASSOU   | A  segredo em argv, asserção de VALOR | exit=0 — A GUARDA NÃO GUARDA"); fail=$((fail+1)); fi

@@ -459,7 +459,11 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	users := c.reconcilableAdminUsers()
 	appendKeycloakUsers(&b, kc, spokeKeycloakRealm, users)
 	appendKeycloakAssertions(&b, kc, spokeKeycloakRealm, spokeKeycloakClient, users)
-	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", b.String())
+	// RunWithEnv, not Run: the operator passwords travel in the child's environment, and only
+	// their variable NAMES appear in the docker arguments.
+	env := operatorPasswordEnv(users)
+	_, err := c.Runner.RunWithEnv(ctx, env,
+		"docker", dockerExecArgs(c.keycloakContainer(), b.String(), env)...)
 	return err
 }
 
@@ -561,11 +565,24 @@ func appendKeycloakUsers(b *strings.Builder, kc, realm string, users []AdminUser
 			}
 		}
 	}
-	for _, u := range users {
+	for i, u := range users {
 		fmt.Fprintf(b, "(%[1]s create users -r %[2]s -s username=%[3]s -s enabled=true "+
 			"-s emailVerified=true -s email=%[3]s -s firstName=%[4]s -s lastName=Operator || kcw 'create operator user') && ",
 			kc, realm, u.Username, strings.ToLower(u.Role))
-		fmt.Fprintf(b, "(%[1]s set-password -r %[2]s --username %[3]s --new-password %[4]s || kcw 'set operator password')", kc, realm, u.Username, u.Password)
+		// The password is NOT written here. `--new-password <value>` puts it in the kcadm JVM's
+		// argv inside the container and, because this whole script is one argument to
+		// `docker exec … bash -c`, in the docker client's argv on the host too — `ps` shows both
+		// to any user. kcadm reads KC_CLI_PASSWORD when the flag is absent (its own
+		// `set-password --help` says so), and a per-command prefix puts the value in that one
+		// process's environment rather than in anyone's argv.
+		//
+		// The value reaches the container through `docker exec -e <name>` (operatorPasswordEnv +
+		// dockerExecArgs), the pass-through form, which names the variable without its value.
+		//
+		// Same rule as Scenario A's keycloak_admin_users_reconcile.go — a deliberate copy, since
+		// the two toolkits share no library; see docs/scenario-drift.md.
+		fmt.Fprintf(b, "(KC_CLI_PASSWORD=\"$%[4]s\" %[1]s set-password -r %[2]s --username %[3]s || kcw 'set operator password')",
+			kc, realm, u.Username, operatorPasswordVar(i))
 		for _, r := range realmRolesForAdminRole(u.Role) {
 			fmt.Fprintf(b, " && (%[1]s add-roles -r %[2]s --uusername %[3]s --rolename %[4]s || kcw 'grant role to operator')", kc, realm, u.Username, r)
 		}
