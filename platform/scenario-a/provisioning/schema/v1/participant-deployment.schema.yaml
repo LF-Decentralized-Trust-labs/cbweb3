@@ -132,6 +132,12 @@ definitions:
         minLength: 1
         description: "'self-signed' for local development (CB generates its own CA and signs CSRs). 'ca://<endpoint>' for CA-signed certificates in staging/prod."
 
+      # Contextually required when mode is "found": the founding central bank's endpoint is
+      # copied into the join bundle, and every bank that joins the spoke points its
+      # payment-orchestrator at it. That subscription is what settles a bank's destination leg
+      # — the relay cannot do it, since an HTLC leg is settled by transferLocked on its owner's
+      # own Paladin node. Enforced in Go (manifest.Validate); schema-level conditional
+      # enforcement is deferred, as for joinBundleRef.
       relay:
         $ref: "#/definitions/Relay"
 

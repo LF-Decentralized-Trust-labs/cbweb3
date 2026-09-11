@@ -165,6 +165,24 @@ func Validate(m *Manifest) error {
 			))
 		}
 
+		// spec.relay.endpoint — required when mode is "found". The founding central bank's
+		// endpoint is copied into the join bundle, and every bank that joins the spoke points
+		// its payment-orchestrator at it (CACTI_API_URL). That subscription is what delivers a
+		// counterpart lock and a revealed secret to the entity that actually holds the leg — the
+		// relay cannot call it, because an HTLC leg is settled by transferLocked on its owner's
+		// own Paladin node. Omitting this produced a bundle with no relay section and a bank
+		// that fell back to http://host.docker.internal:4000: non-empty, so no startup check
+		// fired, and on a separate host simply nothing to talk to. The bank then never learns of
+		// a lock or a settlement, and says nothing about it.
+		if m.Spec.Mode == "found" && (m.Spec.Relay == nil || m.Spec.Relay.Endpoint == "") {
+			errs = append(errs, errors.New(
+				"spec.relay.endpoint: required field is missing for mode:found; "+
+					"set it to the relay this spoke registers with and that its banks poll "+
+					"(e.g. http://localhost:4000 co-located, or http://<relay-host>:4000). "+
+					"A joining bank inherits it from the emitted bundle",
+			))
+		}
+
 		// spec.image
 		if m.Spec.Image == "" {
 			errs = append(errs, errors.New("spec.image: required field is missing"))

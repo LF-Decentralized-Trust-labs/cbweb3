@@ -94,6 +94,7 @@ var CanonicalStepOrder = []string{
 // Canonical step name constants for mode:join. Kept in a namespace distinct from
 // mode:found so both modes can share a SPOKE_DATA_DIR state file without collision.
 const (
+	StepCheckRelay      = "check-relay"
 	StepWriteGenesis    = "write-genesis"
 	StepStartBesuJoin   = "start-besu-join"
 	StepWaitSync        = "wait-sync"
@@ -142,6 +143,7 @@ const (
 //     bilateral FXAgreement.
 //   - proof-of-possession / receive-cert: governance-gated identity (see above).
 var CanonicalJoinStepOrder = []string{
+	StepCheckRelay,
 	StepWriteGenesis,
 	StepStartBesuJoin,
 	StepWaitSync,

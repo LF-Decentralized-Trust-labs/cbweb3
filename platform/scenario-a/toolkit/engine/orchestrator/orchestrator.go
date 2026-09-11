@@ -582,6 +582,23 @@ func runJoinWithSteps(ctx context.Context, m *manifest.Manifest, b *bundle.JoinB
 	if deps.BankCode == "" {
 		return outcome, fmt.Errorf("orchestrator: deps.BankCode is required for mode:join")
 	}
+	// A bank settles its own HTLC leg — transferLocked runs on its Paladin node, so no one can
+	// do it for it — and it learns that a leg needs settling from the relay's journal, which it
+	// polls at CACTI_API_URL. Without an endpoint that URL falls back to the co-located
+	// http://host.docker.internal:4000: non-empty, so the orchestrator's own startup check
+	// passes, and on a separate host it points at nothing. The bank would join clean and then
+	// never see a counterpart lock or a revealed secret, with nothing anywhere saying why.
+	// Refuse while an operator is still watching.
+	if bundleRelayEndpoint(m, b) == "" {
+		return outcome, fmt.Errorf(
+			"orchestrator: no relay endpoint for mode:join — the bundle for spoke %q carries none "+
+				"and this manifest sets no spec.relay.endpoint override. The bank polls the relay's "+
+				"settle journal to settle its own legs; without it it joins but never settles. "+
+				"Re-emit the bundle from a founding manifest that declares spec.relay.endpoint, or "+
+				"set the override here",
+			m.Spec.Spoke.ID,
+		)
+	}
 	spokeID := m.Spec.Spoke.ID
 	dataDir := m.Spec.Node.DataDir
 	deps.Timeouts = deps.Timeouts.resolved()
@@ -703,6 +720,11 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 	}
 
 	steps := []Step{
+		// First, and deliberately: a bank that cannot reach the relay settles nothing, and
+		// finding that out here costs seconds instead of a full Besu + Paladin + backend
+		// bring-up followed by silence. See checkRelayStep for why this is the settlement path
+		// and not a nicety.
+		newCheckRelayStep(bundleRelayEndpoint(m, b), deps.Timeouts.WaitSync, deps.Timeouts.WaitSyncInterval, w),
 		newWriteGenesisStep(spokeID, deps.BankCode, b.Spec.Genesis.Content, b.Spec.Genesis.Hash),
 		newStartBesuJoinStep(spokeID, deps.BankCode, dataDir, deps.ComposeTemplatePath, deps.BesuRPCURL,
 			ep.bootnodeEnode, m.Spec.Node.AdvertisedHost, besuImage, rpcPort, wsPort, p2pPort),
