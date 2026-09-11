@@ -60,6 +60,17 @@ export const config = {
 
   /** JSON file path used to persist relay dedup/retry state across restarts. */
   relayStorePath: optionalEnv("RELAY_STORE_PATH", "/tmp/cacti-relay-store.json"),
+  /**
+   * Entries retained per journal kind before the oldest are dropped.
+   *
+   * A retention policy, so it belongs in configuration: a network with heavier traffic, or one
+   * whose entities can be down longer, needs more headroom, and until now changing it meant
+   * editing a constant and rebuilding. Dropping an entry a consumer has not read loses a
+   * settlement — the destination leg's owner is the only party that can settle it, and this
+   * journal is how it finds out — so the relay records what it dropped and the consumer reports
+   * it (X-Relay-Journal-Trimmed-Through). Raise this rather than rely on that report.
+   */
+  journalMaxEntries: parseInt(optionalEnv("JOURNAL_MAX_ENTRIES", "10000"), 10),
 
   /** JSON file path used to persist the dynamic spoke registry (RL-1) across restarts. */
   spokeRegistryPath: optionalEnv("CACTI_SPOKES_REGISTRY", "/data/cacti-spoke-registry.json"),

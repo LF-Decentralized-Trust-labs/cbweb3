@@ -100,7 +100,7 @@ async function main(): Promise<void> {
 
   // ── Relay store + dynamic spoke registry ─────────────────────────────────
   const abortController = new AbortController();
-  const relayStore = new RelayStore(config.relayStorePath);
+  const relayStore = new RelayStore(config.relayStorePath, console, config.journalMaxEntries);
   await relayStore.init();
 
   // The registry is the single source of watched spokes. A founding central bank self-registers

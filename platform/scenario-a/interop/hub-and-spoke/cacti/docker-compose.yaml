@@ -38,6 +38,11 @@ services:
       INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:-cbweb3-relay-shared-secret}"
       # Poll interval in milliseconds
       POLL_INTERVAL_MS: "${POLL_INTERVAL_MS:-3000}"
+      # Entries retained per journal kind. Dropping one a consumer has not read loses a
+      # settlement that only the destination leg's owner can make, so this is headroom for how
+      # long an entity may be down. Raise it for heavier traffic rather than rely on the
+      # trimmed-through report to catch the loss after the fact.
+      JOURNAL_MAX_ENTRIES: "${JOURNAL_MAX_ENTRIES:-10000}"
       # Persistent store path — backed by a named volume so state survives container restarts
       RELAY_STORE_PATH: "/data/cacti-relay-store.json"
       # Dynamic spoke registry (RL-1) — persisted on the same volume

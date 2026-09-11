@@ -74,8 +74,9 @@ export class RelayStore {
   constructor(
     private readonly filePath: string,
     private readonly log: Pick<Console, "info" | "warn" | "error"> = console,
-    // Retention cap per journal kind. A parameter only so the trim — and the mark it leaves —
-    // is reachable in a test without writing MAX_JOURNAL entries.
+    // Retention cap per journal kind (JOURNAL_MAX_ENTRIES). Injected rather than read here so
+    // the store stays free of configuration, and so the trim — and the mark it leaves — is
+    // reachable in a test without writing MAX_JOURNAL entries.
     private readonly maxJournal: number = MAX_JOURNAL,
   ) {}
 
