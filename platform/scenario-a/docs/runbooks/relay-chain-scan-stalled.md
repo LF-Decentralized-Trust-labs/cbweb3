@@ -100,6 +100,32 @@ curl -sk -b "access_token=$TOK" \
 records a fact you have verified — it does not skip a settlement that still has to
 happen.
 
+**Get the key right, or the repair is a no-op.** The store holds two HTLC key shapes and
+only one of them releases the watermark:
+
+| Key | What it does |
+| --- | --- |
+| `htlc-evt:<observing-spoke>:<txHash>:<logIndex>` | **this one.** The per-event guard the poll loop tests before processing a claim. |
+| `htlc-settled:<dest-spoke>:<dest-contract>` | echo guard only. Consulted when the *destination* spoke is scanned, to skip the settlement bouncing back. Writing it does nothing for a held watermark. |
+
+Take the values from the **`LogHTLCClaimed`** line, not from the `SettleHTLC gRPC failed`
+line — the failure line prints the counterpart's contract id and carries no txHash:
+
+```
+[spoke-costa-rica] LogHTLCClaimed contractId=34ce0a59… block=76018 tx=0x9f2c…
+ ^ observing spoke                                                 ^ txHash
+```
+
+`logIndex` is not in that line. It is `0` unless the same transaction emitted more than one
+`LogHTLCClaimed`; confirm against the keys the store already holds (below) or read the
+receipt with `eth_getTransactionReceipt`.
+
+```bash
+# The keys already in the store — copy the shape from a claim that DID deliver.
+docker run --rm -v "$VOL":/data alpine:3.23 cat /data/cacti-relay-store.json \
+  | python3 -c 'import sys,json; print([k for k in json.load(sys.stdin)["delivered"] if k.startswith("htlc-evt:")][:10])'
+```
+
 ```bash
 docker stop "$CACTI"
 
@@ -112,22 +138,28 @@ p = "/data/cacti-relay-store.json"
 d = json.load(open(p))
 now = int(time.time() * 1000)
 for k in [
-  "htlc-settled:<dest-spoke-id>:<dest-contract-id>",
-  # one line per stuck claim, from the SettleHTLC failures above
+  "htlc-evt:<observing-spoke>:<txHash>:<logIndex>",
+  # one line per stuck claim, from the LogHTLCClaimed lines above
 ]:
     d.setdefault("delivered", {})[k] = now
+    # Forget its failure history too, so a later forced retry is not born at the cap.
+    d.get("settleFailures", {}).pop(k, None)
 json.dump(d, open(p, "w"))
 PY'
 
 docker start "$CACTI"
 ```
 
-If the loop persists, list the keys the store actually holds and match the shape:
+**Confirm it worked** — the watermark must move within a poll interval or two:
 
 ```bash
 docker run --rm -v "$VOL":/data alpine:3.23 cat /data/cacti-relay-store.json \
-  | python3 -c 'import sys,json; print(list(json.load(sys.stdin)["delivered"])[:10])'
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["watermarks"])'
 ```
+
+If it has not moved, the key did not match. Do not repeat the edit with more keys: list the
+store's keys as above and compare character by character against the spoke id in the
+`LogHTLCClaimed` line.
 
 ---
 

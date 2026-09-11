@@ -597,7 +597,25 @@ export class HtlcRelay {
               // but only while there is reason to think the failure is transient. The hold is
               // on the BLOCK, so an unbounded one stops this spoke's entire chain scan, not
               // just this settlement.
-              const attempts = await this.relayStore.recordSettleFailure(evtKey);
+              //
+              // Counting the failure WRITES THE STORE TO DISK, so unlike the plain in-memory
+              // assignment this replaced it can throw (ENOSPC, read-only volume). Letting that
+              // reach the enclosing catch would report it as a decode error AND leave
+              // minFailedBlock unset, so the scan would walk past a claim that never delivered.
+              // Bound the failure of the bound: on a write error, hold and say why.
+              let attempts: number;
+              try {
+                attempts = await this.relayStore.recordSettleFailure(evtKey);
+              } catch (persistErr) {
+                this.log.error(
+                  `[${spoke.id}] could not persist the settle-failure count for ` +
+                  `contractId=${resolved.contractId}: ${String(persistErr)} — holding the watermark ` +
+                  `at block ${raw.blockNumber} so the claim is retried rather than skipped. ` +
+                  `The relay's store is not writable; fix that before anything else.`,
+                );
+                minFailedBlock = Math.min(minFailedBlock, raw.blockNumber);
+                continue;
+              }
               if (attempts < MAX_SETTLE_ATTEMPTS) {
                 minFailedBlock = Math.min(minFailedBlock, raw.blockNumber);
               } else {
@@ -608,7 +626,22 @@ export class HtlcRelay {
                   `${resolved.destSpokeId}'s registered gRPC endpoint serves the entity that holds ` +
                   `contractId=${resolved.contractId}.`,
                 );
-                await this.relayStore.markDelivered(evtKey);
+                // Forget the history BEFORE marking delivered. The counter is persisted, so a
+                // give-up that leaves it at the cap makes the operator's next move — forcing a
+                // retry once the routing is fixed — give up again on its first attempt. Clearing
+                // first means a crash in between costs a fresh retry, never a silent no-retry.
+                try {
+                  await this.relayStore.clearSettleFailure(evtKey);
+                  await this.relayStore.markDelivered(evtKey);
+                } catch (persistErr) {
+                  this.log.error(
+                    `[${spoke.id}] could not persist the give-up for contractId=${resolved.contractId}: ` +
+                    `${String(persistErr)} — holding the watermark at block ${raw.blockNumber}. ` +
+                    `The relay's store is not writable; fix that before anything else.`,
+                  );
+                  minFailedBlock = Math.min(minFailedBlock, raw.blockNumber);
+                  continue;
+                }
               }
             }
           } catch (decodeErr) {

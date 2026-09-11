@@ -420,6 +420,8 @@ describe("HTLC settle persistence (R2-H-11)", () => {
   const HASHLOCK = "deadbeef";
   const TX = "0xtx";
   const EVENT_BLOCK = 10;
+  // Mirrors MAX_SETTLE_ATTEMPTS in htlc-relay.ts (not exported); asserts we stayed below the cap.
+  const MAX_ATTEMPTS_IN_TEST = 20;
 
   let dir: string;
   let file: string;
@@ -582,19 +584,96 @@ describe("HTLC settle persistence (R2-H-11)", () => {
     const { relay, settleCalls } = await makeWiredRelay(store, true);
     (relay as any).log = { info: () => {}, warn: () => {}, error: () => {} };
 
+    // Fail once, then never answer. Parking the second attempt pins the relay in the state
+    // under test — one recorded failure, watermark held — no matter how slow the host is.
+    // Racing an abort against the give-up instead would make this test a coin flip on a
+    // loaded CI box: the cap is 20 attempts and the poll interval here is 5ms, so a ~150ms
+    // stall between "first failure observed" and "abort" reaches the cap and flips every
+    // assertion below.
+    (relay as any).grpcClients.set("spoke-b", {
+      close: vi.fn(),
+      SettleHTLC: (_r: unknown, _m: unknown, _o: unknown, cb: (e: unknown) => void) => {
+        settleCalls.n++;
+        if (settleCalls.n === 1) cb({ code: 5, message: "5 NOT_FOUND" });
+        // else: never call back — the cycle parks here.
+      },
+    });
+
     const controller = new AbortController();
     (relay as any).signal = controller.signal;
     void (relay as any).pollSpoke((relay as any).spokes[0], controller.signal);
 
-    // Stop after the first failure: the watermark must still be behind the event.
-    await waitFor(() => settleCalls.n >= 1);
+    await waitFor(() => store.settleFailureCount(`htlc-evt:spoke-a:${TX}:0`) >= 1, 5_000);
     controller.abort();
-    await new Promise(r => setTimeout(r, 20));
 
-    expect(store.settleFailureCount(`htlc-evt:spoke-a:${TX}:0`)).toBeGreaterThanOrEqual(1);
+    expect(settleCalls.n).toBeLessThan(MAX_ATTEMPTS_IN_TEST);
+    expect(store.settleFailureCount(`htlc-evt:spoke-a:${TX}:0`)).toBe(1);
     expect(store.getWatermark("spoke-a")).toBeLessThan(EVENT_BLOCK);
     expect(store.hasDelivered(`htlc-evt:spoke-a:${TX}:0`)).toBe(false);
   });
+
+  // ── review findings on the bound itself ──────────────────────────────────────
+  //
+  // (2) Giving up must forget the failure history. The counter is persisted, so leaving it at
+  // the cap turns a later forced retry — the operator's move once the routing is fixed — into
+  // an immediate give-up on the very first attempt.
+  it("clears the failure counter when it gives up, so a forced retry still gets its retries", async () => {
+    const store = new RelayStore(file, { info: () => {}, warn: () => {}, error: () => {} });
+    await store.init();
+    const { relay } = await makeWiredRelay(store, true);
+    (relay as any).log = { info: () => {}, warn: () => {}, error: () => {} };
+
+    const controller = new AbortController();
+    (relay as any).signal = controller.signal;
+    void (relay as any).pollSpoke((relay as any).spokes[0], controller.signal);
+
+    const evtKey = `htlc-evt:spoke-a:${TX}:0`;
+    await waitFor(() => store.hasDelivered(evtKey), 8_000);
+    controller.abort();
+    await new Promise(r => setTimeout(r, 20));
+
+    expect(store.hasDelivered(evtKey)).toBe(true);
+    expect(store.settleFailureCount(evtKey)).toBe(0);
+
+    // And it must not come back from disk either.
+    const reloaded = new RelayStore(file, { info: () => {}, warn: () => {}, error: () => {} });
+    await reloaded.init();
+    expect(reloaded.settleFailureCount(evtKey)).toBe(0);
+  }, 15_000);
+
+  // (3) Counting a failure writes the store to disk, and that write can fail (ENOSPC, read-only
+  // volume). It must not cost us the watermark hold: the settlement did NOT deliver, so the block
+  // has to be retried. Before the bound existed this branch was a pure in-memory assignment and
+  // could not throw — the counter is what introduced the risk, so the counter must carry it.
+  it("holds the watermark when persisting the failure counter throws", async () => {
+    const store = new RelayStore(file, { info: () => {}, warn: () => {}, error: () => {} });
+    await store.init();
+    const { relay, settleCalls } = await makeWiredRelay(store, true);
+
+    const logged: string[] = [];
+    (relay as any).log = {
+      info: () => {}, warn: (m: string) => logged.push(m), error: (m: string) => logged.push(m),
+    };
+
+    // The disk is full exactly when the relay tries to record the failure.
+    vi.spyOn(store, "recordSettleFailure").mockRejectedValue(
+      Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" }),
+    );
+
+    const controller = new AbortController();
+    (relay as any).signal = controller.signal;
+    void (relay as any).pollSpoke((relay as any).spokes[0], controller.signal);
+
+    await waitFor(() => settleCalls.n >= 2, 5_000);
+    controller.abort();
+    await new Promise(r => setTimeout(r, 20));
+
+    // The claim is unsettled and unrecorded, so the block must be retried, not skipped.
+    expect(store.getWatermark("spoke-a")).toBeLessThan(EVENT_BLOCK);
+    expect(store.hasDelivered(`htlc-evt:spoke-a:${TX}:0`)).toBe(false);
+    // And it must not be reported as a decode problem, which sends an operator to the wrong place.
+    expect(logged.join("\n")).not.toMatch(/failed to decode/);
+  }, 15_000);
 
   it("does NOT re-settle after a restart when the claim was already delivered", async () => {
     // Simulate a crash AFTER the settle was forwarded (dedup key persisted) but BEFORE the

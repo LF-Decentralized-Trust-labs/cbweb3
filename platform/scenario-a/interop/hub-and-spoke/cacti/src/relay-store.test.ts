@@ -111,6 +111,29 @@ describe("RelayStore block watermark (R2-H-11)", () => {
     expect(store.hasDelivered("trade-9:settle")).toBe(true);
   });
 
+  // A chain reset drops the dedup keys so the new chain's events are processed afresh. The
+  // failure counters are keyed by the SAME `htlc-evt:<spoke>:` shape and must go with them:
+  // left behind they grow without bound, and — worse — every event that had been given up on
+  // comes back already at the cap, so it gives up again on its first attempt and the
+  // retry-transient-failures behaviour is gone exactly where it is most needed.
+  it("resetSpokeChain also drops that spoke's settle-failure counters", async () => {
+    const store = new RelayStore(file, silentLog);
+    await store.init();
+    await store.setMeta("spoke-a", "0xold");
+    await store.recordSettleFailure("htlc-evt:spoke-a:0xtx:0");
+    await store.recordSettleFailure("htlc-evt:spoke-a:0xtx:0");
+    await store.recordSettleFailure("htlc-evt:spoke-b:0xty:0"); // different spoke — must survive
+
+    await store.resetSpokeChain("spoke-a", 0, "0xnew");
+
+    expect(store.settleFailureCount("htlc-evt:spoke-a:0xtx:0")).toBe(0);
+    expect(store.settleFailureCount("htlc-evt:spoke-b:0xty:0")).toBe(1);
+
+    const reloaded = new RelayStore(file, silentLog);
+    await reloaded.init();
+    expect(reloaded.settleFailureCount("htlc-evt:spoke-a:0xtx:0")).toBe(0);
+  });
+
   it("writes atomically — no leftover .tmp file after a write", async () => {
     const store = new RelayStore(file, silentLog);
     await store.init();

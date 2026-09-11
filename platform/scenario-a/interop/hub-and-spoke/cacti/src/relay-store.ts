@@ -216,7 +216,7 @@ export class RelayStore {
   /**
    * Reset a spoke after a detected chain reset: rewind its watermark to `block`, record the new
    * genesis hash, and drop that spoke's HTLC dedup keys — both the per-event guard
-   * (`htlc-evt:${spokeId}:`) and the echo guard (`htlc-settled:${spokeId}:`) — since the previous
+   * (`htlc-evt:${spokeId}:`) and the echo guard (`htlc-settled:${spokeId}:`), along with that spoke's settle-failure counters — since the previous
    * chain's tx hashes and contract ids are meaningless on the new chain. FX delivered keys and
    * other spokes are untouched. Persisted atomically (finding R2-H-11).
    */
@@ -226,6 +226,12 @@ export class RelayStore {
     const prefixes = [`htlc-evt:${spokeId}:`, `htlc-settled:${spokeId}:`];
     for (const key of Object.keys(this.state.delivered)) {
       if (prefixes.some((p) => key.startsWith(p))) delete this.state.delivered[key];
+    }
+    // The failure counters are keyed by the same per-event shape, so they are part of the same
+    // dedup state: left behind they grow without bound, and an event that had been given up on
+    // returns already at the cap and gives up again on its first attempt.
+    for (const key of Object.keys(this.state.settleFailures)) {
+      if (prefixes.some((p) => key.startsWith(p))) delete this.state.settleFailures[key];
     }
     await this.persist();
   }
