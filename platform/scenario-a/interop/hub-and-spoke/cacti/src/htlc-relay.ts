@@ -326,6 +326,16 @@ export class HtlcRelay {
   // caller (Go poller) passes the last seq it processed and receives events with a greater seq.
   // The seq is stable across relay restarts, so the poller's persisted cursor composes exactly
   // with the relay and never re-delivers or loses events (finding R2-H-11).
+  /**
+   * Highest seq ever dropped from a journal by the retention cap; 0 when nothing has been.
+   * Served alongside the events so a consumer can tell whether its cursor fell off the end —
+   * it is the one that loses a settlement when that happens, and until now only the relay
+   * knew, in a log line nobody reads.
+   */
+  getJournalTrimmedThrough(kind: "lock" | "settle"): number {
+    return this.relayStore.journalTrimmedThrough(kind);
+  }
+
   getSettleEvents(sinceSeq = 0): Record<string, unknown>[] {
     return this.relayStore.getEventsSince("settle", sinceSeq);
   }

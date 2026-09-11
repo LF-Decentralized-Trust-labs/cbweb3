@@ -55,13 +55,21 @@ interface RelayStoreState {
   // event a stable seq (assigned once, deduped by chain id) that survives restart, so the Go
   // poller's persisted seq composes exactly with the relay (finding R2-H-11, cursor composition).
   journal: { lock: JournalEntry[]; settle: JournalEntry[] };
+  // Highest seq ever DROPPED from each journal by the retention cap. A consumer whose cursor
+  // is at or below this has missed events that no longer exist — the only exact way to say so,
+  // because `seq` is one counter shared by both journals and a kind's surviving seqs are
+  // therefore legitimately non-contiguous. 0 means nothing has been dropped.
+  trimmedThrough: { lock: number; settle: number };
   // Next sequence to assign. Monotonic across restarts (never reset except on a fresh store).
   seq: number;
 }
 
 /** Fresh empty state. A factory — NOT a shared literal — so instances never alias each other's maps/arrays. */
 function emptyState(): RelayStoreState {
-  return { delivered: {}, retries: [], settleFailures: {}, watermarks: {}, meta: {}, journal: { lock: [], settle: [] }, seq: 1 };
+  return {
+    delivered: {}, retries: [], settleFailures: {}, watermarks: {}, meta: {},
+    journal: { lock: [], settle: [] }, trimmedThrough: { lock: 0, settle: 0 }, seq: 1,
+  };
 }
 
 /** Max journal entries retained per kind. Older entries are trimmed; a consumer lagging beyond
@@ -74,6 +82,9 @@ export class RelayStore {
   constructor(
     private readonly filePath: string,
     private readonly log: Pick<Console, "info" | "warn" | "error"> = console,
+    // Retention cap per journal kind. A parameter only so the trim — and the mark it leaves —
+    // is reachable in a test without writing MAX_JOURNAL entries.
+    private readonly maxJournal: number = MAX_JOURNAL,
   ) {}
 
   async init(): Promise<void> {
@@ -89,6 +100,12 @@ export class RelayStore {
         watermarks: parsed.watermarks ?? {},
         meta: parsed.meta ?? {},
         journal: { lock: journal.lock ?? [], settle: journal.settle ?? [] },
+        // Absent in a store written before the mark existed: "nothing known to be dropped" is
+        // the honest reading, not "everything was".
+        trimmedThrough: {
+          lock: parsed.trimmedThrough?.lock ?? 0,
+          settle: parsed.trimmedThrough?.settle ?? 0,
+        },
         // Resume seq monotonically. On a legacy file (no seq) start past whatever the journal
         // already holds so a reused seq can never collide with a delivered one.
         seq: parsed.seq ?? (maxSeq(journal.lock) > maxSeq(journal.settle) ? maxSeq(journal.lock) : maxSeq(journal.settle)) + 1,
@@ -250,14 +267,31 @@ export class RelayStore {
     }
     const seq = this.state.seq++;
     entries.push({ seq, id, event: { ...event, seq } });
-    if (entries.length > MAX_JOURNAL) {
-      const dropped = entries.splice(0, entries.length - MAX_JOURNAL);
+    if (entries.length > this.maxJournal) {
+      const dropped = entries.splice(0, entries.length - this.maxJournal);
+      // Record what was lost so a lagging consumer can find out it lost it. Entries are
+      // appended in seq order and trimmed from the front, so the last one dropped is the
+      // highest, and everything still retained for this kind is strictly above the mark.
+      const highestDropped = dropped[dropped.length - 1]?.seq ?? 0;
+      if (highestDropped > this.state.trimmedThrough[kind]) {
+        this.state.trimmedThrough[kind] = highestDropped;
+      }
       this.log.warn(
-        `[relay-store] journal '${kind}' trimmed ${dropped.length} oldest entries (cap ${MAX_JOURNAL}); a consumer lagging past this will miss them`,
+        `[relay-store] journal '${kind}' trimmed ${dropped.length} oldest entries through seq ` +
+        `${highestDropped} (cap ${this.maxJournal}); a consumer whose cursor is at or below that has missed them`,
       );
     }
     await this.persist();
     return seq;
+  }
+
+  /**
+   * Highest seq ever dropped from this kind's journal by the retention cap; 0 when nothing has
+   * been. A consumer whose cursor is at or below this has missed events that are gone — see the
+   * field's note for why contiguity cannot answer the same question.
+   */
+  journalTrimmedThrough(kind: JournalKind): number {
+    return this.state.trimmedThrough[kind];
   }
 
   /**
