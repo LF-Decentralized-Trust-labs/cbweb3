@@ -263,6 +263,22 @@ const MAX_EVENTS = 10_000;
  */
 const MAX_BLOCK_RANGE = 5_000;
 
+/**
+ * How many times one claim may fail to settle before the relay stops holding the block
+ * watermark for it.
+ *
+ * Holding is right for a transient failure — a destination that is restarting, a network
+ * blip — because skipping the block would lose the settlement. It is wrong for a permanent
+ * one: the hold is on the BLOCK, so it also freezes every unrelated event after it, on that
+ * whole spoke, for ever and without an alarm. On the LNET stack a settlement whose target
+ * orchestrator did not hold the contract failed 167,360 times and cost three days of missed
+ * locks, which presented to operators as "PvP silently stopped working".
+ *
+ * At the 3s default poll interval this is about a minute of retrying before the relay gives
+ * up on the event, says so at error level, and lets the chain scan move on.
+ */
+const MAX_SETTLE_ATTEMPTS = 20;
+
 export class HtlcRelay {
   // Lock events are also kept in a small in-memory ring purely for resolveCounterpart's
   // same-process hashLock lookup. The durable, seq-numbered copy served to the Go poller lives
@@ -575,9 +591,25 @@ export class HtlcRelay {
             if (settled) {
               await this.relayStore.markDelivered(evtKey);
               await this.relayStore.markDelivered(`htlc-settled:${resolved.destSpokeId}:${resolved.contractId}`);
+              await this.relayStore.clearSettleFailure(evtKey);
             } else {
-              // Hold the watermark at/below this block so the failed settlement is retried.
-              minFailedBlock = Math.min(minFailedBlock, raw.blockNumber);
+              // Hold the watermark at/below this block so the failed settlement is retried —
+              // but only while there is reason to think the failure is transient. The hold is
+              // on the BLOCK, so an unbounded one stops this spoke's entire chain scan, not
+              // just this settlement.
+              const attempts = await this.relayStore.recordSettleFailure(evtKey);
+              if (attempts < MAX_SETTLE_ATTEMPTS) {
+                minFailedBlock = Math.min(minFailedBlock, raw.blockNumber);
+              } else {
+                this.log.error(
+                  `[${spoke.id}] settlement for contractId=${resolved.contractId} on ${resolved.destSpokeId} ` +
+                  `failed ${attempts} times — giving up on this event so the chain scan can advance. ` +
+                  `The counterpart leg was NOT settled by the relay and needs an operator: check that ` +
+                  `${resolved.destSpokeId}'s registered gRPC endpoint serves the entity that holds ` +
+                  `contractId=${resolved.contractId}.`,
+                );
+                await this.relayStore.markDelivered(evtKey);
+              }
             }
           } catch (decodeErr) {
             this.log.warn(`[${spoke.id}] failed to decode LogHTLCClaimed: ${String(decodeErr)}`);

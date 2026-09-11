@@ -467,7 +467,7 @@ describe("HTLC settle persistence (R2-H-11)", () => {
   // Build a relay wired with the real store, a fake connector for spoke-a, a mock gRPC client
   // for spoke-b, and the two counterpart lock events pre-seeded (as an already-running relay
   // would have observed). Returns the relay and the SettleHTLC call counter.
-  async function makeWiredRelay(store: RelayStore) {
+  async function makeWiredRelay(store: RelayStore, alwaysFail = false) {
     const spokes = [
       { id: "spoke-a", besuRpc: "http://a", besuWs: "ws://a", htlcAddress: "0xaaaa", internalApiUrl: "http://a:18080", grpcEndpoint: "a:1" },
       { id: "spoke-b", besuRpc: "http://b", besuWs: "ws://b", htlcAddress: "0xbbbb", internalApiUrl: "http://b:28080", grpcEndpoint: "b:1" },
@@ -480,8 +480,20 @@ describe("HTLC settle persistence (R2-H-11)", () => {
     const settleCalls = { n: 0 };
     const mockClientB = {
       close: vi.fn(),
-      SettleHTLC: (_req: unknown, _m: unknown, _o: unknown, cb: (e: null, r: { htlc_tx_hash: string; zeto_tx_hash: string }) => void) => {
+      SettleHTLC: (
+        _req: unknown,
+        _m: unknown,
+        _o: unknown,
+        cb: (e: unknown, r?: { htlc_tx_hash: string; zeto_tx_hash: string }) => void,
+      ) => {
         settleCalls.n++;
+        if (alwaysFail) {
+          // What the LNET relay actually got, for ever: the destination spoke's registered
+          // endpoint is its CENTRAL BANK's orchestrator, and the contract lives on a
+          // commercial bank's. The error is permanent — retrying never changes it.
+          cb({ code: 5, message: `5 NOT_FOUND: HTLC "${CONTRACT_B}" not found` });
+          return;
+        }
         cb(null, { htlc_tx_hash: "0xh", zeto_tx_hash: "0xz" });
       },
     };
@@ -527,6 +539,61 @@ describe("HTLC settle persistence (R2-H-11)", () => {
     expect(reloaded.hasDelivered(`htlc-evt:spoke-a:${TX}:0`)).toBe(true);
     expect(reloaded.hasDelivered(`htlc-settled:spoke-b:${CONTRACT_B}`)).toBe(true);
     expect(reloaded.getWatermark("spoke-a")).toBe(EVENT_BLOCK);
+  });
+
+  // ── the outage this file did not cover ────────────────────────────────────────
+  //
+  // A settlement that can never succeed used to pin the block watermark at its own block,
+  // for ever. The hold is on the BLOCK, so it froze every unrelated event after it on that
+  // spoke — locks included — and nothing said so. On LNET that was 167,360 identical
+  // failures and three days in which no PvP could pair, presenting as "it just stopped".
+  it("a permanently failing settlement releases the watermark instead of freezing the spoke", async () => {
+    const store = new RelayStore(file, { info: () => {}, warn: () => {}, error: () => {} });
+    await store.init();
+    const { relay, settleCalls } = await makeWiredRelay(store, true);
+
+    const errors: string[] = [];
+    (relay as any).log = { info: () => {}, warn: () => {}, error: (m: string) => errors.push(m) };
+
+    const controller = new AbortController();
+    (relay as any).signal = controller.signal;
+    void (relay as any).pollSpoke((relay as any).spokes[0], controller.signal);
+
+    // Give up is bounded, so the watermark must reach the event's block on its own.
+    const advanced = await waitFor(() => store.getWatermark("spoke-a") === EVENT_BLOCK, 8_000);
+    controller.abort();
+    await new Promise(r => setTimeout(r, 20));
+
+    expect(advanced).toBe(true);
+    expect(store.getWatermark("spoke-a")).toBe(EVENT_BLOCK);
+
+    // It gave up rather than looping without end, and said so where an operator will see it.
+    expect(settleCalls.n).toBeGreaterThanOrEqual(1);
+    expect(settleCalls.n).toBeLessThanOrEqual(40);
+    expect(errors.join("\n")).toMatch(/failed \d+ times/);
+    expect(errors.join("\n")).toMatch(/NOT settled by the relay/);
+  }, 15_000);
+
+  // The bound must not become "skip on the first hiccup": a destination that is merely
+  // restarting has to be retried, which is the reason the hold exists at all.
+  it("holds the watermark while a settlement failure is still plausibly transient", async () => {
+    const store = new RelayStore(file, { info: () => {}, warn: () => {}, error: () => {} });
+    await store.init();
+    const { relay, settleCalls } = await makeWiredRelay(store, true);
+    (relay as any).log = { info: () => {}, warn: () => {}, error: () => {} };
+
+    const controller = new AbortController();
+    (relay as any).signal = controller.signal;
+    void (relay as any).pollSpoke((relay as any).spokes[0], controller.signal);
+
+    // Stop after the first failure: the watermark must still be behind the event.
+    await waitFor(() => settleCalls.n >= 1);
+    controller.abort();
+    await new Promise(r => setTimeout(r, 20));
+
+    expect(store.settleFailureCount(`htlc-evt:spoke-a:${TX}:0`)).toBeGreaterThanOrEqual(1);
+    expect(store.getWatermark("spoke-a")).toBeLessThan(EVENT_BLOCK);
+    expect(store.hasDelivered(`htlc-evt:spoke-a:${TX}:0`)).toBe(false);
   });
 
   it("does NOT re-settle after a restart when the claim was already delivered", async () => {
