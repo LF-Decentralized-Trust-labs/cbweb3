@@ -51,39 +51,49 @@ Two identical readings on a live chain means stalled.
 
 ## Which stall is it
 
-Three causes produce the same symptom and need different repairs.
+These causes produce the same symptom and need different repairs.
 
 ```bash
 docker logs --since 30m "$CACTI" 2>&1 | grep -E \
-  'giving up on this event|chain head .* is behind|poll cycle error|SettleHTLC gRPC failed'
+  'chain head .* is behind|poll cycle error|SettleHTLC gRPC failed'
 ```
 
 | What you see | Cause | Go to |
 | --- | --- | --- |
-| `SettleHTLC gRPC failed … NOT_FOUND`, repeating without end | a settlement that can never succeed is holding the watermark | [A](#a-a-settlement-that-can-never-succeed) |
 | `chain head N is behind resume block M` | the watermark is ahead of the chain, typically after a reset | [B](#b-watermark-ahead-of-the-chain) |
 | `poll cycle error`, repeating | the relay cannot reach that spoke's Besu | [C](#c-the-spokes-besu-is-unreachable) |
-| `giving up on this event` | the bound is working: the relay dropped one settlement and moved on | no stall — see [after the fix](#after-the-bounded-hold) |
+| `SettleHTLC gRPC failed … NOT_FOUND` | **you are on an old relay.** See [A](#a-historical-a-settlement-that-can-never-succeed) |
+| `events lost to journal retention` (in an ORCHESTRATOR log, not the relay's) | this entity fell behind the capped journal and missed settlements | [D](#d-a-consumer-fell-behind-the-journal) |
 
-A count is worth taking, because it tells you how long this has been going:
+---
+
+### A (historical). A settlement that can never succeed
+
+**This stall cannot happen on a current relay.** The settle push was removed: the relay
+appends the claim, secret included, to the journal, and the leg's owner settles itself by
+polling it. Nothing in the settle path makes a network call, so nothing can fail, so
+nothing can hold the watermark. If you are seeing `SettleHTLC gRPC failed`, the relay
+container is running an older image — check its version before repairing anything.
+
+The section is kept because a long-lived deployment can still be on that image, and
+because the store it leaves behind is repaired the same way.
+
+**Why it stalled.** A failed settlement held the block watermark at its own block so the
+claim was retried instead of skipped. The hold was on the BLOCK, so it also froze every
+unrelated event after it — locks included — on that whole spoke.
+
+The failure was not transient. The relay keeps one gRPC endpoint per spoke and it is that
+spoke's **central bank** orchestrator, while an inter-bank leg lives on a **commercial
+bank's**. `SettleHTLC` answered `NOT_FOUND` and always would — and no endpoint would have
+worked, because settling a leg is `transferLocked` on the owner's own Paladin node.
+
+A count tells you how long it had been going:
 
 ```bash
 docker logs "$CACTI" 2>&1 | grep -c 'SettleHTLC gRPC failed'
 ```
 
 On LNET this read **167,360**.
-
----
-
-### A. A settlement that can never succeed
-
-**Why it stalls.** A failed settlement holds the block watermark at its own block so the
-claim is retried instead of skipped. The hold is on the BLOCK, so it also freezes every
-unrelated event after it — locks included — on that whole spoke.
-
-The failure is usually not transient. The relay keeps one gRPC endpoint per spoke and it
-is that spoke's **central bank** orchestrator, while an inter-bank leg lives on a
-**commercial bank's**. `SettleHTLC` then answers `NOT_FOUND` and always will.
 
 **Before repairing, check whether the value already moved.** A claim event means the
 secret was revealed on-chain. Both legs may already be settled while the relay is still
@@ -200,26 +210,53 @@ docker run --rm -v "$VOL":/data alpine:3.23 cat /data/cacti-spoke-registry.json 
 
 ---
 
-## After the bounded hold
+### D. A consumer fell behind the journal
 
-From the fix in `fix/scenario-a-relay-watermark-head-of-line`, a claim that fails
-`MAX_SETTLE_ATTEMPTS` times is given up on, at error level, and the scan advances:
+This one appears in a **payment-orchestrator** log, not the relay's:
 
 ```
-[spoke-x] settlement for contractId=… on spoke-y failed 20 times — giving up on this
-event so the chain scan can advance. The counterpart leg was NOT settled by the relay
-and needs an operator: check that spoke-y's registered gRPC endpoint serves the entity
-that holds contractId=…
+ERROR cacti: events lost to journal retention — this entity was too far behind the relay
+and the events it missed no longer exist  kind=settle cursor=… lost_from_seq=…
+lost_through_seq=…
 ```
 
-That line is **not** a stall. It means one settlement push was dropped and everything
-else kept working. Note that the push is redundant with the journal: the claim, with its
-secret, is appended to the settle journal BEFORE the push is attempted, and the
-destination orchestrator pulls it and settles its own leg. In practice the leg settles
-anyway — verify with `/htlc/status` rather than assuming either way.
+The journal is capped at 10,000 entries per kind. An entity down long enough for that many
+events to pass loses the ones that fell off, and they cannot be recovered from the relay —
+they are gone. For `kind=settle` each lost event is a counterpart leg that will not settle
+itself, because the journal is how its owner finds out it must.
 
-What the line does tell you is that the endpoint-per-spoke routing is still in place. It
-should stop appearing once that is addressed.
+It is not a stall: the orchestrator reports the range once and carries on with what
+survived. The repair is reconciliation, not a restart:
+
+```bash
+# Legs still LOCKED whose counterpart has been claimed on the other spoke.
+curl -sk -b "access_token=$TOK" "https://<entity-host>/a/api/v1/htlc/search" \
+  | python3 -c 'import sys,json; [print(h["contract_id"], h["state"], h["hash_lock"]) for h in json.load(sys.stdin).get("htlcs",[]) if h["state"]=="HTLC_STATE_LOCKED"]'
+```
+
+For each, find the secret in the counterpart spoke's `LogHTLCClaimed` on-chain and settle
+the leg directly. If the timelock has passed, refund instead — see below.
+
+If this appears routinely rather than after an outage, the cap is too small for the
+traffic, or an entity is restarting more often than it should.
+
+## After the removal of the push
+
+A current relay logs neither `SettleHTLC gRPC failed` nor `giving up on this event`; both
+belonged to the push. What it logs on a claim is the journal append:
+
+```
+[spoke-x] LogHTLCClaimed contractId=… block=… tx=…
+```
+
+and the settlement then happens in the destination entity, visible in ITS log:
+
+```
+relay settle: local HTLC leg settled  contractId=<the OTHER spoke's contract id>
+```
+
+The contract id there is the counterpart's, not its own — the entity resolves its own leg
+by `sha256(secret)`. That is the line that proves the path works end to end.
 
 ## Recovering a trade that expired meanwhile
 

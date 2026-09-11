@@ -32,14 +32,6 @@ export type JournalKind = "lock" | "settle";
 interface RelayStoreState {
   delivered: Record<string, number>;
   retries: RelayRetryItem[];
-  // Consecutive failed settlement deliveries, keyed by the observed claim event.
-  //
-  // It exists to BOUND the block-watermark hold. A failed settlement legitimately holds the
-  // watermark so the claim is retried rather than skipped, but a permanently failing target
-  // — a contract the destination orchestrator does not have, say — then pins the watermark
-  // for ever and the relay stops scanning new blocks on that spoke entirely. Measured on the
-  // LNET stack: 167,360 identical failures and three days of locks never observed.
-  settleFailures: Record<string, number>;
   // Last processed block per spoke id. Lets the poller resume after a restart
   // instead of starting at the chain head and skipping events mined during
   // downtime (finding R2-H-11).
@@ -67,7 +59,7 @@ interface RelayStoreState {
 /** Fresh empty state. A factory — NOT a shared literal — so instances never alias each other's maps/arrays. */
 function emptyState(): RelayStoreState {
   return {
-    delivered: {}, retries: [], settleFailures: {}, watermarks: {}, meta: {},
+    delivered: {}, retries: [], watermarks: {}, meta: {},
     journal: { lock: [], settle: [] }, trimmedThrough: { lock: 0, settle: 0 }, seq: 1,
   };
 }
@@ -95,7 +87,6 @@ export class RelayStore {
       const journal = parsed.journal ?? { lock: [], settle: [] };
       this.state = {
         delivered: parsed.delivered ?? {},
-        settleFailures: parsed.settleFailures ?? {},
         retries: parsed.retries ?? [],
         watermarks: parsed.watermarks ?? {},
         meta: parsed.meta ?? {},
@@ -164,31 +155,7 @@ export class RelayStore {
     await this.persist();
   }
 
-  /**
-   * Count one failed settlement delivery for this claim event and return the new total.
-   *
-   * Persisted, because the caller uses it to decide whether to keep holding the watermark,
-   * and that decision has to survive the restart an operator reaches for when the relay
-   * looks stuck.
-   */
-  async recordSettleFailure(key: string): Promise<number> {
-    const next = (this.state.settleFailures[key] ?? 0) + 1;
-    this.state.settleFailures[key] = next;
-    await this.persist();
-    return next;
-  }
-
   /** Forget the failure history for a claim that finally delivered. */
-  async clearSettleFailure(key: string): Promise<void> {
-    if (this.state.settleFailures[key] === undefined) return;
-    delete this.state.settleFailures[key];
-    await this.persist();
-  }
-
-  settleFailureCount(key: string): number {
-    return this.state.settleFailures[key] ?? 0;
-  }
-
   getDueRetries(spokeName: string, now = Date.now()): RelayRetryItem[] {
     return this.state.retries.filter(
       (r) => r.spokeName === spokeName && r.nextAttemptAt <= now,
@@ -233,7 +200,7 @@ export class RelayStore {
   /**
    * Reset a spoke after a detected chain reset: rewind its watermark to `block`, record the new
    * genesis hash, and drop that spoke's HTLC dedup keys — both the per-event guard
-   * (`htlc-evt:${spokeId}:`) and the echo guard (`htlc-settled:${spokeId}:`), along with that spoke's settle-failure counters — since the previous
+   * (`htlc-evt:${spokeId}:`) and the echo guard (`htlc-settled:${spokeId}:`) — since the previous
    * chain's tx hashes and contract ids are meaningless on the new chain. FX delivered keys and
    * other spokes are untouched. Persisted atomically (finding R2-H-11).
    */
@@ -243,12 +210,6 @@ export class RelayStore {
     const prefixes = [`htlc-evt:${spokeId}:`, `htlc-settled:${spokeId}:`];
     for (const key of Object.keys(this.state.delivered)) {
       if (prefixes.some((p) => key.startsWith(p))) delete this.state.delivered[key];
-    }
-    // The failure counters are keyed by the same per-event shape, so they are part of the same
-    // dedup state: left behind they grow without bound, and an event that had been given up on
-    // returns already at the cap and gives up again on its first attempt.
-    for (const key of Object.keys(this.state.settleFailures)) {
-      if (prefixes.some((p) => key.startsWith(p))) delete this.state.settleFailures[key];
     }
     await this.persist();
   }
