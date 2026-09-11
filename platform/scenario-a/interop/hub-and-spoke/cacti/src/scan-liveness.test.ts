@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { HtlcRelay } from "./htlc-relay";
+import { resolve } from "node:path";
 import { RelayStore } from "./relay-store";
 
 // The number that mattered was the one nobody watched.
@@ -14,6 +15,10 @@ import { RelayStore } from "./relay-store";
 // watermark, and that was visible only by reading a JSON file out of a Docker volume twice,
 // thirty seconds apart. Three days passed. The runbook's first check should be a curl, and a
 // scan that has stopped should say so itself rather than wait to be asked.
+// The real proto: addSpoke builds a gRPC client from it, so a fake path would make these tests
+// avoid the very call path that a live relay takes when the toolkit registers a spoke.
+const PROTO = resolve(__dirname, "../../../../apis/proto/payment_orchestrator/v1/payment_orchestrator.proto");
+
 describe("chain-scan liveness is observable", () => {
   let dir: string;
   let file: string;
@@ -28,12 +33,23 @@ describe("chain-scan liveness is observable", () => {
     vi.unstubAllGlobals();
   });
 
-  function relayWith(store: RelayStore) {
-    const spokes = [
-      { id: "spoke-a", besuRpc: "http://a", besuWs: "ws://a", htlcAddress: "0xaaaa", internalApiUrl: "http://a:1", grpcEndpoint: "a:1" },
-    ];
-    const relay = new HtlcRelay(spokes, "/fake/proto", 5, "secret", store as any, new Map());
+  // Registers the spoke the way a deployment does: an empty constructor list, then addSpoke
+  // from the relay's POST /api/v1/spokes handler.
+  async function relayWith(store: RelayStore) {
+    const relay = new HtlcRelay([], PROTO, 5, "secret", store as any, new Map(),
+      async () => ({
+        async getBlock() { return { block: { number: 0, hash: "0xg" } }; },
+        async getPastLogs() { return { logs: [] }; },
+        async shutdown() {},
+      }) as any);
     (relay as any).log = { info: () => {}, warn: () => {}, error: () => {} };
+    const controller = new AbortController();
+    relay.start(controller.signal);
+    await relay.addSpoke({
+      id: "spoke-a", besuRpc: "http://a", besuWs: "ws://a", htlcAddress: "0xaaaa",
+      internalApiUrl: "http://a:1", grpcEndpoint: "a:1",
+    } as any);
+    controller.abort();
     return relay;
   }
 
@@ -42,7 +58,7 @@ describe("chain-scan liveness is observable", () => {
     await store.init();
     await store.setWatermark("spoke-a", 900);
 
-    const relay = relayWith(store);
+    const relay = await relayWith(store);
     (relay as any).chainHeads.set("spoke-a", 1000);
 
     const report = relay.getScanLiveness();
@@ -53,13 +69,45 @@ describe("chain-scan liveness is observable", () => {
     expect(a!.blocksBehind).toBe(100);
   });
 
+  // In a real deployment NO spoke comes from the constructor: the toolkit registers each one at
+  // runtime with POST /api/v1/spokes, and addSpoke starts a watcher without touching the
+  // constructor list. Reporting only the constructor list therefore reported nothing at all,
+  // and an empty `scan` on a live relay reads as "no spokes to worry about" — the same
+  // reassuring silence this endpoint exists to break. Found by running it, not by a unit test:
+  // every test here had handed the relay its spokes up front.
+  it("reports spokes registered at runtime, not only those passed to the constructor", async () => {
+    const store = new RelayStore(file, { info: () => {}, warn: () => {}, error: () => {} });
+    await store.init();
+    await store.setWatermark("spoke-late", 42);
+
+    const relay = new HtlcRelay([], PROTO, 5, "secret", store as any, new Map(),
+      async () => ({
+        async getBlock() { return { block: { number: 42, hash: "0xg" } }; },
+        async getPastLogs() { return { logs: [] }; },
+        async shutdown() {},
+      }) as any);
+    (relay as any).log = { info: () => {}, warn: () => {}, error: () => {} };
+
+    const controller = new AbortController();
+    relay.start(controller.signal);
+    await relay.addSpoke({
+      id: "spoke-late", besuRpc: "http://l", besuWs: "ws://l", htlcAddress: "0xcccc",
+      internalApiUrl: "http://l:1", grpcEndpoint: "l:1",
+    } as any);
+    controller.abort();
+
+    const report = relay.getScanLiveness();
+    expect(report.map(r => r.spokeId)).toContain("spoke-late");
+    expect(report.find(r => r.spokeId === "spoke-late")!.watermark).toBe(42);
+  }, 15_000);
+
   // A spoke registered but never scanned is not "fine, at zero" — it is unknown, and saying
   // zero would read as healthy on a dashboard.
   it("reports a spoke that has never scanned as having no watermark", async () => {
     const store = new RelayStore(file, { info: () => {}, warn: () => {}, error: () => {} });
     await store.init();
 
-    const report = relayWith(store).getScanLiveness();
+    const report = (await relayWith(store)).getScanLiveness();
     const a = report.find(r => r.spokeId === "spoke-a");
     expect(a!.watermark).toBeNull();
   });
@@ -71,7 +119,7 @@ describe("chain-scan liveness is observable", () => {
     await store.init();
     await store.setWatermark("spoke-a", 10);
 
-    const relay = relayWith(store);
+    const relay = await relayWith(store);
     (relay as any).watermarkAdvancedAt.set("spoke-a", Date.now() - 120_000);
 
     const a = relay.getScanLiveness().find(r => r.spokeId === "spoke-a");
@@ -122,7 +170,7 @@ describe("a stalled scan reports itself", () => {
       { id: "spoke-a", besuRpc: "http://a", besuWs: "ws://a", htlcAddress: "0xaaaa", internalApiUrl: "http://a:1", grpcEndpoint: "a:1" },
     ];
     const headRef = { n: 200 };
-    const relay = new HtlcRelay(spokes, "/fake/proto", 5, "secret", store as any,
+    const relay = new HtlcRelay(spokes, PROTO, 5, "secret", store as any,
       new Map<string, any>([["spoke-a", headRisesButLogsFail(headRef)]]));
 
     const errors: string[] = [];
@@ -163,7 +211,7 @@ describe("a stalled scan reports itself", () => {
     const spokes = [
       { id: "spoke-a", besuRpc: "http://a", besuWs: "ws://a", htlcAddress: "0xaaaa", internalApiUrl: "http://a:1", grpcEndpoint: "a:1" },
     ];
-    const relay = new HtlcRelay(spokes, "/fake/proto", 5, "secret", store as any,
+    const relay = new HtlcRelay(spokes, PROTO, 5, "secret", store as any,
       new Map<string, any>([["spoke-a", headRisesButLogsFail({ n: 200 })]]));
 
     const errors: string[] = [];

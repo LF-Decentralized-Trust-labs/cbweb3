@@ -328,12 +328,17 @@ export class HtlcRelay {
    */
   getScanLiveness(): ScanLiveness[] {
     const now = Date.now();
-    return this.spokes.map((spoke) => {
-      const watermark = this.relayStore.getWatermark(spoke.id);
-      const head = this.chainHeads.get(spoke.id);
-      const advancedAt = this.watermarkAdvancedAt.get(spoke.id);
+    // `watching`, not `spokes`: in a real deployment the constructor list is EMPTY and every
+    // spoke arrives at runtime through addSpoke (POST /api/v1/spokes from the toolkit). Reading
+    // the constructor list reported nothing on a live relay, and an empty scan reads as "nothing
+    // to worry about" — the same reassuring silence this exists to break. `watching` is also the
+    // more honest source: it is the set actually being scanned.
+    return [...this.watching].sort().map((spokeId) => {
+      const watermark = this.relayStore.getWatermark(spokeId);
+      const head = this.chainHeads.get(spokeId);
+      const advancedAt = this.watermarkAdvancedAt.get(spokeId);
       return {
-        spokeId: spoke.id,
+        spokeId,
         watermark: watermark ?? null,
         head: head ?? null,
         blocksBehind: watermark !== undefined && head !== undefined ? Math.max(0, head - watermark) : null,
