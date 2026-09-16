@@ -45,7 +45,7 @@ services:
       - entity_net
 
   redis:
-    image: redis:${REDIS_IMAGE_TAG:-7-alpine}
+    image: redis:${REDIS_IMAGE_TAG:-7.2-alpine}
     container_name: ${ENTITY_INFRA_PREFIX}-redis
     # The auth service CAN keep its PKI login nonces here — single-use, consumed by a
     # GET+DEL script — and reads REDIS_PASSWORD for it. Today nothing in this scenario
