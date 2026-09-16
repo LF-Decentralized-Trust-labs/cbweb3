@@ -1,0 +1,70 @@
+# gitleaks ignore list — cbweb3 monorepo
+#
+# Fingerprints of secret-scan findings that exist ONLY in commit history and
+# have been triaged and accepted. Consumed by the history-scan step in
+# .github/workflows/secret-scan.yml so that step fails on NEW findings only.
+#
+# Format is commit:file:rule:line. No secret values appear in this file, and
+# none may be added to it.
+#
+# REGENERATED 2026-09-03 after the monorepo import (PR #56): the platform
+# history was rewritten with git filter-repo (paths prefixed platform/, new
+# commit SHAs), so every fingerprint from platform/.gitleaksignore was
+# re-derived by re-running the scan over the rewritten history. The findings
+# are the SAME set triaged by the platform team — provenance and per-finding
+# rationale live in platform/docs/deliverables/D11-secret-scan-report.md.
+#
+#   - every file below is ABSENT from HEAD; only a history scan reaches them
+#   - no value authenticates against any production or HML environment
+#   - nothing here required rotation
+#
+# Adding an entry means you have triaged that finding and accepted it. Record
+# the reason here. Never add a fingerprint to silence a finding that is still
+# reachable from HEAD — fix the source (or the config allowlists) instead.
+
+# deploy-lnet/scenario-a/bundles/spoke-brazil.bundle.yaml
+#   EVM contract addresses inside a generated join bundle.
+#   Join bundles are public by design (genesis, enode, chainId, addresses); no key material.
+33b72ec85b9af805aa51bd80423426053f8bd750:platform/deploy-lnet/scenario-a/bundles/spoke-brazil.bundle.yaml:generic-api-key:21
+33b72ec85b9af805aa51bd80423426053f8bd750:platform/deploy-lnet/scenario-a/bundles/spoke-brazil.bundle.yaml:generic-api-key:26
+
+# scenario-a/portals.md
+#   Local sample walkthrough: two Keycloak JWTs and one HTLC preimage.
+#   JWTs were issued by a container alias resolvable only inside a local compose network and
+#   expired minutes after issuance on 2026-07-02; the preimage is from a local demo payment,
+#   revealed by protocol design. Nothing authenticates against any deployed environment.
+858faaf70ee71d226ac497f6e387ee323c3a9d54:platform/scenario-a/portals.md:generic-api-key:152
+858faaf70ee71d226ac497f6e387ee323c3a9d54:platform/scenario-a/portals.md:generic-api-key:96
+858faaf70ee71d226ac497f6e387ee323c3a9d54:platform/scenario-a/portals.md:jwt:104
+
+# specs/001-hub-network-isolation/handoff-cooperative-liquidity-wizard.md
+#   EVM contract addresses in a handoff document. Public addresses, not credentials.
+2b0f484fb26d800720f4175f72f4d86b96e0a3d7:platform/specs/001-hub-network-isolation/handoff-cooperative-liquidity-wizard.md:generic-api-key:113
+2b0f484fb26d800720f4175f72f4d86b96e0a3d7:platform/specs/001-hub-network-isolation/handoff-cooperative-liquidity-wizard.md:generic-api-key:172
+2b0f484fb26d800720f4175f72f4d86b96e0a3d7:platform/specs/001-hub-network-isolation/handoff-cooperative-liquidity-wizard.md:generic-api-key:251
+2b0f484fb26d800720f4175f72f4d86b96e0a3d7:platform/specs/001-hub-network-isolation/handoff-cooperative-liquidity-wizard.md:generic-api-key:293
+
+# scenario-b/specs/006-hub-currency-registry/quickstart.md
+#   EVM contract addresses in quickstart examples. Public addresses, not credentials.
+86d5357aa106e328195774451306ece3ed66be13:platform/scenario-b/specs/006-hub-currency-registry/quickstart.md:generic-api-key:43
+86d5357aa106e328195774451306ece3ed66be13:platform/scenario-b/specs/006-hub-currency-registry/quickstart.md:generic-api-key:61
+86d5357aa106e328195774451306ece3ed66be13:platform/scenario-b/specs/006-hub-currency-registry/quickstart.md:generic-api-key:88
+86d5357aa106e328195774451306ece3ed66be13:platform/scenario-b/specs/006-hub-currency-registry/quickstart.md:generic-api-key:89
+
+# scenario-b/specs/006-hub-currency-registry/contracts/hub-currency-api.md
+#   EVM contract addresses in API documentation examples.
+#   Addresses are public by construction. generic-api-key is reacting to hex entropy.
+86d5357aa106e328195774451306ece3ed66be13:platform/scenario-b/specs/006-hub-currency-registry/contracts/hub-currency-api.md:generic-api-key:106
+86d5357aa106e328195774451306ece3ed66be13:platform/scenario-b/specs/006-hub-currency-registry/contracts/hub-currency-api.md:generic-api-key:112
+86d5357aa106e328195774451306ece3ed66be13:platform/scenario-b/specs/006-hub-currency-registry/contracts/hub-currency-api.md:generic-api-key:146
+86d5357aa106e328195774451306ece3ed66be13:platform/scenario-b/specs/006-hub-currency-registry/contracts/hub-currency-api.md:generic-api-key:147
+86d5357aa106e328195774451306ece3ed66be13:platform/scenario-b/specs/006-hub-currency-registry/contracts/hub-currency-api.md:generic-api-key:25
+
+# backend/docker-compose-backend.bank-d.yaml
+#   BESU_OPERATOR_KEY for the make-era local compose stack (same key as bank-c).
+c34c5badba00708c6e24d25041667a78901c7caa:platform/backend/docker-compose-backend.bank-d.yaml:generic-api-key:71
+
+# backend/docker-compose-backend.bank-c.yaml
+#   BESU_OPERATOR_KEY for the make-era local compose stack — an ephemeral Besu chain on the
+#   developer machine. Never used in production or HML.
+c34c5badba00708c6e24d25041667a78901c7caa:platform/backend/docker-compose-backend.bank-c.yaml:generic-api-key:71

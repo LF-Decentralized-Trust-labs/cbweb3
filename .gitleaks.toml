@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# gitleaks configuration — cbweb3 monorepo root
+#
+# Consumed by .github/workflows/secret-scan.yml (working-tree scan + full
+# history scan). Extends the platform's config — platform/.gitleaks.toml —
+# which itself extends the gitleaks default ruleset, so every platform
+# exemption keeps its provenance notes in exactly one place. The allowlists
+# below cover only repository-root surfaces: the community Toolbox and the
+# root CI workflows.
+#
+# History-only findings (files deleted before HEAD) are suppressed by the
+# root .gitleaksignore fingerprints, not here. Read the header of that file
+# before adding to it.
+
+title = "cbweb3 monorepo gitleaks config"
+
+[extend]
+path = "platform/.gitleaks.toml"
+
+[[allowlists]]
+description = "Toolbox specimen payloads — mocks, test vectors and sandbox tutorials"
+# The Toolbox publishes reference mocks, executable test vectors and a
+# mock-driven tutorial. Their payloads are specimen values BY DESIGN: EVM
+# contract addresses (public by construction), HTLC hashes and preimages
+# (revealed by protocol design), and expired or synthetic session tokens.
+# The conformance suite generates its Prism mock from these same files, so
+# the values must stay literal. Whole-path exemption is deliberate — the same
+# rationale as the platform's test-fixture globs: the files' entire purpose
+# is example data. Nothing under these paths is consumed by any deployment.
+paths = [
+  '''Toolbox/mocks/.*\.json$''',
+  '''Toolbox/test-vectors/.*\.json$''',
+  '''Toolbox/sandbox/tutorials/.*\.md$''',
+]
+
+[[allowlists]]
+description = "Documented example values in published contracts, conformance helpers and root CI"
+# Value-anchored, NOT path globs, so any other high-entropy string in these
+# same files still trips the gate (the platform config documents why globs
+# are the last resort).
+regexes = [
+  # OpenAPI example tokens in Toolbox/contracts/auth — literally a JWT header
+  # followed by "...": not decodable, not credentials.
+  '''eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9\.\.\.''',
+  '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.\.\.''',
+  # Example pool addresses in Toolbox/contracts/amm — the deterministic
+  # well-known local-deployment addresses, public by construction.
+  '''0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512''',
+  '''0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0''',
+  # HTLC preimage specimen shared by the conformance helpers and the PvP
+  # vectors; its sha256 pairing is asserted by the test suite itself.
+  '''d2aec5d19f13a018dd1895ef2f97b1cb0ca95664ff69b99bde9303a7a5dda43c''',
+  # The root Toolbox CI passes a placeholder bearer token to the Prism mock;
+  # the name states what it is.
+  '''SYNTHETIC_TOKEN_CI''',
+]
