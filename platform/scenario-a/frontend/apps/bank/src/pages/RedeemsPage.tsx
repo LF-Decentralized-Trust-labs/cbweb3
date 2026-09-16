@@ -2,6 +2,7 @@
 
 import {
   amountRefusalMessage,
+  apiErrorMessage,
   Badge,
   Button,
   Card,
@@ -93,11 +94,7 @@ export function RedeemsPage() {
       setAmount("0");
       setConfirmRequest(false);
     } catch (submitError) {
-      toast.error(
-        submitError instanceof Error
-          ? submitError.message
-          : "Unable to request redeem",
-      );
+      toast.error(apiErrorMessage(submitError, "Unable to request redeem"));
     }
   };
 

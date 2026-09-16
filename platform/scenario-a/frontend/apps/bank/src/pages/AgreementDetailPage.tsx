@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  apiErrorMessage,
   Badge,
   Button,
   Card,
@@ -89,7 +90,7 @@ export function AgreementDetailPage() {
       toast.success(`Agreement ${action}ed successfully.`);
       setConfirmAction(null);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : `Unable to ${action} agreement.`);
+      toast.error(apiErrorMessage(error, `Unable to ${action} agreement.`));
     }
   };
 

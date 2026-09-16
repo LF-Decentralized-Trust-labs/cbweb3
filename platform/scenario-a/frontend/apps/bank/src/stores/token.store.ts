@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { tokenApi } from "../services/api";
 import type { OnRampRequest, OnRampRequestPayload, TokenBalance, TokenTransaction, TransferRequest } from "../types";
+import { apiErrorMessage } from "@cbweb3/ui";
 
 type TokenState = {
   balance: TokenBalance | null;
@@ -31,7 +32,7 @@ export const useTokenStore = create<TokenState>((set) => ({
       ]);
       set({ balance, transactions, onRampRequests, status: "idle" });
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to load balances" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to load balances") });
     }
   },
   transfer: async (payload) => {
@@ -45,7 +46,7 @@ export const useTokenStore = create<TokenState>((set) => ({
       ]);
       set({ balance, transactions, onRampRequests, status: "idle" });
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to transfer" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to transfer") });
     }
   },
   requestOnRamp: async (payload) => {
@@ -59,7 +60,7 @@ export const useTokenStore = create<TokenState>((set) => ({
       ]);
       set({ balance, transactions, onRampRequests, status: "idle" });
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to submit liquidity request" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to submit liquidity request") });
     }
   },
 }));

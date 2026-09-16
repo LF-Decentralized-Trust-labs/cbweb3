@@ -2,6 +2,7 @@
 
 import {
   amountRefusalMessage,
+  apiErrorMessage,
   Button,
   Card,
   CardContent,
@@ -227,7 +228,7 @@ export function HTLCNewPage() {
       toast.success("PvP transfer initiated successfully.");
       navigate(`/htlc/${result.contract_id}`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to initiate PvP transfer.");
+      toast.error(apiErrorMessage(error, "Unable to initiate PvP transfer."));
     }
   };
 
@@ -249,7 +250,7 @@ export function HTLCNewPage() {
       toast.success("PvP transfer continuation submitted successfully.");
       navigate(`/htlc/${result.contract_id}`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to continue PvP transfer.");
+      toast.error(apiErrorMessage(error, "Unable to continue PvP transfer."));
     }
   };
 

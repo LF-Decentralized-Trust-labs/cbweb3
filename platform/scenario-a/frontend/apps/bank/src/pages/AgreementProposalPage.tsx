@@ -2,6 +2,7 @@
 
 import {
   amountRefusalMessage,
+  apiErrorMessage,
   Button,
   Card,
   CardContent,
@@ -220,7 +221,7 @@ export function AgreementProposalPage() {
       toast.success("Trade agreement proposed successfully.");
       navigate(`/agreements/${result.trade_id}`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to propose trade agreement.");
+      toast.error(apiErrorMessage(error, "Unable to propose trade agreement."));
     }
   };
 

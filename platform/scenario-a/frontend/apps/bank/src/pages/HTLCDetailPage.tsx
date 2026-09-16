@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  apiErrorMessage,
   Badge,
   Button,
   Card,
@@ -99,7 +100,7 @@ export function HTLCDetailPage() {
           // Fall through to user-facing error below.
         }
       }
-      toast.error(error instanceof Error ? error.message : "Unable to complete settlement.");
+      toast.error(apiErrorMessage(error, "Unable to complete settlement."));
     }
   };
 
@@ -109,7 +110,7 @@ export function HTLCDetailPage() {
       toast.success("Settlement revoked. Funds returned.");
       setConfirmRefund(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to revoke settlement.");
+      toast.error(apiErrorMessage(error, "Unable to revoke settlement."));
     }
   };
 
