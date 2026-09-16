@@ -12,6 +12,7 @@ Operational documentation for deployment and configuration of the CBWeb3 platfor
 | [environment-setup.md](environment-setup.md) | Prerequisites, tool installation, complete port reference per entity |
 | [container-log-disk-recovery.md](container-log-disk-recovery.md) | Reclaiming disk from unbounded container logs on hosts deployed before rotation was added, and confirming the growth rate actually fell |
 | [pente-endorser-key-loss-recovery.md](pente-endorser-key-loss-recovery.md) | Recovering an environment whose Pente privacy groups died with `PD012214` because the Paladin key store was on `tmpfs`: persist the seed, prove it survives a restart, then recreate the FX contexts — in that order |
+| [relay-chain-scan-stalled.md](relay-chain-scan-stalled.md) | The Cacti relay stopped advancing its block watermark, so PvP legs never pair and both sides sit pending: confirm the stall, tell the three causes apart, and release the watermark without skipping a settlement that still has to happen |
 
 **Quick start:**
 

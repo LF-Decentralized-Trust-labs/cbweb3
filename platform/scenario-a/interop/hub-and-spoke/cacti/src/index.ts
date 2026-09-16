@@ -47,6 +47,18 @@ interface RelayProof {
   createdAt: number;
 }
 
+/**
+ * Response header carrying the highest journal seq the relay has dropped to retention, per the
+ * kind being served. A consumer whose persisted cursor is at or below it has missed events that
+ * no longer exist — and for the settle journal that is a settlement the destination leg will
+ * never hear about, since the leg's owner is the only party that can settle it.
+ *
+ * A header rather than a field: the body is a bare array that the Go poller decodes directly,
+ * and a relay and an orchestrator are deployed separately, so the shape has to stay compatible
+ * in both directions.
+ */
+const JOURNAL_TRIMMED_HEADER = "X-Relay-Journal-Trimmed-Through";
+
 const proofStore = new Map<string, RelayProof>();
 const MAX_PROOFS = 5_000;
 
@@ -88,7 +100,7 @@ async function main(): Promise<void> {
 
   // ── Relay store + dynamic spoke registry ─────────────────────────────────
   const abortController = new AbortController();
-  const relayStore = new RelayStore(config.relayStorePath);
+  const relayStore = new RelayStore(config.relayStorePath, console, config.journalMaxEntries);
   await relayStore.init();
 
   // The registry is the single source of watched spokes. A founding central bank self-registers
@@ -142,7 +154,13 @@ async function main(): Promise<void> {
 
   // Liveness / readiness
   app.get("/api/v1/health", (_req: Request, res: Response) => {
-    res.json({ status: "ok", uptime: process.uptime() });
+    // The chain scan is the relay's actual job, and "the process is up" says nothing about it:
+    // through the LNET outage this probe answered ok for three days while no spoke was being
+    // scanned. Serving the watermarks here replaces a two-reading manual procedure against a
+    // Docker volume with one curl, and gives a dashboard something worth alerting on —
+    // secondsSinceAdvance, which separates catching up from stopped.
+    const scan = relay.getScanLiveness();
+    res.json({ status: "ok", uptime: process.uptime(), scan });
   });
 
   // ── Spoke registration (RL-1) ────────────────────────────────────────────
@@ -206,6 +224,10 @@ async function main(): Promise<void> {
    */
   app.get("/api/v1/relay/events/settle", (req: Request, res: Response) => {
     const since = parseInt(String(req.query["since"] ?? "0"), 10);
+    // The body shape is unchanged — a bare array — because the Go poller decodes it directly.
+    // The retention mark rides in a header so an older consumer is unaffected and a current
+    // one can tell whether its cursor fell off the end of the journal.
+    res.set(JOURNAL_TRIMMED_HEADER, String(relay.getJournalTrimmedThrough("settle")));
     res.json(relay.getSettleEvents(Number.isFinite(since) ? since : 0));
   });
 
@@ -217,6 +239,7 @@ async function main(): Promise<void> {
    */
   app.get("/api/v1/relay/events/lock", (req: Request, res: Response) => {
     const since = parseInt(String(req.query["since"] ?? "0"), 10);
+    res.set(JOURNAL_TRIMMED_HEADER, String(relay.getJournalTrimmedThrough("lock")));
     res.json(relay.getLockEvents(Number.isFinite(since) ? since : 0));
   });
 

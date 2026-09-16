@@ -80,6 +80,7 @@ func validManifest() *manifest.Manifest {
 			Image:       "build",
 			KeyProvider: "kms://local-emulator",
 			CertSource:  "self-signed",
+			Relay:       &manifest.Relay{Endpoint: "http://localhost:4000"},
 			AdminUsers: []manifest.AdminUser{
 				{Role: "ROLE_GOVERNANCE", Username: "admin@brasil.governance.gov", Password: "governance-local"},
 				{Role: "ROLE_TREASURY", Username: "admin@brasil.treasury.gov", Password: "treasury-local"},
@@ -158,7 +159,9 @@ func TestValidate_ValidManifest(t *testing.T) {
 
 func TestValidate_ValidManifest_OptionalFieldsOmitted(t *testing.T) {
 	m := validManifest()
-	m.Spec.Relay = nil        // optional
+	// spec.relay was in this list until it became required for mode:found — see
+	// TestValidate_RelayEndpoint_RequiredForFound for why a missing one is not a harmless
+	// default but a bank that silently never settles.
 	m.Spec.JoinBundleRef = "" // optional
 	m.Spec.Node.RPC = nil     // optional
 	m.Spec.Node.WS = nil      // optional
@@ -329,6 +332,46 @@ func TestValidate_DataDir_RequiredForJoin(t *testing.T) {
 	err := manifest.Validate(m)
 	if err == nil || !strings.Contains(err.Error(), "spec.node.dataDir") {
 		t.Errorf("dataDir must be required for mode:join, got: %v", err)
+	}
+}
+
+// The founding central bank's relay endpoint is what the join bundle carries to every bank
+// that joins the spoke, and a bank's payment-orchestrator polls the relay's settle journal —
+// the path that actually settles a destination leg. Omitting it here produced a bundle with no
+// relay section, and a joining bank then fell back to http://host.docker.internal:4000: not
+// empty, so no startup check fired, and on its own VM simply nothing. That bank never learns
+// of a counterpart lock or a revealed secret, silently.
+func TestValidate_RelayEndpoint_RequiredForFound(t *testing.T) {
+	m := validManifest()
+	m.Spec.Mode = "found"
+	m.Spec.Relay = nil
+	err := manifest.Validate(m)
+	if err == nil || !strings.Contains(err.Error(), "spec.relay.endpoint") {
+		t.Errorf("relay endpoint must be required for mode:found, got: %v", err)
+	}
+}
+
+// A present-but-blank endpoint is the same hole with a section around it.
+func TestValidate_RelayEndpoint_RejectsEmptyForFound(t *testing.T) {
+	m := validManifest()
+	m.Spec.Mode = "found"
+	m.Spec.Relay = &manifest.Relay{Endpoint: ""}
+	err := manifest.Validate(m)
+	if err == nil || !strings.Contains(err.Error(), "spec.relay.endpoint") {
+		t.Errorf("a blank relay endpoint must be rejected for mode:found, got: %v", err)
+	}
+}
+
+// A joining bank inherits the endpoint from the bundle, so its own manifest need not repeat
+// it. The requirement is on the spoke's founder, not on every participant.
+func TestValidate_RelayEndpoint_NotRequiredForJoin(t *testing.T) {
+	m := validManifest()
+	m.Spec.Role = "commercial-bank"
+	m.Spec.Mode = "join"
+	m.Spec.JoinBundleRef = "./bundles/spoke-brl.bundle.yaml"
+	m.Spec.Relay = nil
+	if err := manifest.Validate(m); err != nil && strings.Contains(err.Error(), "spec.relay") {
+		t.Errorf("a joining bank must not be required to declare a relay endpoint, got: %v", err)
 	}
 }
 
