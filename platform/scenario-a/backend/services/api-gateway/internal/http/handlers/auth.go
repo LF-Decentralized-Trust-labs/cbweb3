@@ -5,14 +5,14 @@ package handlers
 
 import (
 	"fmt"
-	"log"
-
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/middleware"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/gofiber/fiber/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"log"
+	"time"
 )
 
 // AuthHandler implements authentication endpoints.
@@ -166,35 +166,37 @@ func setAuthCookies(c *fiber.Ctx, accessToken, refreshToken string, expiresIn, r
 	return nil
 }
 
-// clearAuthCookies removes the auth cookies from the browser by expiring them immediately.
+// clearAuthCookies deletes the auth cookies from the browser.
+//
+// Expires-in-the-past, NOT MaxAge: -1. Fiber writes a Max-Age attribute only when the value is
+// positive, so a negative one is dropped without warning and the browser receives a cookie with
+// an empty value and NO expiry — cleared in effect, since an empty session fails authentication,
+// but still sitting in the jar until the browser closes. Setting Expires is what deletes it.
+//
+// The bug was invisible from Go: a test that reads MaxAge back sees the value the handler set,
+// not what Fiber wrote, so it passes both before and after. logout_cookie_wire_test.go asserts
+// the Set-Cookie header instead, which is the only place the difference exists.
+//
+// The NOC backend already did it this way, and already tested it
+// (noc-backend/internal/api/auth_test.go, TestLogout_ExpiresEveryAuthCookie); this gateway is
+// the half that had not caught up on either. Both scenarios carry the same fix — the same hole was on
+// each side, so it is not drift.
 func clearAuthCookies(c *fiber.Ctx, secure bool) {
-	c.Cookie(&fiber.Cookie{
-		Name:     middleware.CSRFCookieName,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HTTPOnly: false,
-		Secure:   secure,
-		SameSite: "Strict",
-	})
-	c.Cookie(&fiber.Cookie{
-		Name:     "access_token",
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HTTPOnly: true,
-		Secure:   secure,
-		SameSite: "Strict",
-	})
-	c.Cookie(&fiber.Cookie{
-		Name:     "refresh_token",
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HTTPOnly: true,
-		Secure:   secure,
-		SameSite: "Strict",
-	})
+	past := time.Now().Add(-time.Hour)
+	for _, name := range []string{middleware.CSRFCookieName, "access_token", "refresh_token"} {
+		c.Cookie(&fiber.Cookie{
+			Name:  name,
+			Value: "",
+			Path:  "/",
+			// Expires, not MaxAge — see above.
+			Expires: past,
+			// The CSRF cookie is read by the browser's JS to echo the token back; the session
+			// cookies are not. Unchanged from before this fix.
+			HTTPOnly: name != middleware.CSRFCookieName,
+			Secure:   secure,
+			SameSite: "Strict",
+		})
+	}
 }
 
 // Login authenticates a client and returns tokens or a PKI nonce challenge.
