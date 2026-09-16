@@ -179,6 +179,7 @@ type bridgeBurnUnlockServiceIface interface {
 
 type bridgePositionReaderIface interface {
 	ListPositions(ctx context.Context, stateFilter string) ([]services.BridgePositionResult, error)
+	ListPositionsForOwner(ctx context.Context, ownerBankID, stateFilter string) ([]services.BridgePositionResult, error)
 }
 
 type liquidityServiceIface interface {
@@ -622,6 +623,21 @@ func registerSovereignRoutes(app *fiber.App, deps Dependencies) {
 		app.Post("/internal/amm/cross-currency-bridge-out",
 			middleware.RequireRelayAuthMigrating(deps.RelayAuth),
 			ccboh.HandleBridgeOut,
+		)
+	}
+
+	// Pre-flight for the SAME condition the bridge-out above enforces, asked by another central
+	// bank before it moves any value. Registered next to it deliberately: the two answer from
+	// the same registry, and if they ever disagree the pre-flight would authorise a payment the
+	// delivery then refuses — which is worse than having no pre-flight at all.
+	//
+	// It reuses CrossCurrencyBeneficiaryResolver, so there is one implementation of "can this
+	// bank receive" rather than two that can drift.
+	if checker, ok := deps.CrossCurrencyBeneficiaryResolver.(handlers.BeneficiaryEligibilityCheckerIface); ok && checker != nil {
+		beh := handlers.NewBeneficiaryEligibilityHandler(checker)
+		app.Post("/internal/amm/beneficiary-eligibility",
+			middleware.RequireRelayAuthMigrating(deps.RelayAuth),
+			beh.HandleCheck,
 		)
 	}
 

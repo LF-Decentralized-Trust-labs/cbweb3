@@ -215,6 +215,17 @@ func TestEmitReport_BundleOmittedOnDryRun(t *testing.T) {
 
 // ---- US2: dry-run ----
 
+// stepPlanned reports whether the plan contains a step by name. A count alone says the plan
+// grew, not that it grew the right way.
+func stepPlanned(steps []apply.StepResult, name string) bool {
+	for _, s := range steps {
+		if s.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDryRun_AllPendingForNewSpoke(t *testing.T) {
 	m := loadTestManifest(t, "central-bank-brl.yaml")
 	// Point DataDir to an empty temp dir so no state file exists.
@@ -236,8 +247,19 @@ func TestDryRun_AllPendingForNewSpoke(t *testing.T) {
 	if result.DryRun != true {
 		t.Error("DryRun should be true")
 	}
-	if len(result.Steps) != 17 {
-		t.Errorf("Steps len = %d; want 17", len(result.Steps))
+	// 19 since reconcile-keycloak-realm joined the found pipeline (see CanonicalStepOrder).
+	//
+	// The count is a deliberate tripwire, hand-maintained: deriving it from PlannedStepOrder
+	// would be tautological, since that is what the plan is built from. Bumping it is meant to
+	// be a moment of thought about whether the new step belongs, so the name check below says
+	// which step the number is about.
+	if len(result.Steps) != 19 {
+		t.Errorf("Steps len = %d; want 19", len(result.Steps))
+	}
+	if !stepPlanned(result.Steps, "reconcile-keycloak-realm") {
+		t.Error("reconcile-keycloak-realm is not in the plan; the realm import only applies to a " +
+			"realm that does not yet exist, so without it a changed origin or token lifespan " +
+			"never reaches a provisioned entity")
 	}
 	for _, s := range result.Steps {
 		if s.Status != "pending" {

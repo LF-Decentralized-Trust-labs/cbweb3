@@ -16,11 +16,11 @@ func TestObserveComposeEnvCarriesAMMGateway(t *testing.T) {
 	c := ObserveConfig{
 		Runner:        &exec.FakeRunner{},
 		Bundle:        observeBundle(),
-		AMMGatewayURL: "http://host.docker.internal:41645",
+		AMMGatewayURL: "http://host.docker.internal:17145",
 	}
 	c.WithDefaults()
 
-	if joined := strings.Join(c.ComposeEnv(), "\n"); !strings.Contains(joined, "AMM_GATEWAY_URL=http://host.docker.internal:41645") {
+	if joined := strings.Join(c.ComposeEnv(), "\n"); !strings.Contains(joined, "AMM_GATEWAY_URL=http://host.docker.internal:17145") {
 		t.Errorf("AMM_GATEWAY_URL missing from compose env:\n%s", joined)
 	}
 }
@@ -43,7 +43,7 @@ func TestObserveAMMGatewayDoesNotChangeThePortalImage(t *testing.T) {
 	base := ObserveConfig{Runner: &exec.FakeRunner{}, Bundle: observeBundle()}
 	base.WithDefaults()
 	withGateway := base
-	withGateway.AMMGatewayURL = "http://host.docker.internal:41645"
+	withGateway.AMMGatewayURL = "http://host.docker.internal:17145"
 
 	if base.portalImage() != withGateway.portalImage() {
 		t.Errorf("portal image changed with the AMM gateway: %q vs %q", base.portalImage(), withGateway.portalImage())

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  apiErrorMessage,
   Badge,
   Button,
   Card,
@@ -53,6 +54,7 @@ export function HTLCHistoryPage() {
   const search = useHtlcStore((state) => state.search);
   const fetchPayments = usePaymentStore((state) => state.fetchAll);
   const balance = usePaymentStore((state) => state.balance);
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
   const paymentStatus = usePaymentStore((state) => state.status);
 
   const [stateFilter, setStateFilter] = useState<FilterState>("ALL");
@@ -71,7 +73,7 @@ export function HTLCHistoryPage() {
       setLocks(response.locks);
       setTotal(response.total);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to load settlement history.");
+      toast.error(apiErrorMessage(error, "Unable to load settlement history."));
     } finally {
       setLoading(false);
     }
@@ -98,7 +100,7 @@ export function HTLCHistoryPage() {
         </Button>
       </div>
 
-      <BalanceWidget balance={balance} loading={paymentStatus === "loading" && balance === null} />
+      <BalanceWidget balance={balance} decimals={tCeBMDecimals} loading={paymentStatus === "loading" && balance === null} />
 
       <Card>
         <CardHeader>

@@ -142,6 +142,37 @@ type ProxyRoute struct {
 	IsAPI    bool // api routes strip only /<scenario> (gateway keeps /api/v1/…); portals strip the whole prefix
 }
 
+// centralBankProxyRoutes and commercialBankProxyRoutes are the route sets each mode
+// exposes. They are functions rather than literals at the two call sites in orchestrator.go
+// so a guard can evaluate them for an entity name nobody has deployed yet — the bound has
+// to hold for the next country, not for the ones tried so far.
+//
+// Ported in shape from Scenario B, where the same upstreams outgrew a DNS label and three
+// portals answered 502 while the api-gateway kept working, which read as a routing fault
+// rather than a naming one. See proxy_dns_label_test.go and docs/guard-parity.md.
+
+// centralBankProxyRoutes routes a central bank's portals and its api-gateway by path.
+//
+// The NOC portal is co-located on the entity network (built here); its backend route
+// (/a/noc-api/) is written separately by the observe deployment.
+func centralBankProxyRoutes(prefix string) []ProxyRoute {
+	return []ProxyRoute{
+		{Segment: "governance", Upstream: prefix + "-governance-frontend:80"},
+		{Segment: "treasury", Upstream: prefix + "-treasury-frontend:80"},
+		{Segment: "supervisor", Upstream: prefix + "-supervisor-frontend:80"},
+		{Segment: nocProxyPortalSegment, Upstream: prefix + "-noc-frontend:80"},
+		{Segment: "api", Upstream: prefix + "-api-gateway:8080", IsAPI: true},
+	}
+}
+
+// commercialBankProxyRoutes routes a commercial bank's portal and its api-gateway by path.
+func commercialBankProxyRoutes(prefix string) []ProxyRoute {
+	return []ProxyRoute{
+		{Segment: "bank", Upstream: prefix + "-bank-frontend:80"},
+		{Segment: "api", Upstream: prefix + "-api-gateway:8080", IsAPI: true},
+	}
+}
+
 // proxyStep is the SOFT per-host reverse-proxy step. Like the launcher it is soft-by-
 // logging: Scenario A's engine has no soft flag, so Run never returns an error for a
 // non-fatal proxy problem (missing image, docker failure) — it logs and returns nil so the

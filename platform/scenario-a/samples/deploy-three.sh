@@ -161,14 +161,14 @@ cat <<'EOF'
                                                  launcher   http://localhost:5199
 
   Argentina (spoke-ars)
-    central-bank   api http://localhost:18845   governance http://localhost:25845
-                                                 treasury   http://localhost:26845
-                                                 supervisor http://localhost:30845
-                                                 noc        http://localhost:32845
+    central-bank   api http://localhost:18665   governance http://localhost:25665
+                                                 treasury   http://localhost:26665
+                                                 supervisor http://localhost:30665
+                                                 noc        http://localhost:32665
                                                  launcher   http://localhost:5194
-    bank-galicia   api http://localhost:18846   portal     http://localhost:25846
+    bank-galicia   api http://localhost:18666   portal     http://localhost:25666
                                                  launcher   http://localhost:5195
-    bank-macro     api http://localhost:18847   portal     http://localhost:25847
+    bank-macro     api http://localhost:18667   portal     http://localhost:25667
                                                  launcher   http://localhost:5196
 
   The launcher (per entity) is the A/B entry point; it lists that entity's Scenario A

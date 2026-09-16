@@ -40,6 +40,7 @@ This runbook describes the complete procedure for bringing up the CBWeb3 environ
   - [Frontend: make frontend-spoke-all](#frontend-make-frontend-spoke-all)
   - [Health verification](#health-verification)
   - [End-to-end demo (HTLC cross-spoke)](#end-to-end-demo-htlc-cross-spoke)
+  - [Redeploying after a code change (`--rebuild`)](#redeploying-after-a-code-change---rebuild)
   - [Teardown](#teardown)
 - [Scenario B — International Hub](#scenario-b--international-hub)
 - [Troubleshooting](#troubleshooting)
@@ -188,6 +189,13 @@ The command runs **Spoke-A** followed by **Spoke-B** in sequence, then starts th
 
 ### Detailed phases
 
+> **Esta seção descreve o caminho removido.** Os alvos `make deploy.up-*`,
+> `make dev.up-<entidade>` e `make spoke-all` citados abaixo **não existem mais**, e os
+> arquivos sob `deploy/local/` que ela referencia foram apagados junto com eles. A seção
+> é mantida como registro da sequência de fases — útil para entender o que o toolkit faz
+> em cada etapa —, não como instrução executável. Para subir um stack, use
+> `cd samples && ./deploy-all.sh`.
+
 Each spoke goes through the same phases. The numbers below correspond to the internal `make` calls.
 
 #### Phase 1 — PKI (idempotent)
@@ -246,7 +254,6 @@ Contracts deployed per spoke:
 | `HashTimeLockedContract` | Atomic cross-spoke escrow |
 | `IdentityRegistry` | On-chain participant registry |
 | `SpokeBridge` | Cross-spoke bridge |
-| `AutomatedMarketMaker` | AMM pool (used in Scenario B) |
 | `FXAgreement` | FX agreement lifecycle |
 
 #### Phase 5 — Paladin (privacy layer)
@@ -363,7 +370,7 @@ make pki.check-commercial-banks
 - [ ] All 6 API gateways return 200 on `/healthz`
 - [ ] Besu spoke-a (chain 1338) is producing blocks
 - [ ] Besu spoke-b (chain 1339) is producing blocks
-- [ ] Contracts deployed (addresses in `deploy/local/paladin/spoke-a/.deployed-addrs.env`)
+- [ ] Contracts deployed (addresses in `<SPOKE_DATA_DIR>/.deployed-addrs.env`, the entity data dir the manifest declares)
 - [ ] Paladin nodes responding (check logs via `docker logs`)
 - [ ] Cacti relay running
 
@@ -397,6 +404,34 @@ Per-entity scripts:
 ./tryouts/tryout-spoke-a-bank-a.sh   # Onboarding + payment Bank-A
 ./tryouts/tryout-spoke-b-bank-b.sh   # Onboarding + payment Bank-B
 ```
+
+---
+
+### Redeploying after a code change (`--rebuild`)
+
+The steps that build this entity's service and portal images are gated on a **health
+probe** — does the api-gateway answer `/healthz`, does each portal serve a page. Neither
+question can see the source tree. So after editing a Go service or a React app, a plain
+apply finds the containers healthy, reports the step satisfied, and never reaches the
+`docker compose up --build` inside it. The stack keeps serving the previous binary while
+the report says everything is fine.
+
+```bash
+cbweb3 apply -f <manifest.yaml> --rebuild
+```
+
+`--rebuild` overrides that check for those steps only: the images are rebuilt from the
+current source and compose recreates the containers on the new image id. It does **not**
+touch chain state, contracts, PKI or genesis, and it does not re-run the rest of the
+pipeline — Besu, Paladin and the deploy steps keep their normal checks.
+
+The report tells the two apart: a step this run actually rebuilt reads `executed`, one
+whose check stood reads `skipped`.
+
+> Deleting the step's line from `<dataDir>/.provisioning-state.yaml` does **not** work,
+> and never did. This engine calls every step's `Check` regardless of persisted state,
+> so the probe still answers "healthy" and the step is still skipped. Until this flag
+> existed, that workaround also made the report claim the step had `executed`.
 
 ---
 
@@ -536,17 +571,16 @@ cat contracts/.env
 
 Make sure `DEPLOYER_PRIVATE_KEY`, `ADMIN_ADDRESS`, and `CENTRAL_BANK_ADDRESS` are set in `contracts/.env`.
 
-### Resume is refused, or a participant cannot be registered (institutionId)
+### A participant cannot be registered, or resolves to the wrong institution (institutionId)
 
-The IdentityRegistry carries an `institutionId` per participant, and the AMM resume quorum
-counts **distinct institutions** rather than distinct addresses. Two consequences show up at
-deploy time.
+The IdentityRegistry carries an `institutionId` per participant, and institution attribution
+is read back through `getInstitutionId` by the auth and compliance services. Two consequences
+show up at deploy time.
 
 **The registry ABI changed.** `registerParticipant` takes a fifth argument (`bytes32
 institutionId`) and `getInstitutionId(address)` is new. A registry deployed before this
-change does not answer `getInstitutionId`, and an AMM pointed at it refuses every resume
-signature with `AMM__InvalidInstitutionId`. There is no migration path on a deployed
-instance — the registry holds no such field. It has to be redeployed, and the toolkit is the
+change does not answer `getInstitutionId` at all, so every caller that reads institution
+attribution gets nothing back. There is no migration path on a deployed instance — the registry holds no such field. It has to be redeployed, and the toolkit is the
 only path that does so (see the note at the top of this runbook: the legacy `deploy/local`
 targets were retired on 2026-08-21).
 
@@ -570,17 +604,14 @@ exists. It belongs to the retired six-entity local topology: its sync step write
 `backend/config/.env.infra.*`, files nothing provisions any more, and after the legacy
 removal moved the script its own `ROOT_DIR` resolves above the repository root.
 
-The AMM and the registry must move together. A stack with a new AMM and an old registry, or
-the reverse, fails at the first resume rather than at deploy.
-
 **One institution must resolve to one id.** The id is `keccak256(bankCode)`, computed
 identically in three places — the Go services
 (`backend/shared/blockchain/registry.InstitutionIDForParticipant`), the seed script
 (`contracts/script/RegisterParticipants.s.sol`, env `CENTRAL_BANK_CODE`) and the
 provisioning toolkit (which renders `GOVERNANCE_BANK_CODE` into the CB's env and hashes the
 same value). If a central bank registers a second governance wallet under a different code,
-the contract sees two institutions and that bank can resume on its own — the failure this
-control exists to prevent, and it fails silently. Check the codes agree:
+the registry records two institutions for one bank and every consumer of that attribution
+reads them as unrelated — and it fails silently. Check the codes agree:
 
 ```bash
 # The toolkit renders the CB's env into the data dir, not into backend/config.
@@ -611,7 +642,7 @@ docker logs cbweb3-api-gateway-bank-a --tail 50
 make deploy.validate-backend-bank-a
 ```
 
-Check that contract addresses were synced: `deploy/local/paladin/spoke-a/.deployed-addrs.env`.
+Check that contract addresses were synced: `<SPOKE_DATA_DIR>/.deployed-addrs.env`.
 
 ### Regenerate PKI
 

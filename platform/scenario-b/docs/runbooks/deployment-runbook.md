@@ -715,6 +715,7 @@ verified identity to be the institution named in the request:
 | `/internal/v1/payments/{deposits,escrows,redeems}` (GET) | `requester_id` (derived, not read) | `401 RELAY_CALLER_IDENTITY_REQUIRED`, `403 REQUESTER_NOT_A_PARTICIPANT` |
 | `/internal/v1/payments/{deposits,escrows,redeems}` (POST) | `requester_besu_address` (derived, not read) | same |
 | `/internal/v1/payments/deposits/exchange` (POST) | `deposit_id` must belong to the caller | `403 REQUESTER_NOT_DEPOSIT_OWNER`, `503 DEPOSIT_OWNERSHIP_UNAVAILABLE` |
+| `/internal/v1/bridge/positions` (GET) | `owner_bank_id` (derived, not read) | `401 RELAY_CALLER_IDENTITY_REQUIRED` |
 
 **These routes deliberately ignore `RELAY_REQUIRE_SIGNATURE`, and that divergence must not be
 "fixed".** Everywhere else the flag decides whether the shared secret is still accepted; here it is
@@ -965,7 +966,7 @@ make deploy.up-hub-besu
 
 #### Validator Configuration
 
-The sandbox uses a **single-validator** Hub topology (`NODES=1` in `deploy/local/hub-besu/.env.network`, see [research.md Decision 3](../../specs/001-hub-network-isolation/research.md)). A single validator is sufficient for prototype and integration testing: the sole node acts as both bootnode and validator, producing 2-second QBFT blocks.
+The sandbox uses a **single-validator** Hub topology — [`provisioning/templates/hub.compose.yaml`](../../provisioning/templates/hub.compose.yaml) declares one `hub-validator` service (the `NODES=1` setting in `deploy/local/hub-besu/.env.network` this used to cite went with that removed tree, and the `001-hub-network-isolation` spec it referenced for Decision 3 is not in the tree either). A single validator is sufficient for prototype and integration testing: the sole node acts as both bootnode and validator, producing 2-second QBFT blocks.
 
 **For production deployments**, the single-validator topology is explicitly not recommended. Production requires a Byzantine-fault-tolerant validator set with **n ≥ 3f+1** nodes, where `f` is the maximum number of faulty nodes you wish to tolerate. Minimum practical configuration for 1 fault tolerance: **4 validators**. Additional steps for a multi-validator Hub:
 
@@ -1277,21 +1278,37 @@ docker ps --format '{{.Names}}' | grep '^sc-b-cbweb3-'
 **Ports on the toolkit path** are all offsets from the entity's `spec.node.rpc.port` in its
 manifest, so each entity gets its own set and nothing collides:
 
-| Service | Offset | Example (bank-itau, RPC `33646`) |
+| Service | Offset | Example (bank-itau, RPC `9146`) |
 | --- | --- | --- |
-| Besu JSON-RPC | `+0` | `33646` |
-| Postgres | `+5000` | `38646` |
-| Redis | `+6000` | `39646` |
+| Besu JSON-RPC | `+0` | `9146` |
+| Postgres | `+5000` | `14146` |
+| Redis | `+6000` | `15146` |
 | Keycloak (CB/hub only) | `+7000` | — |
-| API gateway | `+8000` | `41646` |
-| Portal (bank) / governance portal (CB) | `+9000` | `42646` |
+| API gateway | `+8000` | `17146` |
+| Portal (bank) / governance portal (CB) | `+9000` | `18146` |
 | NOC backend (CB/hub only) | `+11000` | — |
 | NOC portal (CB/hub only) | `+12000` | — |
 | Treasury portal (CB only) | `+13000` | — |
 | Supervisor portal (CB only) | `+14000` | — |
 
-The sample topology therefore exposes the hub gateway on `41845` (RPC `33845`), Brazil's central
-bank on `41645` and bank-itau on `41646`.
+The sample topology therefore exposes the hub gateway on `17345` (RPC `9345`), Brazil's central
+bank on `17145` and bank-itau on `17146`.
+
+Every one of these must stay below **32768**, the floor of the kernel's ephemeral range
+(`net.ipv4.ip_local_port_range`, default `32768-60999`). A published host port at or above
+it races every outbound connection on the machine: the kernel may hand that number to
+another socket before Docker binds it, and the bind fails with `address already in use`
+against a port nothing appears to hold — at a random step of a random entity. Because the
+supervisor portal carries the largest offset, the ceiling on a declared RPC port is
+**18767**; a base above it produces derived ports in the range even though the base itself
+looks safe. On the single-host sample topology, Scenario B bases live in the
+`x145`-`x557` lane and Scenario A's in `x645`-`x767`, so the two scenarios never
+collide there. `deploy-lnet` runs one entity per VM and keeps them disjoint by a
+different arrangement (Scenario A on suffix `645`, Scenario B on suffix `845`; see
+[`deploy-lnet/README.md`](../../../deploy-lnet/README.md)) — the ceiling applies to
+both trees, the lane split only to the samples. `ports_ephemeral_test.go` enforces
+the ceiling on both; see
+[`docs/scenario-drift.md`](../../../docs/scenario-drift.md) §10.
 
 **Per-entity step state** lives in `<dataDir>/.provisioning-state.yaml` — that is what makes a
 re-run resume instead of restarting. `apply` prints a per-step report; read it before reading logs.
@@ -1323,7 +1340,7 @@ docker exec <portal-container> grep -c 'a distinctive string from your change' \
   /usr/share/nginx/html/assets/*.js
 
 # Force a rebuild
-docker rmi -f cbweb3b/bank-frontend:gw41646
+docker rmi -f cbweb3b/bank-frontend:gw17146
 ```
 
 Then re-run the deploy (or the single `start-bank-frontend` step). The same applies to the CB
@@ -1409,47 +1426,64 @@ It should not be: an unknown key-id triggers one registry reload before rejectio
 once every 5s. If it persists, the bank has no issued certificate stored — check that onboarding
 completed (`certificate_data` on its `participants` row), since that is the pin source.
 
-### A central bank's CA material on disk is misleading (open, low severity)
+### `sign CSR: x509: provided PrivateKey doesn't match parent's PublicKey` (fixed)
 
-**Reproduced on a clean deploy**, so this is systematic, not the residue of repeated re-applies. A
-CB's PKI volume holds three distinct keys where the filenames suggest two pairs:
+A commercial bank's onboarding fails at **Complete** with that message. KYC approval succeeded,
+because that step signs nothing — the failure waits for the first credential actually issued, which
+can be weeks after the deploy that caused it.
 
-| File | State |
+**Cause.** `central-bank.crt` and `central-bank.key` had two producers with conflicting intent:
+
+| Producer | What it writes there |
 |---|---|
-| `central-bank-ca.crt` + `central-bank-ca.key` | a matched pair, but NOT the issuer in use |
-| `central-bank.crt` | the certificate that actually signs participant credentials |
-| `central-bank.key` | matches no certificate present |
+| toolkit `gen-tls-spoke` (`genCBCA`) | a **self-signed CA** (`IsCA`, CN `central-bank-ca`) and its key |
+| compliance `EnsurePKIFiles` | this entity's **participant** key/CSR, and a leaf signed by `central-bank-ca.*` |
 
-Compliance is configured with `CA_CERT_FILE=central-bank.crt` and `CA_KEY_FILE=central-bank.key` — a
-pair that does not match.
+`ensureCSR`'s guard was `fileExists(csr) && fileExists(key)`, so a key with no CSR beside it — exactly
+what `gen-tls` leaves — read as "nothing here": the bootstrap generated a fresh pair over a private key
+it did not create, while `ensureCert` left the certificate alone. The volume was then left holding
+`central-bank.crt` (gen-tls's CA) next to `central-bank.key` (a participant key), and
+`CA_CERT_FILE`/`CA_KEY_FILE` named that mismatched pair.
 
-**Credential issuance nevertheless works, and this was verified.** On a freshly deployed stack two
-banks were onboarded end to end (credential request → KYC approval → COMPLETE), and the issued
-certificate verifies against `central-bank.crt`. The consistent explanation is that compliance
-generates and keeps its CA in memory during bootstrap, writes the certificate to `central-bank.crt`,
-and never reads `CA_KEY_FILE` back; the `.key` files in the volume are residue from another generator.
+**Why it appeared to work at first.** Onboarding two banks end to end on a fresh stack succeeded and
+was verified. That is not a contradiction: `main` loaded the CA *before* running the bootstrap, so the
+in-memory CA held the pair as it was — still matched. The clobbered key on disk only bites the next
+time the container reads it, i.e. after a restart or redeploy.
 
-**So the risk is not what it looks like.** Onboarding is not blocked. What is broken is the *disk
-representation*: any component that treats `central-bank.crt` + `central-bank.key` as a CA pair fails
-with `x509: provided PrivateKey doesn't match parent's PublicKey`. That is a trap for future work, not
-an outage — the toolkit's `gen-relay-identity` hit exactly it and now falls back to a self-signed
-identity, which is equivalent under pinning since the issuer is never consulted.
+**Fixed** by three changes that must stay together:
 
-Note also that `genCBCA`'s idempotency check is `volumeHasFile(central-bank.crt)`, so it will never
-repair the pairing on an existing volume.
+- `CA_CERT_FILE`/`CA_KEY_FILE` name `central-bank-ca.*`, the pair the compliance bootstrap creates on
+  its own (pinned by `TestCAEnvNamesTheBootstrapCAPair`);
+- `ensureCSR` adopts an existing key and derives its CSR instead of replacing it;
+- `NewCAFromEnv` refuses a cert and key that are not each other's, naming both files, and the
+  bootstrap now runs *before* the CA load — with `CA_CERT_FILE` naming a file the bootstrap creates,
+  the old order would be fatal on every first boot.
 
-Verify before building anything that signs with the CB's CA:
+Expect `compliance: CA loaded from disk` and no `not a pair`; where the bootstrap adopts a key it logs
+`reused the existing key at …`. An affected stack repairs itself on `apply --rebuild` as long as
+`central-bank-ca.*` is already a coherent pair there; check with the fingerprints below.
 
 ```bash
-docker cp <cb-gateway>:/workspace/backend/config/pki/central-bank.crt /tmp/ca.crt
-docker cp <cb-gateway>:/workspace/backend/config/pki/central-bank.key /tmp/ca.key
-# These two hashes are currently DIFFERENT; treat the pair as unusable until that is fixed.
+docker cp <cb-compliance>:/workspace/backend/config/pki/central-bank-ca.crt /tmp/ca.crt
+docker cp <cb-compliance>:/workspace/backend/config/pki/central-bank-ca.key /tmp/ca.key
+# These two hashes MUST be identical.
 openssl x509 -in /tmp/ca.crt -pubkey -noout | openssl dgst -sha256
 openssl ec   -in /tmp/ca.key -pubout      | openssl dgst -sha256
 ```
 
-The CA design is deferred to a later phase of the project; this entry exists so the disk state is not
-mistaken for a usable CA in the meantime.
+**Still open, and it belongs to the CA card, not here.**
+
+- `ensureCert` skips a certificate that does not match its key, so an *existing* mismatch is not
+  repaired — only new ones are prevented. `genCBCA`'s idempotency check is
+  `volumeHasFile(central-bank.crt)`, so it will not repair a volume either.
+- The issuer moved, so a stack upgraded across this fix has **two trust anchors**: credentials issued
+  before it chain to gen-tls's CA in `central-bank.crt`, and new ones to `central-bank-ca.*`. Nothing
+  verifies chains today — `VerifyChain` is gated on `CA_CERT_PEM`, which no template or toolkit step
+  sets, and `relayauth` pins per certificate — so nothing fails. When chain verification is wired,
+  every credential issued before the fix has to be re-issued, not just the hand-repaired ones.
+- `EnsureGovernanceParticipant` stores the CA certificate as the governance row's `certificate_data`
+  and returns early when the row exists, so an upgraded stack keeps the old anchor in its database
+  while a fresh deploy stores the new one.
 
 ### Keycloak does not initialize
 

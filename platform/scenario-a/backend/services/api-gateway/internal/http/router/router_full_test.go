@@ -91,6 +91,7 @@ func TestSetup_CentralBankRoutesRegistered(t *testing.T) {
 	for _, tc := range routes {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
 		req.AddCookie(&http.Cookie{Name: "access_token", Value: "tok"})
+		attachCSRF(t, req, "tok")
 		resp, err := app.Test(req)
 		if err != nil {
 			t.Fatalf("%s %s: %v", tc.method, tc.path, err)
@@ -150,6 +151,7 @@ func TestSetup_CommercialBankRoutesRegistered(t *testing.T) {
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))
 		req.AddCookie(&http.Cookie{Name: "access_token", Value: "tok"})
+		attachCSRF(t, req, "tok")
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := app.Test(req)
 		if err != nil {
@@ -167,6 +169,7 @@ func TestSetup_CommercialBankRoutesRegistered(t *testing.T) {
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		req.AddCookie(&http.Cookie{Name: "access_token", Value: "tok"})
+		attachCSRF(t, req, "tok")
 		resp, _ := app.Test(req)
 		if resp.StatusCode != http.StatusNotFound {
 			t.Errorf("GET %s: expected 404 on commercial bank, got %d", path, resp.StatusCode)

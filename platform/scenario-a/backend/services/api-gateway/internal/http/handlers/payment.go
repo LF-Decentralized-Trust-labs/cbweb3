@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -49,7 +51,10 @@ type AuditLogWriter interface {
 // gateway wires this in.
 type PvPLedger interface {
 	RecordLeg(ctx context.Context, in services.SettledLegInput) error
-	ListCreditsForBank(ctx context.Context, bankID string) ([]services.PvPCreditRow, error)
+	// ListCreditsForBank takes the membership predicate rather than deciding scope
+	// itself: the same rule must govern authorization and this query, and the
+	// predicate lives here (identityBelongsToBank) so there is one definition.
+	ListCreditsForBank(ctx context.Context, bankID string, belongs func(identity string) bool) ([]services.PvPCreditRow, error)
 }
 
 // PaymentHandler exposes the payment-orchestrator operations as REST endpoints.
@@ -188,6 +193,77 @@ func unknownIdentities(roster []string, identities ...string) []string {
 		}
 		seen[trimmed] = struct{}{}
 		if _, ok := valid[trimmed]; !ok {
+			invalid = append(invalid, trimmed)
+		}
+	}
+	return invalid
+}
+
+// cbNodeSuffix is the toolkit's central-bank node naming rule: cbNodeName(spokeID)
+// is spokeID + "-cb", with no bank id appended.
+const cbNodeSuffix = "-cb"
+
+// spokeIDsFromRoster derives the set of real spoke ids from the Paladin roster.
+//
+// It reads ONLY the central-bank entries, and that narrowness is the point. A node
+// name is <spokeId>-<bankId> and both halves may contain hyphens, so a bank entry
+// cannot be split back into its two parts — that guess is what produced the
+// unroutable "spoke-costa". A central bank's node is exactly <spokeId>-cb, so
+// stripping that one suffix recovers the spoke id verbatim under both live bank-id
+// conventions (cb1… in LNET, bank-itau… in the samples). It is also complete: every
+// spoke has exactly one central bank, so no spoke can be missed by looking only at
+// those entries.
+//
+// Same rule as spokeIdFromCentralBankIdentity in the bank portal (PR #210). The two
+// must not drift.
+func spokeIDsFromRoster(roster []string) map[string]struct{} {
+	spokes := make(map[string]struct{}, len(roster))
+	for _, id := range roster {
+		node := strings.TrimSpace(id)
+		if at := strings.Index(node, "@"); at >= 0 {
+			node = node[at+1:]
+		}
+		if !strings.HasSuffix(node, cbNodeSuffix) {
+			continue
+		}
+		if spokeID := strings.TrimSuffix(node, cbNodeSuffix); spokeID != "" {
+			spokes[spokeID] = struct{}{}
+		}
+	}
+	return spokes
+}
+
+// unknownSpokeIDs returns the non-empty spoke ids, in order and de-duplicated, that
+// are not in the roster-derived set. It mirrors unknownIdentities deliberately: the
+// two validate fields that come from the SAME roster, and one of them being checked
+// while the other was not is what let a non-existent spoke id reach immutable Pente
+// storage.
+//
+// Membership is EXACT. A prefix-tolerant comparison would accept "spoke-costa" for
+// "spoke-costa-rica" — the precise value that was observed on-chain — so it would
+// pass a careless test and still ship the defect.
+//
+// An empty spoke set yields no unknowns. That mirrors unknownIdentities' empty-roster
+// convention, and it is a deliberate fail-OPEN: a roster that somehow carries no
+// central-bank entry would otherwise make every propose fail, which is a worse
+// outage than the defect being guarded. The caller logs when it happens, so the
+// condition is visible rather than silent.
+func unknownSpokeIDs(spokes map[string]struct{}, ids ...string) []string {
+	if len(spokes) == 0 {
+		return nil
+	}
+	var invalid []string
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
+			continue
+		}
+		if _, dup := seen[trimmed]; dup {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		if _, ok := spokes[trimmed]; !ok {
 			invalid = append(invalid, trimmed)
 		}
 	}
@@ -493,25 +569,61 @@ func isHTLCCounterparty(sender, receiver, bankID string) (bool, error) {
 	if bankID == "" {
 		return false, nil
 	}
-	senderBank, sErr := bankIDFromIdentity(sender)
-	receiverBank, rErr := bankIDFromIdentity(receiver)
-	if sErr != nil {
-		return false, sErr
-	}
-	if rErr != nil {
-		return false, rErr
-	}
-	return senderBank == bankID || receiverBank == bankID, nil
+	// Membership is TESTED, not extracted. bankIDFromIdentity cannot recover the
+	// bank id when the spoke id carries hyphens ("spoke-costa-rica-cb1" reads as
+	// "rica-cb1"), and it returns that wrong value with a nil error — which is how
+	// the lock's own creator got "not a counterparty of this HTLC".
+	return identityBelongsToBank(sender, bankID) || identityBelongsToBank(receiver, bankID), nil
 }
 
-// bankIDFromIdentity extracts the bank identifier from a Paladin identity string.
-// e.g. "funded_operator@spoke-a-bank-a" → "bank-a"
+// identityBelongsToBank reports whether a Paladin identity belongs to bankID.
 //
-// The Paladin identity format "{name}@{spoke-word}-{letter}-{bankID}" is structural
-// to this function: the bankID is the third dash-delimited segment after the "@".
-// If Paladin changes this naming convention, this function will return an error and
-// all authorization checks will fail closed until the implementation is updated.
-// Mirrors identity.BankID in the payment-orchestrator; keep both in sync or move to a shared module.
+// This is the authorization primitive; prefer it over bankIDFromIdentity, which
+// cannot be made correct. A node name is `<spokeId>-<bankId>` and BOTH halves may
+// contain hyphens, so no split recovers the two parts:
+//
+//	spoke-costa-rica-cb1   spokeId=spoke-costa-rica  bankId=cb1
+//	spoke-brl-bank-itau    spokeId=spoke-brl         bankId=bank-itau
+//
+// Both shapes are live — LNET manifests use cb1…cb6, the samples use bank-itau.
+// Testing is exact where extracting is not: the caller already knows the bank id
+// it is asking about, so the identity only has to end at that boundary. The
+// leading "-" prevents substring spoofing: "bank" must not match a node ending in
+// "-bank-abc", and "cb1" must not match one ending in "-cb11".
+//
+// A party stored as a bare bank id ("cb1") is accepted by exact equality.
+//
+// Kept in sync with identity.BelongsToBank in the payment-orchestrator and
+// identityBelongsToBank in the bank portal's features/fx/identity.ts. All three
+// carry the same case table in their tests; change them together.
+func identityBelongsToBank(paladinIdentity, bankID string) bool {
+	bankID = strings.TrimSpace(bankID)
+	if bankID == "" {
+		return false
+	}
+	node := strings.TrimSpace(paladinIdentity)
+	if at := strings.Index(node, "@"); at >= 0 {
+		node = node[at+1:]
+	}
+	if node == "" {
+		return false
+	}
+	return node == bankID || strings.HasSuffix(node, "-"+bankID)
+}
+
+// bankIDFromIdentity extracts the bank identifier from a Paladin identity string,
+// assuming the spoke id is exactly two hyphen-separated segments.
+//
+// DO NOT USE FOR AUTHORIZATION — use identityBelongsToBank. The assumption is
+// false: a spoke id may carry more segments ("spoke-costa-rica"), and the 3-way
+// split then returns part of the spoke name glued to the bank id ("rica-cb1")
+// with NO error, so callers cannot tell. The comment this replaced claimed the
+// function "will return an error and all authorization checks will fail closed";
+// it does not, and they did not.
+//
+// It remains for the one caller that genuinely needs a stored label rather than a
+// decision (the PvP ledger's receiver_bank_id column), which is tracked as its
+// own defect because fixing it needs a schema or config decision.
 func bankIDFromIdentity(paladinIdentity string) (string, error) {
 	parts := strings.SplitN(paladinIdentity, "@", 2)
 	if len(parts) < 2 {
@@ -954,6 +1066,34 @@ func (h *PaymentHandler) ProposeFXAgreement(c *fiber.Ctx) error {
 			"invalid_identities": invalid,
 		})
 	}
+	// Reject a spoke id that does not exist, from the SAME roster the identities were
+	// just checked against. Without this, a non-empty, non-equal but non-existent id
+	// such as "spoke-costa" passed the orchestrator's shape-only checks and was
+	// written into the Pente group's private storage — which is immutable — and the
+	// failure surfaced much later at the relay, which cannot route it. The damage is
+	// not a rejected request; it is a permanent record plus an agreement that can
+	// never settle.
+	//
+	// PR #210 removed the only known way for the UI to produce a bad value. This is
+	// what makes the API itself safe: the gateway is a REST surface, and any other
+	// client or script can post an arbitrary string.
+	spokes := spokeIDsFromRoster(roster)
+	if len(spokes) == 0 {
+		slog.Warn("propose: no central-bank entries in the Paladin roster — spoke ids cannot be validated",
+			"roster_size", len(roster))
+	}
+	if invalid := unknownSpokeIDs(spokes, req.SourceSpokeID, req.DestSpokeID); len(invalid) > 0 {
+		known := make([]string, 0, len(spokes))
+		for id := range spokes {
+			known = append(known, id)
+		}
+		sort.Strings(known)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":             "one or more spoke ids do not exist: " + strings.Join(invalid, ", ") + " (known: " + strings.Join(known, ", ") + ")",
+			"invalid_spoke_ids": invalid,
+			"known_spoke_ids":   known,
+		})
+	}
 	// Propagate the authenticated caller identity so the orchestrator binds the
 	// originator to the caller and rejects a client-supplied foreign originator
 	// (R2-H-9/H-10). on_behalf is a governance/relay operation (direct gRPC) and is
@@ -1150,9 +1290,16 @@ func (h *PaymentHandler) RecordSettledPvPLeg(c *fiber.Ctx) error {
 	if body.ContractID == "" || body.Receiver == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "contract_id and receiver are required"})
 	}
+	// The bank id is a query label, not a scoping decision (scoping tests the stored
+	// identity — see ListCreditsForBank), so a derivation failure must not discard the
+	// leg. It used to answer 400 here, and the reporting orchestrator only logs a
+	// warning and never retries: an unparseable receiver identity silently erased an
+	// already-settled movement from the ledger.
 	receiverBankID, err := bankIDFromIdentity(body.Receiver)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "unparseable receiver identity: " + err.Error()})
+		receiverBankID = ""
+		slog.Warn("pvp ledger: could not derive a bank label from the receiver identity — recording the leg anyway",
+			"contract_id", body.ContractID, "trade_id", body.TradeID, "receiver", body.Receiver, "error", err)
 	}
 	settledAt, err := time.Parse(time.RFC3339, body.SettledAt)
 	if err != nil {
@@ -1193,7 +1340,10 @@ func (h *PaymentHandler) ListSettledPvPCredits(c *fiber.Ctx) error {
 	if h.pvpLedger == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "pvp ledger not configured"})
 	}
-	rows, err := h.pvpLedger.ListCreditsForBank(c.Context(), bankID)
+	// Bind the bank so the service receives exactly the authorization rule, with no
+	// second copy of it and no chance of the two arguments being swapped.
+	belongs := func(identity string) bool { return identityBelongsToBank(identity, bankID) }
+	rows, err := h.pvpLedger.ListCreditsForBank(c.Context(), bankID, belongs)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}

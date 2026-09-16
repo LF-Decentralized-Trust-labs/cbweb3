@@ -24,6 +24,39 @@ import (
 // of vanishing.
 const kcadmPreamble = `kcw() { echo "kcadm: $1 did not apply cleanly (continuing; the end state is asserted below)" >&2; }; `
 
+// kcadmLogin returns the `config credentials` command every provisioning script
+// starts with, authenticating WITHOUT putting the admin secret in any argv.
+//
+// The whole script is one argument to `docker exec … bash -c`, so a secret
+// interpolated into it lands in three process lists: the container's (the shell's
+// argv and the kcadm JVM's own), the host's (the script is an argument to the docker
+// client) and the toolkit's. Passing it as --password exposed it in all three.
+//
+// Nothing needs to be shipped in: the value is already inside the container, in
+// Keycloak's own environment as KC_BOOTSTRAP_ADMIN_PASSWORD (set by the
+// entity-keycloak compose template from KC_ADMIN_PASSWORD). The script therefore
+// names the variable and the value never crosses the boundary. kcadm reads its
+// password from KC_CLI_PASSWORD when the flag is absent — the same mechanism as
+// REDISCLI_AUTH, which this codebase already uses for Redis.
+//
+// An earlier comment at each call site claimed no env route existed for
+// `config credentials` and deferred the fix to a realm-import migration. That was
+// wrong for the Keycloak this project pins, and the migration is not required.
+//
+// The assignment is a per-command prefix rather than a script-wide export so it
+// reaches kcadm and nothing else, and so a script that drops this helper cannot keep
+// authenticating by accident.
+//
+// Verified against quay.io/keycloak/keycloak:26.0 on 2026-09-02: with the variable
+// set and no flag, login succeeds and an authenticated read returns real data; with
+// it unset and no flag, kcadm fails with "Console is not active, but password is
+// required" and exit 1 — so the `&&` chains still break on a failed login.
+func kcadmLogin(kc string) string {
+	return fmt.Sprintf(
+		`KC_CLI_PASSWORD="$KC_BOOTSTRAP_ADMIN_PASSWORD" %s config credentials `+
+			`--server http://localhost:8080 --realm master --user admin`, kc)
+}
+
 // appendKeycloakAssertions appends end-state checks for everything whose silent absence
 // breaks the entity, and fails the step naming the missing object. This is the check that
 // holds regardless of *why* something is missing: a create that failed, a create that

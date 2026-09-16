@@ -74,7 +74,6 @@ contracts.deploy-spoke-a:
 | `HashTimeLockedContract` | `identityRegistry` | Cross-spoke escrow |
 | `IdentityRegistry` | `admin` | On-chain participant registry |
 | `SpokeBridge` | `identityRegistry` | Cross-spoke bridge |
-| `AutomatedMarketMaker` | `tokenA, tokenB, identityRegistry` | AMM pool (used in Scenario B) |
 | `FXAgreement` | `identityRegistry, oracle` | FX agreement lifecycle |
 
 After deployment, run `make contracts.sync-addresses` to propagate addresses to the service `.env` files.
@@ -116,8 +115,8 @@ Registered participants receive one of the following functional roles:
 | Role | Value | Assigned to | Capabilities |
 |------|-------|------------|-------------|
 | `NONE` | 0 | Unregistered | No permission to transact |
-| `GOVERNANCE` | 1 | Network administrators | Transaction authorization + pause AMM |
-| `CENTRAL_BANK` | 2 | Central banks | Transaction authorization + pause AMM |
+| `GOVERNANCE` | 1 | Network administrators | Transaction authorization |
+| `CENTRAL_BANK` | 2 | Central banks | Transaction authorization |
 | `COMMERCIAL_BANK` | 3 | Commercial banks | Transaction authorization |
 
 > `canTransact()` returns `true` only for participants with `Verified` status. `canPause()` is reserved for `CENTRAL_BANK` and `GOVERNANCE`.

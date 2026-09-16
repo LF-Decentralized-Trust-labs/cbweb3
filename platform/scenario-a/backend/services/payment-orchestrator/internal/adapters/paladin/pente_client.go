@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"strings"
@@ -39,6 +40,7 @@ type PenteClient struct {
 	identity        string
 	receiptTimeout  time.Duration
 	receiptInterval time.Duration
+	logger          *slog.Logger
 }
 
 // PenteClientConfig configures the Paladin JSON-RPC endpoint and the calling node identity.
@@ -51,10 +53,18 @@ type PenteClientConfig struct {
 	// Identity is this node's local Paladin identity (e.g. funded_operator@spoke-brl-cb),
 	// used as `from` for pgroup transactions/calls. Must be local to the node.
 	Identity string
+	// Logger is optional; slog.Default() is used when nil. Party-address resolution
+	// degrades to a placeholder on failure, and that has to be visible somewhere.
+	Logger *slog.Logger
 }
 
 func NewPenteClient(cfg PenteClientConfig) *PenteClient {
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &PenteClient{
+		logger:          logger,
 		rpcURL:          strings.TrimRight(cfg.BaseURL, "/"),
 		defaultContract: normalizeAddress(cfg.FXAgreementAddress),
 		identity:        cfg.Identity,
@@ -324,18 +334,79 @@ func (c *PenteClient) proposeInput(ctx context.Context, params ports.FXProposalP
 	return in
 }
 
+// nodeUnknownCode is Paladin's error code for an identity whose node is absent from this
+// Paladin's registry ("PD012100: No entries found for node '...'"). It is the ONE resolution
+// failure that is expected rather than wrong — see resolvePartyAddr.
+const nodeUnknownCode = "PD012100"
+
 // resolvePartyAddr resolves a Paladin identity to its in-group EVM address via ptx_resolveVerifier
 // (the address Paladin will use as msg.sender when that identity submits a tx). Falls back to the
-// provided placeholder when the identity is empty or not resolvable on this node (a remote party).
+// provided placeholder when the identity is empty or cannot be resolved here.
+//
+// Which parties resolve was measured on a live two-spoke deploy, from the Itaú node:
+//
+//	funded_operator@spoke-brl-bank-itau        0xad6e7a6d…   own node
+//	funded_operator@spoke-brl-cb               0x62730609…   same spoke
+//	funded_operator@spoke-brl-bank-bradesco    0xf00f7987…   same spoke
+//	funded_operator@spoke-cop-cb               PD012100      other spoke
+//	funded_operator@spoke-cop-bank-bancolombia PD012100      other spoke
+//	funded_operator@spoke-cop-bank-davivienda  PD012100      other spoke
+//
+// The boundary is the SPOKE, not the node: every identity peered on this spoke's registry
+// resolves, and nothing across the hub does. So the placeholder is the normal outcome for the
+// cross-spoke counterparty of an FX agreement, and each side's record stores a different address
+// for the same party — the real one at home, the placeholder abroad. That is safe today only
+// because the lifecycle txs gated on `msg.sender == <party>` (accept/reject, cancel) are submitted
+// into the party's OWN group, where the address is the resolved one.
+//
+// The log level is chosen from Paladin's own error rather than from the identity's shape, because
+// there is no reliable way to recover a spoke id from a node name (`spoke-brl-bank-itau` splits
+// as either `spoke-brl` or `spoke-brl-bank`; both conventions are live) and guessing is what
+// produced the truncated-spoke bug in the FX form. PD012100 means this Paladin has never heard of
+// the node — expected across a hub, so debug. Anything else means the node IS reachable and the
+// resolution still failed (transport error, timeout, empty result), which is a real fault about to
+// put a placeholder into an immutable record: warn. An unrecognised error warns as well — for an
+// observability guard, noise after a Paladin upgrade is a safer failure than silence.
 func (c *PenteClient) resolvePartyAddr(ctx context.Context, identity, fallback string) string {
 	if identity == "" {
 		return fallback
 	}
 	var addr string
-	if err := c.rpc(ctx, "ptx_resolveVerifier", []any{identity, "ecdsa:secp256k1", "eth_address"}, &addr); err == nil && addr != "" {
+	err := c.rpc(ctx, "ptx_resolveVerifier", []any{identity, "ecdsa:secp256k1", "eth_address"}, &addr)
+	if err == nil && addr != "" {
 		return addr
 	}
+	// A local identity must always resolve, whatever the reason given.
+	expected := isNodeUnknown(err) && !c.isLocalNode(identity)
+	level := slog.LevelWarn
+	if expected {
+		level = slog.LevelDebug
+	}
+	c.logger.Log(ctx, level, "pente: party address not resolved — using derived placeholder",
+		"identity", identity, "placeholder", fallback, "local", c.isLocalNode(identity),
+		"expected", expected, "error", err)
 	return fallback
+}
+
+// isNodeUnknown reports whether err is Paladin's "node not in my registry" failure, the only
+// resolution failure that is routine. A nil err reaching the fallback means the call succeeded but
+// returned an empty address, which is a fault, not a routine miss.
+func isNodeUnknown(err error) bool {
+	return err != nil && strings.Contains(err.Error(), nodeUnknownCode)
+}
+
+// isLocalNode reports whether identity lives on this client's own Paladin node, comparing the part
+// after "@". Same-spoke peers resolve too, so this is NOT the test for "should have resolved" — it
+// only marks the case that can never be excused.
+func (c *PenteClient) isLocalNode(identity string) bool {
+	node := func(v string) string {
+		if at := strings.Index(v, "@"); at >= 0 {
+			return strings.TrimSpace(v[at+1:])
+		}
+		return ""
+	}
+	self := node(c.identity)
+	return self != "" && node(identity) == self
 }
 
 // routingInput builds the ABI tuple map for the FXAgreementLibrary.Routing struct.

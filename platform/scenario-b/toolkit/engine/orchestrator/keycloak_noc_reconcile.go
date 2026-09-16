@@ -42,14 +42,13 @@ const keycloakAdminCLI = "/opt/keycloak/bin/kcadm.sh"
 // The whole script is handed to `bash -c` as ONE argv element, so the single-quoted JSON array
 // survives intact. Origins are validated first: this is the same embedding that once produced
 // "Cannot parse the JSON" from a backslash-escaped value, swallowed by a `|| true`.
-func nocOriginsReconcileScript(kc, realm, adminPassword string, origins []string) (string, error) {
+func nocOriginsReconcileScript(kc, realm string, origins []string) (string, error) {
 	webOrigins, err := jsonStringArray(origins)
 	if err != nil {
 		return "", fmt.Errorf("noc-portal webOrigins: %w", err)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master "+
-		"--user admin --password %[2]s && ", kc, adminPassword)
+	fmt.Fprintf(&b, "%s && ", kcadmLogin(kc))
 	// --format csv --noquotes prints the bare id, so no JSON parsing is needed in the shell.
 	fmt.Fprintf(&b, "KCID=$(%[1]s get clients -r %[2]s -q clientId=%[3]s --fields id --format csv --noquotes) && ",
 		kc, realm, nocKeycloakClient)
@@ -63,11 +62,10 @@ func nocOriginsReconcileScript(kc, realm, adminPassword string, origins []string
 }
 
 // nocOriginsReadScript prints the client's current webOrigins, one per line.
-func nocOriginsReadScript(kc, realm, adminPassword string) string {
-	return fmt.Sprintf("%[1]s config credentials --server http://localhost:8080 --realm master "+
-		"--user admin --password %[2]s >/dev/null && "+
+func nocOriginsReadScript(kc, realm string) string {
+	return fmt.Sprintf("%[2]s >/dev/null && "+
 		"%[1]s get clients -r %[3]s -q clientId=%[4]s --fields webOrigins --format csv --noquotes",
-		kc, adminPassword, realm, nocKeycloakClient)
+		kc, kcadmLogin(kc), realm, nocKeycloakClient)
 }
 
 // originsMatchDeclared reports whether the registered origins are EXACTLY the declared set.
@@ -114,8 +112,8 @@ func sortedOrigins(in []string) []string {
 }
 
 // reconcileNOCOrigins runs the update inside the entity's Keycloak container.
-func reconcileNOCOrigins(ctx context.Context, r exec.CommandRunner, container, kc, realm, adminPassword string, origins []string) error {
-	script, err := nocOriginsReconcileScript(kc, realm, adminPassword, origins)
+func reconcileNOCOrigins(ctx context.Context, r exec.CommandRunner, container, kc, realm string, origins []string) error {
+	script, err := nocOriginsReconcileScript(kc, realm, origins)
 	if err != nil {
 		return err
 	}
@@ -133,8 +131,8 @@ func reconcileNOCOrigins(ctx context.Context, r exec.CommandRunner, container, k
 // reconciling. Returning an error here would fail the whole apply on an entity whose data dir
 // exists but whose containers are down, which is an ordinary state (the earlier steps that
 // would have started Keycloak are themselves skipped once the entity is provisioned).
-func nocOriginsAlreadyRegistered(ctx context.Context, r exec.CommandRunner, container, kc, realm, adminPassword string, origins []string) (bool, error) {
-	out, err := r.Run(ctx, "docker", "exec", container, "bash", "-c", nocOriginsReadScript(kc, realm, adminPassword))
+func nocOriginsAlreadyRegistered(ctx context.Context, r exec.CommandRunner, container, kc, realm string, origins []string) (bool, error) {
+	out, err := r.Run(ctx, "docker", "exec", container, "bash", "-c", nocOriginsReadScript(kc, realm))
 	if err != nil {
 		return false, nil
 	}

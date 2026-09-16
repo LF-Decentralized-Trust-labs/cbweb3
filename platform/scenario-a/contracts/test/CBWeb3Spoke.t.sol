@@ -15,7 +15,7 @@ import {IIdentityRegistry} from "../src/interfaces/IIdentityRegistry.sol";
 /// @dev Tests verify that spoke-specific contracts are deployed correctly.
 ///      Spokes deploy: IdentityRegistry, tCeBM (domestic currency), HTLC (Scenario A domestic leg),
 ///      and SpokeBridge (lock-and-mint for Scenario B).
-///      Hub-only contracts (AMM) are NOT deployed here.
+///      Hub-only contracts are NOT deployed here.
 contract DeployCBWeb3SpokeTest is Test {
     DeployCBWeb3Spoke public deployScript;
 
@@ -42,9 +42,13 @@ contract DeployCBWeb3SpokeTest is Test {
         deployerPrivateKey = uint256(0x1);
         expectedDeployer = vm.addr(deployerPrivateKey);
 
+        /// @dev makeAddr, not literals: vm.setEnv writes the PROCESS environment and forge
+        ///      runs suites in parallel, so every suite that sets ADMIN_ADDRESS must converge
+        ///      on the same value or it clobbers another suite's deploy script. Same reason as
+        ///      TokenizedCentralBankMoney.t.sol.
         vm.setEnv("DEPLOYER_PRIVATE_KEY", vm.toString(deployerPrivateKey));
-        vm.setEnv("ADMIN_ADDRESS", vm.toString(address(0x1234567890123456789012345678901234567890)));
-        vm.setEnv("CENTRAL_BANK_ADDRESS", vm.toString(address(0x2345678901234567890123456789012345678901)));
+        vm.setEnv("ADMIN_ADDRESS", vm.toString(makeAddr("admin")));
+        vm.setEnv("CENTRAL_BANK_ADDRESS", vm.toString(makeAddr("centralBank")));
         vm.setEnv("TOKEN_NAME", TOKEN_NAME);
         vm.setEnv("TOKEN_SYMBOL", TOKEN_SYMBOL);
         vm.setEnv("FIAT_TOKEN_NAME", FIAT_TOKEN_NAME);

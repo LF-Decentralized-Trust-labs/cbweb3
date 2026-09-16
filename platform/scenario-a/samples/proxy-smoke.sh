@@ -42,8 +42,8 @@ log() { printf '\n\033[1;36m[proxy-smoke] %s\033[0m\n' "$*"; }
 
 if [[ "${1:-}" == "--clean" ]]; then
   log "cleaning docker (containers + volumes) and work dir…"
-  docker rm -f "$(docker ps -aq)" 2>/dev/null || true
-  docker volume rm "$(docker volume ls -q)" 2>/dev/null || true
+  docker rm -f $(docker ps -aq) 2>/dev/null || true
+  docker volume rm $(docker volume ls -q) 2>/dev/null || true
   docker rm -f cbweb3-proxy 2>/dev/null || true
   rm -rf "${WORK_DIR}" 2>/dev/null || true
 fi
@@ -93,7 +93,7 @@ log "relay healthy at http://localhost:4000"
 
 # --- deploy (run from work dir so relative dataDir isolates state) ------------
 ( cd "${WORK_DIR}" && apply "found central-bank-brazil behind the proxy" \
-    "${SCRIPT_DIR}/central-bank-brazil.yaml" )
+    "${SCRIPT_DIR}/proxy-smoke/central-bank-brazil.yaml" )
 
 # --- summary ------------------------------------------------------------------
 scheme="https"; [[ "${PROXY_TLS_MODE}" == "off" ]] && scheme="http"

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  apiErrorMessage,
   Badge,
   Button,
   Card,
@@ -12,6 +13,7 @@ import {
 } from "@cbweb3/ui";
 import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { identityBelongsToBank } from "../features/fx/identity";
 import { useAuthStore } from "../stores/auth.store";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
 import type { FXAgreementState } from "../types";
@@ -22,16 +24,6 @@ import type { FXAgreementState } from "../types";
  * Mirrors identity.BankID in the payment-orchestrator.
  * Returns empty string if the identity does not match the expected format.
  */
-function bankIDFromPaladinIdentity(paladinIdentity: string): string {
-  const atParts = paladinIdentity.split("@");
-  if (atParts.length < 2) return "";
-  const dashIdx1 = atParts[1].indexOf("-");
-  if (dashIdx1 === -1) return "";
-  const dashIdx2 = atParts[1].indexOf("-", dashIdx1 + 1);
-  if (dashIdx2 === -1) return "";
-  return atParts[1].slice(dashIdx2 + 1);
-}
-
 const shortState = (state: FXAgreementState) => {
   const s = state.replace("FX_STATE_", "");
   if (s === "PROPOSED") return "Proposed";
@@ -82,9 +74,13 @@ export function AgreementDetailPage() {
 
   // Determine if the current user is the originator of this agreement.
   // Accept and Reject are counterparty-only actions; the creator should use Cancel.
+  // Membership is TESTED, not extracted: the spoke id may contain hyphens, so no
+  // split of the node name recovers the bank id — see features/fx/identity.ts.
   const myBankId = profile?.bankId ?? "";
-  const originatorBankId = agreement?.originator ? bankIDFromPaladinIdentity(agreement.originator) : "";
-  const isOriginator = myBankId !== "" && originatorBankId !== "" && myBankId === originatorBankId;
+  const isOriginator =
+    myBankId !== "" &&
+    !!agreement?.originator &&
+    identityBelongsToBank(agreement.originator, myBankId);
 
   const onAction = async (action: "accept" | "reject" | "cancel") => {
     try {
@@ -94,7 +90,7 @@ export function AgreementDetailPage() {
       toast.success(`Agreement ${action}ed successfully.`);
       setConfirmAction(null);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : `Unable to ${action} agreement.`);
+      toast.error(apiErrorMessage(error, `Unable to ${action} agreement.`));
     }
   };
 

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -127,6 +128,16 @@ func (s *paymentOrchestratorService) GetBalance(ctx context.Context, req *pb.Get
 
 // --- FX Agreement Operations ---
 
+// decimalString is the only shape a rate may take, and integerString the only
+// shape an amount may take. big.Rat.SetString on its own also accepts 0x10,
+// 1_000, 1e3 and 1/3; big.Int.SetString(s, 10) still takes a sign. Pinning the
+// shape first means everything the boundary accepts, the on-chain converter
+// accepts, and there is exactly one way to write a given amount.
+var (
+	decimalString = regexp.MustCompile(`^\d+(\.\d+)?$`)
+	integerString = regexp.MustCompile(`^\d+$`)
+)
+
 func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req *pb.ProposeFXAgreementRequest) (*pb.ProposeFXAgreementResponse, error) {
 	if req.CounterpartyB == "" || req.OriginAmount == "" || req.CounterAmount == "" ||
 		req.OriginCurrency == "" || req.CounterCurrency == "" || req.Rate == "" || req.ExpiryDate == 0 {
@@ -139,13 +150,27 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 	if strings.EqualFold(req.OriginCurrency, req.CounterCurrency) {
 		return nil, status.Error(codes.InvalidArgument, "origin_currency and counter_currency must be different")
 	}
-	originRat, ok := new(big.Rat).SetString(req.OriginAmount)
-	if !ok || originRat.Sign() <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "origin_amount must be a positive decimal")
+	// Amounts are base-unit integers: the on-chain FXAgreement.propose takes
+	// uint256, and buildFXProposalParams converts with big.Int.SetString(s, 10).
+	// Validating with big.Rat here was strictly wider, so "1000.10" passed and
+	// was refused hundreds of lines later by the converter, reaching the portal
+	// as "invalid FX proposal params". Same defect as Scenario A, same fix; the
+	// two are kept in step deliberately (docs/scenario-drift.md).
+	originInt, ok := new(big.Int).SetString(req.OriginAmount, 10)
+	if !integerString.MatchString(req.OriginAmount) || !ok || originInt.Sign() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "origin_amount must be a positive integer in base units, with no decimal separator")
 	}
-	counterRat, ok := new(big.Rat).SetString(req.CounterAmount)
-	if !ok || counterRat.Sign() <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "counter_amount must be a positive decimal")
+	counterInt, ok := new(big.Int).SetString(req.CounterAmount, 10)
+	if !integerString.MatchString(req.CounterAmount) || !ok || counterInt.Sign() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "counter_amount must be a positive integer in base units, with no decimal separator")
+	}
+	originRat := new(big.Rat).SetInt(originInt)
+	counterRat := new(big.Rat).SetInt(counterInt)
+
+	// The rate genuinely is a decimal, so big.Rat is right — but only after the
+	// shape is checked, or it would read "0x10" as a rate of 16.
+	if !decimalString.MatchString(req.Rate) {
+		return nil, status.Error(codes.InvalidArgument, "rate must be a positive decimal")
 	}
 	rateRat, ok := new(big.Rat).SetString(req.Rate)
 	if !ok || rateRat.Sign() <= 0 {

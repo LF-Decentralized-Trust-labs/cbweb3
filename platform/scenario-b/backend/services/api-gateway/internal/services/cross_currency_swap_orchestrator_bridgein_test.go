@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 )
@@ -29,6 +30,12 @@ func (stubSwapRepo) UpdateBridgeOutPositionID(context.Context, string, string) e
 }
 func (stubSwapRepo) UpdateFailureReason(context.Context, string, string) error { return nil }
 func (stubSwapRepo) UpdateResidue(context.Context, string, string, string, domain.ResidueReturnStatus) error {
+	return nil
+}
+
+// UpdateBridgeOutDelivery is a no-op here: these tests exercise Step 1, which never reaches the
+// delivery leg. It exists so the stub satisfies the repository interface.
+func (stubSwapRepo) UpdateBridgeOutDelivery(context.Context, string, domain.BridgeOutDeliveryStatus, int, *time.Time) error {
 	return nil
 }
 

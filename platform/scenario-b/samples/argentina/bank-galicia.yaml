@@ -17,9 +17,9 @@ spec:
   joinBundleRef: ../bundles/spoke-ars.bundle.yaml
   node:
     advertisedHost: host.docker.internal
-    rpc:  { port: 33746 }
-    ws:   { port: 33756 }
-    p2p:  { port: 56404 }
+    rpc:  { port: 9246 }
+    ws:   { port: 9256 }
+    p2p:  { port: 30404 }
     dataDir: cbweb3-data/bank-galicia
     validator: false
   image: build

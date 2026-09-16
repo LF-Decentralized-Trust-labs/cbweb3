@@ -4,7 +4,8 @@ import { create } from "zustand";
 import { authApi } from "../services/api";
 import { cancelTokenRefresh, scheduleTokenRefresh } from "../services/api/token-refresh";
 import type { AsyncStatus, UserProfile } from "../types";
-import { GOVERNANCE_UNAUTHORIZED_MESSAGE, hasGovernanceAccess } from "../auth/authorization";
+import { GOVERNANCE_UNAUTHORIZED_MESSAGE, hasPortalAccess } from "../auth/authorization";
+import { loginErrorMessage } from "@cbweb3/ui";
 
 type AuthState = {
   profile: UserProfile | null;
@@ -36,7 +37,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       scheduleTokenRefresh(loginResponse.expiresIn);
 
       const profile = await authApi.me();
-      const authorized = hasGovernanceAccess(profile);
+      const authorized = hasPortalAccess(profile);
       set({
         profile,
         isAuthenticated: authorized,
@@ -50,7 +51,9 @@ export const useAuthStore = create<AuthState>((set) => ({
         isAuthenticated: false,
         initialized: true,
         status: "error",
-        error: error instanceof Error ? error.message : "Unable to login",
+        // The gateway names the cause in the body; axios's own message is only "Request failed
+        // with status code N". Shared so the five portals cannot drift apart on this copy.
+        error: loginErrorMessage(error),
       });
     }
   },
@@ -70,7 +73,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ status: "loading", error: null });
     try {
       const profile = await authApi.me();
-      const authorized = hasGovernanceAccess(profile);
+      const authorized = hasPortalAccess(profile);
       set({
         profile,
         isAuthenticated: authorized,

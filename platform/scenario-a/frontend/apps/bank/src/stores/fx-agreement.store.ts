@@ -7,6 +7,7 @@ import type {
   ProposeFXAgreementRequest,
   ProposeFXAgreementResponse,
 } from "../types";
+import { apiErrorMessage } from "@cbweb3/ui";
 
 type FXAgreementState = {
   agreements: FXAgreement[];
@@ -34,7 +35,7 @@ export const useFxAgreementStore = create<FXAgreementState>((set) => ({
       const agreements = await fxAgreementApi.list(params);
       set({ agreements, status: "idle" });
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to load agreements" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to load agreements") });
     }
   },
   getAgreement: async (tradeId) => {
@@ -44,7 +45,7 @@ export const useFxAgreementStore = create<FXAgreementState>((set) => ({
       set({ currentAgreement: agreement, status: "idle" });
       return agreement;
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to load agreement" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to load agreement") });
       throw error;
     }
   },
@@ -56,7 +57,7 @@ export const useFxAgreementStore = create<FXAgreementState>((set) => ({
       set({ agreements, status: "idle" });
       return response;
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to propose agreement" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to propose agreement") });
       throw error;
     }
   },
@@ -67,7 +68,7 @@ export const useFxAgreementStore = create<FXAgreementState>((set) => ({
       const agreement = await fxAgreementApi.get(tradeId);
       set({ currentAgreement: agreement, status: "idle" });
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to accept agreement" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to accept agreement") });
       throw error;
     }
   },
@@ -78,7 +79,7 @@ export const useFxAgreementStore = create<FXAgreementState>((set) => ({
       const agreement = await fxAgreementApi.get(tradeId);
       set({ currentAgreement: agreement, status: "idle" });
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to reject agreement" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to reject agreement") });
       throw error;
     }
   },
@@ -89,7 +90,7 @@ export const useFxAgreementStore = create<FXAgreementState>((set) => ({
       const agreement = await fxAgreementApi.get(tradeId);
       set({ currentAgreement: agreement, status: "idle" });
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to cancel agreement" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to cancel agreement") });
       throw error;
     }
   },
@@ -100,7 +101,7 @@ export const useFxAgreementStore = create<FXAgreementState>((set) => ({
       const agreement = await fxAgreementApi.get(tradeId);
       set({ currentAgreement: agreement, status: "idle" });
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to settle agreement" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to settle agreement") });
       throw error;
     }
   },

@@ -30,8 +30,20 @@
 #     design; see specs/026-tk4-compose-central-bank/plan.md addendum.
 #   Falls back to ${BACKEND_CONTEXT}/config/pki (repo default) if unset.
 
+# Container log rotation, applied to every service in this file.
+#
+# Without it Docker's json-file driver has no size cap and no rotation: the
+# Scenario A Paladin containers reached 96 GB (~2.4 GB/day) and a full disk takes
+# the whole network down. 50m x 5 caps each service at 250 MB.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   compliance:
+    logging: *cbweb3_logging
     build:
       context: ${BACKEND_CONTEXT:?BACKEND_CONTEXT is required}
       dockerfile: services/compliance/Dockerfile
@@ -59,6 +71,7 @@ services:
       - entity_net
 
   auth:
+    logging: *cbweb3_logging
     build:
       context: ${BACKEND_CONTEXT}
       dockerfile: services/auth/Dockerfile
@@ -80,6 +93,7 @@ services:
       - entity_net
 
   payment-orchestrator:
+    logging: *cbweb3_logging
     build:
       context: ${BACKEND_CONTEXT}
       dockerfile: services/payment-orchestrator/Dockerfile
@@ -99,6 +113,16 @@ services:
       PAYMENT_GRPC_PORT: "9094"
       PALADIN_URL: ${PALADIN_URL:?PALADIN_URL is required}
       PALADIN_IDENTITY: ${PALADIN_IDENTITY:?PALADIN_IDENTITY is required}
+      # The spoke this orchestrator belongs to, used for the receiver-locality
+      # check. Passed explicitly because it CANNOT be parsed back out of
+      # PALADIN_IDENTITY: a node name is <spokeId>-<bankId> and both halves may
+      # contain hyphens, so "spoke-costa-rica-cb1" is indistinguishable from a
+      # spoke called "spoke-costa" with a bank called "rica-cb1".
+      #
+      # Optional on purpose (:- and not :?): an environment deployed before this
+      # line exists keeps starting, and the service falls back to the old
+      # two-segment guess — which is what it did all along.
+      SPOKE_ID: ${SPOKE_ID:-}
       CACTI_API_URL: ${CACTI_API_URL:-http://host.docker.internal:4000}
       # Besu signing path (HTLC) is per-relationship and only wired once a bilateral
       # contract exists. At found (CB-only) it is OFF, so no operator key is needed.
@@ -124,6 +148,7 @@ services:
       - entity_net
 
   api-gateway:
+    logging: *cbweb3_logging
     build:
       context: ${BACKEND_CONTEXT}
       dockerfile: services/api-gateway/Dockerfile
@@ -140,6 +165,11 @@ services:
       - path: ${ENTITY_ENV_FILE}
         required: true
     environment:
+      # Local stacks are served over plain HTTP, and the Secure flag would make the
+      # browser discard the session cookie outright. COOKIE_SECURE now defaults to
+      # TRUE in the gateway, so this opt-out has to be explicit — which is the point:
+      # the unsafe setting is the one that requires someone to type it.
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
       APP_PORT: "8080"
       REQUEST_TIMEOUT_SEC: "30"
       AUTH_GRPC_ADDR: ${ENTITY_PREFIX}-auth:9091

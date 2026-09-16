@@ -12,18 +12,42 @@
 # no SPOKE_DATA_DIR bind mount. Deviation from the original design; see the
 # addendum in specs/026-tk4-compose-central-bank/plan.md.
 
+# Container log rotation, applied to every service in this file.
+#
+# Without it Docker's json-file driver has no size cap and no rotation: the
+# Scenario A Paladin containers reached 96 GB (~2.4 GB/day) and a full disk takes
+# the whole network down. 50m x 5 caps each service at 250 MB.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   paladin-data-init:
+    logging: *cbweb3_logging
     image: alpine:3.23
     user: "0:0"
     volumes:
       - cb_data:/data/cb
-    command: ["sh", "-c", "mkdir -p /data/cb && chmod -R 777 /data/cb"]
+    # Pre-create the Paladin key store directory on the volume and hand it to
+    # uid 1000. BOTH halves are load-bearing:
+    #   - mkdir: Paladin's filesystem key store does NOT create its own directory.
+    #     It fails to boot with "PD020800: Path 'keystore' does not exist" and the
+    #     start-paladin step then dies on a health-check timeout. This is what the
+    #     removed `/data/keystore` tmpfs entry was silently providing besides the
+    #     write permission, and missing it broke a full deploy on 2026-09-03.
+    #   - the final chmod 600: the recursive 777 above is the legacy safety net for
+    #     root-owned volume content, but the key store now lives inside that tree
+    #     and `-seed.key` is private key material Paladin writes 0600. Restoring it
+    #     keeps a world-readable seed from being re-created on every bring-up.
+    command: ["sh", "-c", "mkdir -p /data/cb/keystore && chmod -R 777 /data/cb && find /data/cb/keystore -type f -exec chmod 600 {} +"]
     restart: "no"
 
   # Service keys are fixed (Compose forbids ${...} in service names); the spoke
   # id is carried in container_name instead.
   paladin-cb:
+    logging: *cbweb3_logging
     image: ${PALADIN_IMAGE}
     container_name: paladin-${SPOKE_ID}-cb
     user: "${PALADIN_UID:-1000}:${PALADIN_GID:-1000}"
@@ -32,7 +56,7 @@ services:
       - "${PALADIN_CB_WS_PORT}:8549"
       - "${PALADIN_CB_GRPC_PORT}:9000"
     environment:
-      - PALADIN_LOG_LEVEL=debug
+      - PALADIN_LOG_LEVEL=${PALADIN_LOG_LEVEL:-info}
     volumes:
       # Read-only in practice (Paladin only reads config.yaml/tls.{crt,key} at
       # startup); seeded root-owned 0644/0755 by writeVolumeFile, so no init
@@ -43,8 +67,31 @@ services:
       # its SQLite database (PD010202). Matches the spk-02 found stack.
       - cb_data:/data
     tmpfs:
+      # /app/jna ONLY. It is where the JVM extracts JNA's native libraries: it
+      # needs exec and is genuinely disposable.
+      #
+      # /data/keystore must never be added here. It holds the bip32 seed of the
+      # hd_wallet key store (paladin-config/central-bank/config.yaml.tmpl), which
+      # derives every *salted* Pente endorsement identity — the plain
+      # `funded_operator` identity comes from a static inline key and is the
+      # reason a lost seed looks like nothing at all. On tmpfs the seed is
+      # regenerated on every container START — a plain `docker restart` is
+      # enough, verified 2026-09-03 — and every endorsement key silently changes
+      # with it. A Pente privacy group writes its endorser set to the
+      # base ledger at creation and that set is immutable, so every group made
+      # before that restart is permanently dead: transitions revert with
+      # PenteInvalidEndorser, which Paladin surfaces as the opaque PD012214.
+      # This cost one LNET environment every FX agreement it had, and the symptom
+      # appeared eleven days after the redeploy that caused it
+      # (docs/runbooks/pente-endorser-key-loss-recovery.md).
+      #
+      # The keystore lives on cb_data instead, and paladin-data-init both creates
+      # /data/cb/keystore and makes the tree writable by uid 1000. The mkdir is
+      # not optional: the tmpfs entry was creating the directory as well as
+      # making it writable, and Paladin's key store creates neither (PD020800).
+      # Removing the tmpfs without the mkdir does not boot — see the note on that
+      # service above.
       - /app/jna:exec,mode=1777
-      - /data/keystore:mode=0777
     networks:
       - spoke_network
     extra_hosts:

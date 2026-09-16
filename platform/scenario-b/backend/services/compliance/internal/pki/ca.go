@@ -6,6 +6,11 @@
 package pki
 
 import (
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/x509"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 
@@ -36,7 +41,94 @@ func NewCAFromEnv() (*CA, error) {
 		return nil, fmt.Errorf("compliance/pki: read CA key: %w", err)
 	}
 
+	cert, err := parseCertPEM(string(certPEM))
+	if err != nil {
+		return nil, fmt.Errorf("compliance/pki: CA_CERT_FILE %s: %w", certFile, err)
+	}
+
+	// Refuse a certificate that is not an issuing authority. What CA_CERT_FILE should name
+	// is enforced in the toolkit by filename, which says nothing here: this loader would
+	// accept a participant leaf and its own key, and go on issuing certificates from it that
+	// no verifier can ever chain. The one thing that makes a certificate an issuer is what it
+	// asserts about itself, so check that instead of the name.
+	if err := assertIsIssuingCA(cert); err != nil {
+		return nil, fmt.Errorf("compliance/pki: CA_CERT_FILE %s cannot issue: %w", certFile, err)
+	}
+
+	// Refuse a cert and key that are not each other's. Two producers have owned these
+	// filenames — the toolkit's gen-tls step and this service's own PKI bootstrap — and when
+	// they disagreed the process still started, reported "CA loaded from disk", and failed
+	// only at the first bank's onboarding, weeks later, with an x509 error naming neither
+	// file. A CA that cannot sign is not a CA; say so here, where the operator is looking.
+	if err := assertKeyMatchesCert(cert, string(keyPEM)); err != nil {
+		// "are not a pair" only when they genuinely are not. A key this loader cannot READ
+		// is a different fault with a different remedy, and reporting it as a mismatch
+		// sends an operator to regenerate a key that may be the correct one.
+		if errors.Is(err, errUnreadableKey) {
+			return nil, fmt.Errorf("compliance/pki: CA_KEY_FILE %s could not be read as an EC private key: %w", keyFile, err)
+		}
+		return nil, fmt.Errorf("compliance/pki: CA_CERT_FILE %s and CA_KEY_FILE %s are not a pair: %w", certFile, keyFile, err)
+	}
+
 	return &CA{certPEM: string(certPEM), keyPEM: string(keyPEM)}, nil
+}
+
+// parseCertPEM decodes the single certificate a CA file is expected to hold.
+func parseCertPEM(certPEM string) (*x509.Certificate, error) {
+	block, _ := pem.Decode([]byte(certPEM))
+	if block == nil {
+		return nil, fmt.Errorf("no PEM block in the certificate")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse certificate: %w", err)
+	}
+	return cert, nil
+}
+
+// assertIsIssuingCA reports whether cert may sign other certificates.
+//
+// Both halves matter and neither implies the other: BasicConstraints says it is a CA, and
+// KeyUsage says signing certificates is among the things this key may do. x509 checks them
+// when a chain is VERIFIED, which in this deployment never happens — CA_CERT_PEM is unset,
+// so auth skips VerifyChain entirely, and a certificate issued by a non-CA would be accepted
+// at login and rejected the day that gate is turned on. Refuse it at boot instead.
+//
+// It would NOT have caught the misconfiguration this check was written alongside:
+// central-bank.crt is a self-signed CA, so pointing the issuer at it passed this test. It
+// closes the case the toolkit's filename assertion only names.
+func assertIsIssuingCA(cert *x509.Certificate) error {
+	if !cert.IsCA {
+		return fmt.Errorf("the certificate for %q is not a CA (BasicConstraints CA:FALSE); "+
+			"this must be the authority, not a participant certificate", cert.Subject.CommonName)
+	}
+	if cert.KeyUsage != 0 && cert.KeyUsage&x509.KeyUsageCertSign == 0 {
+		return fmt.Errorf("the CA certificate for %q does not carry KeyUsage certSign", cert.Subject.CommonName)
+	}
+	return nil
+}
+
+// assertKeyMatchesCert reports whether keyPEM is the private key of cert.
+//
+// Compared by public key rather than by issuing anything: the check must hold for every
+// certificate this CA will ever sign, not for one sample.
+func assertKeyMatchesCert(cert *x509.Certificate, keyPEM string) error {
+	keyBlock, _ := pem.Decode([]byte(keyPEM))
+	if keyBlock == nil {
+		return fmt.Errorf("%w: no PEM block in the key", errUnreadableKey)
+	}
+	key, err := ParseECPrivateKey(keyBlock.Bytes)
+	if err != nil {
+		return err
+	}
+	pub, ok := cert.PublicKey.(interface{ Equal(crypto.PublicKey) bool })
+	if !ok {
+		return fmt.Errorf("certificate public key of type %T cannot be compared", cert.PublicKey)
+	}
+	if !pub.Equal(key.Public()) {
+		return fmt.Errorf("the certificate's public key is not the one this private key derives")
+	}
+	return nil
 }
 
 // NewCAFromPEM creates a CA from PEM strings directly. Useful for testing.
@@ -73,4 +165,36 @@ func (ca *CA) IssueParticipantCert(userID, institutionName, role string) (pki.Is
 		return pki.IssuedCert{}, fmt.Errorf("compliance/pki: issue cert for %s: %w", userID, err)
 	}
 	return issued, nil
+}
+
+// errUnreadableKey marks a key the loader cannot decode at all, as opposed to one that
+// decodes fine and simply belongs to a different certificate. The two have different
+// remedies, so NewCAFromEnv reports them differently.
+var errUnreadableKey = errors.New("unreadable private key")
+
+// ParseECPrivateKey reads an EC private key in either encoding this deployment can hold.
+//
+// Everything in this repository writes SEC1 ("EC PRIVATE KEY", x509.MarshalECPrivateKey).
+// A key placed by hand very likely does not: `openssl genpkey` has defaulted to PKCS#8
+// ("PRIVATE KEY") since OpenSSL 3, and at least one central bank's material was repaired
+// by hand before this validation existed. Refusing PKCS#8 would fail the boot over an
+// encoding, not over anything about whether the key is the right one — and because this
+// check is fatal, that fault presents as a crash loop rather than as a warning.
+//
+// Exported for internal/bootstrap, which meets keys from the same producers and must accept
+// exactly the same set: a key this loader would refuse at boot is one the bootstrap must not
+// adopt, and the two drifting apart is how a stack passes the bootstrap and then crash-loops.
+func ParseECPrivateKey(der []byte) (*ecdsa.PrivateKey, error) {
+	if key, err := x509.ParseECPrivateKey(der); err == nil {
+		return key, nil
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(der)
+	if err != nil {
+		return nil, fmt.Errorf("%w: not SEC1 (\"EC PRIVATE KEY\") or PKCS#8 (\"PRIVATE KEY\"): %v", errUnreadableKey, err)
+	}
+	key, ok := parsed.(*ecdsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("%w: key is %T; this PKI is EC (prime256v1)", errUnreadableKey, parsed)
+	}
+	return key, nil
 }

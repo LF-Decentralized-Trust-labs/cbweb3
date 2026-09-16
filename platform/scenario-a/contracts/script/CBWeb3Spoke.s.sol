@@ -13,7 +13,7 @@ import {FiatCentralBankMoney} from "../src/FiatCentralBankMoney.sol";
 /// @dev Deploys an IdentityRegistry (local KYC), a single TokenizedCentralBankMoney (domestic currency),
 ///      an HTLC (for domestic legs of Scenario A cross-border settlement),
 ///      and a SpokeBridge (lock-and-mint for Scenario B AMM participation).
-///      Hub-only contracts (AMM) are NOT deployed here.
+///      Hub-only contracts are NOT deployed here.
 contract DeployCBWeb3Spoke is Script {
     /// @notice Regional Identity and Compliance Registry
     IdentityRegistry public identityRegistry;

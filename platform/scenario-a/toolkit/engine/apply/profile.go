@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/orchestrator"
 )
 
 // LocalProfile holds the resolved runtime defaults for environment: local.
@@ -129,9 +131,9 @@ func LocalProfileFromExDir(exDir, dataDir string, rpcPort int) LocalProfile {
 	p.CentralBankComposePath = envOr("CBWEB3_CENTRAL_BANK_COMPOSE",
 		filepath.Join(root, "provisioning", "templates", "central-bank", "docker-compose.yaml"))
 
-	p.BesuImage = envOr("CBWEB3_BESU_IMAGE", "hyperledger/besu:25.8.0")
+	p.BesuImage = envOr("CBWEB3_BESU_IMAGE", orchestrator.DefaultBesuImage)
 
-	p.PaladinImage = envOr("CBWEB3_PALADIN_IMAGE", "docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1")
+	p.PaladinImage = envOr("CBWEB3_PALADIN_IMAGE", orchestrator.DefaultPaladinImage)
 
 	p.ContractsOutDir = envOr("CBWEB3_CONTRACTS_OUT", filepath.Join(root, "contracts", "out"))
 

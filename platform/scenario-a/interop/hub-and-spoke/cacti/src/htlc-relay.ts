@@ -6,8 +6,12 @@
  * Responsibilities:
  *   1. Use Cacti PluginLedgerConnectorBesu.getPastLogs to fetch HTLC events
  *      from each Besu spoke, with ethers.js Interface for ABI decoding.
- *   2. On LogHTLCClaimed: call SettleHTLC on the counterpart spoke's
- *      payment-orchestrator via gRPC, propagating the revealed secret.
+ *   2. On LogHTLCClaimed: append the claim, secret included, to the durable journal. The
+ *      counterpart leg is settled by its OWNER, which polls that journal — not by this relay.
+ *      Settling means transferLocked on the owner's own Paladin node, over locked Zeto states
+ *      local to it, so no one else can perform it; and the relay could not address the owner
+ *      anyway, holding one gRPC endpoint per spoke (the founding central bank's) while an
+ *      inter-bank leg lives on a commercial bank's orchestrator.
  *   3. Store all observed events in an in-memory ring buffer so the REST API
  *      (consumed by the CactiRelay Go adapter) can poll them by timestamp.
  *
@@ -124,16 +128,6 @@ const FX_AGREEMENT_ABI = [
 // gRPC client helpers
 // ---------------------------------------------------------------------------
 
-interface SettleHTLCRequest {
-  contract_id: string;
-  secret: string;
-}
-
-interface SettleHTLCResponse {
-  htlc_tx_hash: string;
-  zeto_tx_hash: string;
-}
-
 interface ProposeFXAgreementGrpcRequest {
   trade_id: string;
   counterparty_b: string;
@@ -164,21 +158,6 @@ interface SettleFXAgreementGrpcRequest { trade_id: string; }
 interface SettleFXAgreementGrpcResponse { tx_hash: string; }
 
 interface PaymentOrchestratorClient extends grpc.Client {
-  SettleHTLC(
-    req: SettleHTLCRequest,
-    callback: (err: grpc.ServiceError | null, resp: SettleHTLCResponse) => void,
-  ): void;
-  SettleHTLC(
-    req: SettleHTLCRequest,
-    metadata: grpc.Metadata,
-    callback: (err: grpc.ServiceError | null, resp: SettleHTLCResponse) => void,
-  ): void;
-  SettleHTLC(
-    req: SettleHTLCRequest,
-    metadata: grpc.Metadata,
-    options: grpc.CallOptions,
-    callback: (err: grpc.ServiceError | null, resp: SettleHTLCResponse) => void,
-  ): void;
   ProposeFXAgreement(
     req: ProposeFXAgreementGrpcRequest,
     metadata: grpc.Metadata,
@@ -263,11 +242,30 @@ const MAX_EVENTS = 10_000;
  */
 const MAX_BLOCK_RANGE = 5_000;
 
+/** One spoke's chain-scan liveness, as served by GET /api/v1/health. */
+export interface ScanLiveness {
+  spokeId: string;
+  /** Last block the scan has processed; null when this spoke has never been scanned. */
+  watermark: number | null;
+  /** Last block seen on the chain; null before the first successful poll. */
+  head: number | null;
+  blocksBehind: number | null;
+  /** Seconds since the watermark last moved; null before the first advance. */
+  secondsSinceAdvance: number | null;
+}
+
+/**
+ * How long a spoke's chain scan may stand still, while the chain is producing blocks, before
+ * the relay says so at error level.
+ *
+ * Time, not block distance: a relay 5,000 blocks behind and advancing is catching up, which is
+ * normal after downtime, while one three blocks behind and frozen is the outage. Ten minutes is
+ * far longer than any legitimate pause at the 3s default poll interval, and short enough that
+ * an operator hears about it the same morning rather than three days later.
+ */
+const SCAN_STALL_ERROR_AFTER_MS = 10 * 60 * 1000;
+
 export class HtlcRelay {
-  // Lock events are also kept in a small in-memory ring purely for resolveCounterpart's
-  // same-process hashLock lookup. The durable, seq-numbered copy served to the Go poller lives
-  // in the RelayStore journal (finding R2-H-11) — this ring is not the serving source of truth.
-  private readonly lockEvents: LockEvent[] = [];
   private readonly fxProposalEvents: FXProposalEvent[] = [];
   private readonly fxAcceptanceEvents: FXAcceptanceEvent[] = [];
   private readonly fxRejectionEvents: FXRejectionEvent[] = [];
@@ -290,6 +288,16 @@ export class HtlcRelay {
   /** The lifecycle signal, captured in start() and reused by runtime addSpoke() calls. */
   private signal?: AbortSignal;
 
+  // Chain-scan liveness, per spoke. The watermark is the one number that told the truth during
+  // the LNET outage — the relay logged busily for three days while this stood still — and it
+  // was reachable only by reading a JSON file out of a Docker volume, twice, thirty seconds
+  // apart. Kept here so it can be served, and so the relay can notice its own stall.
+  private readonly chainHeads = new Map<string, number>();
+  private readonly watermarkAdvancedAt = new Map<string, number>();
+  // Spokes already reported as stalled. The condition persists until the scan moves, and an
+  // error repeated every poll interval is an error nobody reads.
+  private readonly stallReported = new Set<string>();
+
   constructor(
     private readonly spokes: SpokeDep[],
     private readonly protoPath: string,
@@ -306,10 +314,53 @@ export class HtlcRelay {
 
   // ── Public accessors (used by REST API) ────────────────────────────────
 
+  /**
+   * Chain-scan liveness per spoke: where the scan is, where the chain is, and how long since
+   * the scan last moved.
+   *
+   * `blocksBehind` alone does not separate the two states that matter. A relay 5,000 blocks
+   * behind and advancing is catching up; one three blocks behind and frozen for an hour is the
+   * outage that presented as "PvP stopped working". `secondsSinceAdvance` is what tells them
+   * apart, and it is the field to alert on.
+   *
+   * A spoke that has never scanned reports a null watermark rather than 0 — unknown is not
+   * zero, and zero reads as healthy.
+   */
+  getScanLiveness(): ScanLiveness[] {
+    const now = Date.now();
+    // `watching`, not `spokes`: in a real deployment the constructor list is EMPTY and every
+    // spoke arrives at runtime through addSpoke (POST /api/v1/spokes from the toolkit). Reading
+    // the constructor list reported nothing on a live relay, and an empty scan reads as "nothing
+    // to worry about" — the same reassuring silence this exists to break. `watching` is also the
+    // more honest source: it is the set actually being scanned.
+    return [...this.watching].sort().map((spokeId) => {
+      const watermark = this.relayStore.getWatermark(spokeId);
+      const head = this.chainHeads.get(spokeId);
+      const advancedAt = this.watermarkAdvancedAt.get(spokeId);
+      return {
+        spokeId,
+        watermark: watermark ?? null,
+        head: head ?? null,
+        blocksBehind: watermark !== undefined && head !== undefined ? Math.max(0, head - watermark) : null,
+        secondsSinceAdvance: advancedAt === undefined ? null : Math.floor((now - advancedAt) / 1000),
+      };
+    });
+  }
+
   // Lock/settle events are served from the durable seq journal, not the in-memory ring: the
   // caller (Go poller) passes the last seq it processed and receives events with a greater seq.
   // The seq is stable across relay restarts, so the poller's persisted cursor composes exactly
   // with the relay and never re-delivers or loses events (finding R2-H-11).
+  /**
+   * Highest seq ever dropped from a journal by the retention cap; 0 when nothing has been.
+   * Served alongside the events so a consumer can tell whether its cursor fell off the end —
+   * it is the one that loses a settlement when that happens, and until now only the relay
+   * knew, in a log line nobody reads.
+   */
+  getJournalTrimmedThrough(kind: "lock" | "settle"): number {
+    return this.relayStore.journalTrimmedThrough(kind);
+  }
+
   getSettleEvents(sinceSeq = 0): Record<string, unknown>[] {
     return this.relayStore.getEventsSince("settle", sinceSeq);
   }
@@ -449,6 +500,8 @@ export class HtlcRelay {
         const latestBlock = typeof latestResp.block === "object" && latestResp.block !== null
           ? Number((latestResp.block as Record<string, unknown>)["number"] ?? 0)
           : 0;
+        this.chainHeads.set(spoke.id, latestBlock);
+        this.reportScanStallIfAny(spoke.id, latestBlock);
         if (latestBlock < fromBlock) {
           // Head is behind our resume point: either the chain has not produced new blocks yet, or
           // (after a reset the genesis guard did not catch) the watermark is ahead of the chain.
@@ -496,9 +549,6 @@ export class HtlcRelay {
               txHash: raw.transactionHash,
               timestamp: Date.now(),
             };
-            // Ring for resolveCounterpart's in-process lookup; journal (deduped by chain id) is the
-            // durable, seq-stable copy served to the Go poller (finding R2-H-11).
-            pushRing(this.lockEvents, evt, MAX_EVENTS);
             await this.relayStore.appendEvent(
               "lock",
               `${spoke.id}:${raw.transactionHash}:${logIndex}`,
@@ -515,7 +565,7 @@ export class HtlcRelay {
         // Process LogHTLCClaimed events — decode and forward settlement. A settlement that fails
         // to deliver must NOT let the watermark advance past its block, so the event is retried
         // rather than silently dropped (finding R2-H-11). We track the lowest failed block here.
-        let minFailedBlock = Number.POSITIVE_INFINITY;
+
         for (const raw of claimedResp.logs) {
           try {
             const parsed = iface.parseLog({ topics: raw.topics, data: raw.data });
@@ -542,43 +592,13 @@ export class HtlcRelay {
               `[${spoke.id}] LogHTLCClaimed contractId=${contractId} block=${raw.blockNumber} tx=${raw.transactionHash}`,
             );
 
-            // Per-event replay guard (survives restart): this exact observed claim was already
-            // forwarded. Keyed on txHash:logIndex — the stable event identity, not the secret.
-            const evtKey = `htlc-evt:${spoke.id}:${raw.transactionHash}:${logIndex}`;
-            if (this.relayStore.hasDelivered(evtKey)) {
-              continue;
-            }
-
-            // Echo guard: a claim for a contract THIS relay settled is the settlement's own event
-            // bouncing back; do not forward it to the origin (already claimed there).
-            if (this.relayStore.hasDelivered(`htlc-settled:${spoke.id}:${contractId}`)) {
-              this.log.info(
-                `[${spoke.id}] skipping echo claim for relay-settled contractId=${contractId}`,
-              );
-              await this.relayStore.markDelivered(evtKey);
-              continue;
-            }
-
-            const resolved = this.resolveCounterpart(spoke.id, contractId);
-            if (!resolved) {
-              // Counterpart lock not observed (yet). Do not mark delivered — a later cycle that
-              // re-scans this block (e.g. after another failure) can still resolve and forward it.
-              this.log.warn(`[${spoke.id}] skipping settlement — could not resolve counterpart for contractId=${contractId}`);
-              continue;
-            }
-            const destClient = this.grpcClients.get(resolved.destSpokeId);
-            if (!destClient) {
-              this.log.error(`[${spoke.id}] settlement skipped: dest_spoke_id "${resolved.destSpokeId}" not in registry`);
-              continue;
-            }
-            const settled = await this.settleOnCounterpart(destClient, spoke.id, resolved.contractId, secret);
-            if (settled) {
-              await this.relayStore.markDelivered(evtKey);
-              await this.relayStore.markDelivered(`htlc-settled:${resolved.destSpokeId}:${resolved.contractId}`);
-            } else {
-              // Hold the watermark at/below this block so the failed settlement is retried.
-              minFailedBlock = Math.min(minFailedBlock, raw.blockNumber);
-            }
+            // Nothing is pushed from here. The claim is now in the journal, and the journal is
+            // what settles a counterpart leg: each orchestrator polls it and settles its own leg,
+            // resolving it by sha256(secret) rather than by a contract id it was handed. The relay
+            // could never have done that job — transferLocked runs on the leg owner's own Paladin
+            // node over states local to it — and it could not even address the owner, since it
+            // holds one gRPC endpoint per spoke, the founding central bank's, while an inter-bank
+            // leg lives on a commercial bank's. See docs/decisions for the full account.
           } catch (decodeErr) {
             this.log.warn(`[${spoke.id}] failed to decode LogHTLCClaimed: ${String(decodeErr)}`);
           }
@@ -596,14 +616,22 @@ export class HtlcRelay {
           );
         }
 
-        // Advance the watermark only through the blocks whose settlements actually delivered.
-        // If a settlement failed at block N, stop at N-1 so [N, toBlock] is retried next cycle
-        // instead of being skipped (advance-after-delivery, not after-fetch — finding R2-H-11).
-        const deliveredThrough = minFailedBlock === Number.POSITIVE_INFINITY
-          ? toBlock
-          : minFailedBlock - 1;
-        await this.relayStore.setWatermark(spoke.id, deliveredThrough);
-        fromBlock = deliveredThrough + 1;
+        // Advance through everything scanned. Delivery is the journal append above, which is
+        // local and idempotent, so there is no remote outcome left to wait on — and therefore
+        // nothing that can hold this back. The hold that used to live here existed for the
+        // settle push, and it is what turned one unsettleable claim into a frozen spoke: the
+        // hold was on the BLOCK, so it froze every unrelated event after it, locks included,
+        // and starved the journal that was doing the real work (finding R2-H-11 still holds —
+        // the watermark means delivered; delivered simply no longer involves a network call).
+        const previousWatermark = this.relayStore.getWatermark(spoke.id);
+        await this.relayStore.setWatermark(spoke.id, toBlock);
+        if (previousWatermark === undefined || toBlock > previousWatermark) {
+          this.watermarkAdvancedAt.set(spoke.id, Date.now());
+          if (this.stallReported.delete(spoke.id)) {
+            this.log.info(`[${spoke.id}] chain scan is advancing again (watermark ${toBlock})`);
+          }
+        }
+        fromBlock = toBlock + 1;
         failures = 0;
       } catch (err) {
         this.log.warn(`[${spoke.id}] poll cycle error: ${String(err)}`);
@@ -635,6 +663,32 @@ export class HtlcRelay {
    * from the new genesis instead of stalling with head permanently below watermark (R2-H-11).
    * Returns the block to resume from (unchanged unless a reset was detected).
    */
+  /**
+   * Say, once, when this spoke's scan has stopped while its chain has not.
+   *
+   * This is the sentence that was missing for three days on LNET. The relay was logging
+   * continuously and answering its health probe the whole time; what it had stopped doing was
+   * advancing, and nothing said so. Reported once per stall — repeating it every poll interval
+   * would bury it in the same noise that hid the original.
+   */
+  private reportScanStallIfAny(spokeId: string, head: number): void {
+    if (this.stallReported.has(spokeId)) return;
+    const advancedAt = this.watermarkAdvancedAt.get(spokeId);
+    if (advancedAt === undefined) return; // never scanned yet — not a stall
+    const stillMs = Date.now() - advancedAt;
+    if (stillMs < SCAN_STALL_ERROR_AFTER_MS) return;
+    const watermark = this.relayStore.getWatermark(spokeId);
+    if (watermark === undefined || head <= watermark) return; // nothing new to scan
+
+    this.stallReported.add(spokeId);
+    this.log.error(
+      `[${spokeId}] chain scan has not advanced for ${Math.floor(stillMs / 1000)}s while the ` +
+      `chain moved on: watermark ${watermark}, head ${head} (${head - watermark} blocks behind). ` +
+      `Nothing on this spoke is being observed, so no lock or claim reaches the journal and no ` +
+      `PvP here can pair. See docs/runbooks/relay-chain-scan-stalled.md`,
+    );
+  }
+
   private async reconcileSpokeChain(
     connector: PluginLedgerConnectorBesu,
     spoke: SpokeDep,
@@ -665,81 +719,6 @@ export class HtlcRelay {
       return 0;
     }
     return fromBlock;
-  }
-
-  private resolveCounterpart(
-    spokeName: string,
-    contractId: string,
-  ): { destSpokeId: string; contractId: string } | undefined {
-    // Walk backwards so we pick the most recent matching event.
-    let sourceLock: LockEvent | undefined;
-    for (let i = this.lockEvents.length - 1; i >= 0; i--) {
-      const l = this.lockEvents[i];
-      if (l.spoke === spokeName && l.contractId === contractId) {
-        sourceLock = l;
-        break;
-      }
-    }
-    if (!sourceLock) {
-      this.log.warn(
-        `[${spokeName}] resolveCounterpart: source lock not found for contractId=${contractId}`,
-      );
-      return undefined;
-    }
-
-    let counterpartLock: LockEvent | undefined;
-    for (let i = this.lockEvents.length - 1; i >= 0; i--) {
-      const l = this.lockEvents[i];
-      if (l.spoke !== spokeName && l.hashLock === sourceLock.hashLock) {
-        counterpartLock = l;
-        break;
-      }
-    }
-    if (!counterpartLock) {
-      this.log.warn(
-        `[${spokeName}] resolveCounterpart: no counterpart lock found for hashLock=${sourceLock.hashLock}`,
-      );
-      return undefined;
-    }
-
-    this.log.info(
-      `[${spokeName}] resolveCounterpart: ${contractId} → ${counterpartLock.contractId} (destSpokeId=${counterpartLock.spoke})`,
-    );
-    return { destSpokeId: counterpartLock.spoke, contractId: counterpartLock.contractId };
-  }
-
-  /**
-   * Settle on the counterpart spoke. Resolves true only when the gRPC call succeeded; a failure
-   * resolves false so the caller holds the watermark and retries instead of marking the event
-   * delivered (finding R2-H-11: the watermark must mean delivered, not merely attempted).
-   */
-  private settleOnCounterpart(
-    client: PaymentOrchestratorClient,
-    spokeName: string,
-    contractId: string,
-    secret: string,
-  ): Promise<boolean> {
-    return new Promise((resolve) => {
-      const deadline = new Date(Date.now() + 30_000);
-      client.SettleHTLC(
-        { contract_id: contractId, secret },
-        new grpc.Metadata(),
-        { deadline },
-        (err: grpc.ServiceError | null, resp: SettleHTLCResponse) => {
-          if (err) {
-            this.log.error(
-              `[${spokeName}] SettleHTLC gRPC failed contractId=${contractId}: ${err.message}`,
-            );
-            resolve(false);
-          } else {
-            this.log.info(
-              `[${spokeName}] counterpart settled contractId=${contractId} htlcTx=${resp?.htlc_tx_hash} zetoTx=${resp?.zeto_tx_hash}`,
-            );
-            resolve(true);
-          }
-        },
-      );
-    });
   }
 
   private pruneForwardedTradeIds(): void {

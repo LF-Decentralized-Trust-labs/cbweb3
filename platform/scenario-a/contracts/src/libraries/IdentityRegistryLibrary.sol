@@ -27,8 +27,8 @@ library IdentityRegistryLibrary {
     /// @param legalName Registered legal name of the institution.
     /// @param institutionId Opaque institution-level identifier used for quorum de-duplication.
     ///        Every wallet belonging to the same institution shares this value, which lets a
-    ///        governance quorum (the AMM circuit-breaker resume) require approvals from distinct
-    ///        institutions rather than merely distinct keys.
+    ///        governance quorum require approvals from distinct institutions rather than merely
+    ///        distinct keys.
     /// @param role Functional role (e.g., Commercial Bank) governing access rights.
     /// @param status Current KYC/AML verification state.
     /// @param zkPointer Hash reference to private credentials handled by the privacy layer.

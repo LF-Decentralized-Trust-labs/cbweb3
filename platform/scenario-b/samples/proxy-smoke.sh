@@ -24,6 +24,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"       # .../scenario-b/samples/proxy-smoke
 SAMPLES_DIR="${SCRIPT_DIR}"
+# This smoke keeps its manifest and its state in samples/proxy-smoke/, isolated from
+# deploy-all.sh's samples/cbweb3-data — the two must not share a data dir, and a
+# --clean here must not wipe the other's state.
+WORK_DIR="${SCRIPT_DIR}/proxy-smoke"
 SCENARIO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"                  # .../scenario-b
 REPO_ROOT="$(cd "${SCENARIO_DIR}/.." && pwd)"                   # repo root
 
@@ -32,15 +36,15 @@ HOST="cb-brazil.localtest.me"
 
 log() { printf '\n\033[1;36m[proxy-smoke] %s\033[0m\n' "$*"; }
 
-cd "${SCRIPT_DIR}"   # relative node.dataDir + emitted bundles resolve under proxy-smoke/
+cd "${WORK_DIR}"   # relative node.dataDir + emitted bundles resolve under proxy-smoke/
 
 if [[ "${1:-}" == "--clean" ]]; then
   log "cleaning docker (containers + volumes + networks) and work dir…"
-  docker rm -f "$(docker ps -aq)" 2>/dev/null || true
-  docker volume rm "$(docker volume ls -q)" 2>/dev/null || true
+  docker rm -f $(docker ps -aq) 2>/dev/null || true
+  docker volume rm $(docker volume ls -q) 2>/dev/null || true
   docker network prune -f 2>/dev/null || true
   docker rm -f cbweb3-proxy 2>/dev/null || true
-  rm -rf "${SCRIPT_DIR}/cbweb3-data" "${SCRIPT_DIR}/bundles" 2>/dev/null || true
+  rm -rf "${WORK_DIR}/cbweb3-data" "${WORK_DIR}/bundles" 2>/dev/null || true
 fi
 
 # --- images (generic, built once) ---------------------------------------------
@@ -70,7 +74,7 @@ fi
 apply() { # <label> <manifest> [extra flags...]
   local label="$1" manifest="$2"; shift 2
   log "${label}"
-  "${BIN}" apply -f "${manifest}" -o yaml --repo-root "${REPO_ROOT}" --out-dir "${SCRIPT_DIR}" "$@"
+  "${BIN}" apply -f "${manifest}" -o yaml --repo-root "${REPO_ROOT}" --out-dir "${WORK_DIR}" "$@"
 }
 
 # --- relay (external; hard prerequisite of register-relay-spoke) --------------
@@ -80,7 +84,7 @@ bash "${SCENARIO_DIR}/provisioning/scripts/start-cacti.sh"
 # --- hub then CB (proxy enabled on the CB) ------------------------------------
 apply "Hub — found-hub hub-cbweb3" "${SCENARIO_DIR}/samples/hub/hub-cbweb3.yaml"
 apply "Brazil — found-spoke central-bank-brazil behind the proxy" \
-  "${SCRIPT_DIR}/central-bank-brazil.yaml" --spoke-rpc http://localhost:33645
+  "${WORK_DIR}/central-bank-brazil.yaml" --spoke-rpc http://localhost:9145
 
 # --- summary ------------------------------------------------------------------
 scheme="https"; [[ "${PROXY_TLS_MODE}" == "off" ]] && scheme="http"
@@ -94,7 +98,7 @@ cat <<EOF
   ${scheme}://${HOST}/b/api/v1/     -> api-gateway
 
   '${HOST}' resolves to 127.0.0.1, so open these in a browser ON THIS MACHINE.
-  The hub stays port-based (it is infra, not proxied): api http://localhost:41845.
+  The hub stays port-based (it is infra, not proxied): api http://localhost:17345.
 EOF
 if [[ "${PROXY_TLS_MODE}" != "off" ]]; then
   cat <<'EOF'

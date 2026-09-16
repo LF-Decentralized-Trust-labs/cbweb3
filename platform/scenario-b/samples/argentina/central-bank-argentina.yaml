@@ -29,16 +29,20 @@ spec:
   # since the toolkit holds no sovereign signing keys.
   node:
     advertisedHost: host.docker.internal
-    rpc:  { port: 33745 }
-    ws:   { port: 33755 }
-    p2p:  { port: 56403 }
+    rpc:  { port: 9245 }
+    ws:   { port: 9255 }
+    p2p:  { port: 30403 }
     dataDir: cbweb3-data/central-bank-argentina
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed
   relay:
     endpoint: http://localhost:7000
-  cbEndpoint: http://host.docker.internal:18745
+  # This CB's own api-gateway, host-mapped (RPC 9245 + 8000). Declared for the
+  # credential-request hook the toolkit roadmap describes; NOTHING in the engine
+  # reads it yet, which is how it went unnoticed that the old value (18745) carried
+  # Scenario A's base AND Scenario A's +10000 gateway offset.
+  cbEndpoint: http://host.docker.internal:17245
   frontendHost: localhost
   launcher: enable
   launcherPort: 5194
@@ -46,6 +50,7 @@ spec:
     - { role: GOVERNANCE, username: admin@argentina.governance.gov, password: argentina-governance-local }
     - { role: TREASURY,   username: admin@argentina.treasury.gov,   password: argentina-treasury-local }
     - { role: SUPERVISOR, username: admin@argentina.supervisor.gov, password: argentina-supervisor-local }
+    - { role: ADMISSION,  username: admin@argentina.admission.gov, password: argentina-admission-local }
   # Reverse proxy off — these many-entity single-host samples are port-based via the
   # per-entity launcher. Test the proxy separately with proxy-smoke.sh (one entity per host).
   proxy: disable

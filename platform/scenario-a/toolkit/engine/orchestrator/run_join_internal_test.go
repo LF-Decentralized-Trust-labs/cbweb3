@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/bundle"
@@ -48,6 +49,7 @@ func testJoinBundle() *bundle.JoinBundle {
 			Contracts:  bundle.ContractsSpec{RegistryAddress: "0x1234"},
 			Validators: []bundle.ValidatorSpec{{Address: "0xCB", RPCURL: "http://cb:8645"}},
 			CBEndpoint: "http://cb:8080/cr",
+			Relay:      &bundle.RelaySpec{Endpoint: "http://relay:4000"},
 		},
 	}
 }
@@ -72,6 +74,43 @@ func mockJoinSteps(checkVal bool) ([]Step, []*mockStep) {
 	return steps, mocks
 }
 
+// A bank whose bundle carries no relay endpoint, and which does not override one, used to
+// join successfully and then point its payment-orchestrator at the co-located default
+// http://host.docker.internal:4000. That is non-empty, so the orchestrator's own startup
+// check passes, and on a separate host it resolves to nothing. The bank subscribes to a
+// relay that is not there: it never learns of a counterpart lock or a revealed secret, and
+// nothing in the deployment says so. Fail the join instead, while there is still an operator
+// watching it.
+func TestRunJoin_RefusesBundleWithoutRelayEndpoint(t *testing.T) {
+	dataDir := t.TempDir()
+	m := testJoinManifest(dataDir)
+	b := testJoinBundle()
+	b.Spec.Relay = nil
+
+	steps, _ := mockJoinSteps(true)
+	var buf bytes.Buffer
+	_, err := runJoinWithSteps(context.Background(), m, b, testJoinDeps(), &buf, steps)
+	if err == nil || !strings.Contains(err.Error(), "relay endpoint") {
+		t.Fatalf("join must refuse a bundle with no relay endpoint, got: %v", err)
+	}
+}
+
+// The bank's own manifest may carry the endpoint instead — an override for a bank that
+// reaches the relay by a different address than the founder advertised.
+func TestRunJoin_AcceptsManifestRelayOverrideWhenBundleHasNone(t *testing.T) {
+	dataDir := t.TempDir()
+	m := testJoinManifest(dataDir)
+	m.Spec.Relay = &manifest.Relay{Endpoint: "http://relay.bank-side:4000"}
+	b := testJoinBundle()
+	b.Spec.Relay = nil
+
+	steps, _ := mockJoinSteps(true)
+	var buf bytes.Buffer
+	if _, err := runJoinWithSteps(context.Background(), m, b, testJoinDeps(), &buf, steps); err != nil {
+		t.Fatalf("a manifest relay override must satisfy the requirement: %v", err)
+	}
+}
+
 // T008: all steps already done → no Run is called.
 func TestRunJoin_AllStepsDone(t *testing.T) {
 	dataDir := t.TempDir()
@@ -79,7 +118,7 @@ func TestRunJoin_AllStepsDone(t *testing.T) {
 	steps, mocks := mockJoinSteps(true) // every Check returns done=true
 
 	var buf bytes.Buffer
-	if err := runJoinWithSteps(context.Background(), m, testJoinBundle(), testJoinDeps(), &buf, steps); err != nil {
+	if _, err := runJoinWithSteps(context.Background(), m, testJoinBundle(), testJoinDeps(), &buf, steps); err != nil {
 		t.Fatalf("RunJoin: %v", err)
 	}
 	for _, mk := range mocks {
@@ -96,7 +135,7 @@ func TestRunJoin_AllStepsSucceed(t *testing.T) {
 	steps, mocks := mockJoinSteps(false)
 
 	var buf bytes.Buffer
-	if err := runJoinWithSteps(context.Background(), m, testJoinBundle(), testJoinDeps(), &buf, steps); err != nil {
+	if _, err := runJoinWithSteps(context.Background(), m, testJoinBundle(), testJoinDeps(), &buf, steps); err != nil {
 		t.Fatalf("RunJoin: %v", err)
 	}
 	for _, mk := range mocks {
@@ -137,7 +176,7 @@ func TestRunJoin_ResumeFromStep5(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runJoinWithSteps(context.Background(), m, testJoinBundle(), testJoinDeps(), &buf, steps); err != nil {
+	if _, err := runJoinWithSteps(context.Background(), m, testJoinBundle(), testJoinDeps(), &buf, steps); err != nil {
 		t.Fatalf("RunJoin: %v", err)
 	}
 	for i := 0; i < 4; i++ {
@@ -156,7 +195,7 @@ func TestRunJoin_NilBundle(t *testing.T) {
 	dataDir := t.TempDir()
 	m := testJoinManifest(dataDir)
 	var buf bytes.Buffer
-	err := runJoinWithSteps(context.Background(), m, nil, testJoinDeps(), &buf, nil)
+	_, err := runJoinWithSteps(context.Background(), m, nil, testJoinDeps(), &buf, nil)
 	if !errors.Is(err, ErrBundleNotFound) {
 		t.Errorf("expected ErrBundleNotFound, got %v", err)
 	}
@@ -174,7 +213,7 @@ func TestRunJoin_ProvisioningLocked(t *testing.T) {
 
 	steps, _ := mockJoinSteps(false)
 	var buf bytes.Buffer
-	err = runJoinWithSteps(context.Background(), m, testJoinBundle(), testJoinDeps(), &buf, steps)
+	_, err = runJoinWithSteps(context.Background(), m, testJoinBundle(), testJoinDeps(), &buf, steps)
 	if !errors.Is(err, ErrProvisioningLocked) {
 		t.Errorf("expected ErrProvisioningLocked, got %v", err)
 	}

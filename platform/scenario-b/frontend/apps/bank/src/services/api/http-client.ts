@@ -16,11 +16,13 @@ export const apiBaseV2 = `${apiBaseRoot}/api/v2`;
 export const httpClient = axios.create({
   baseURL: apiBaseV1,
   withCredentials: true,
+  withXSRFToken: true,
 });
 
 export const httpClientV2 = axios.create({
   baseURL: apiBaseV2,
   withCredentials: true,
+  withXSRFToken: true,
 });
 
 attachAuthInterceptor(httpClient);

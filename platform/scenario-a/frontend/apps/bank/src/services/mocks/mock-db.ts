@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type {
-  AMMPoolStatus,
-  AMMQuoteRequest,
-  AMMQuoteResponse,
   ComplianceCredential,
   OnRampRequest,
   OnRampRequestPayload,
@@ -54,14 +51,6 @@ let onRampRequests: OnRampRequest[] = [
     createdAt: nowIso(),
   },
 ];
-
-let pool: AMMPoolStatus = {
-  tokenA: "BRL-tCeBM",
-  tokenB: "ARS-tCeBM",
-  reserveA: "700000",
-  reserveB: "300000",
-  imbalanceFlag: false,
-};
 
 const credentials: ComplianceCredential[] = [
   { id: "cred_kyc_001", type: "KYC_VERIFIED", issuer: "CB Compliance Node", expiresAt: "2027-12-31T23:59:59.000Z" },
@@ -145,41 +134,6 @@ export const mockDb = {
   async getTransactions() {
     await wait(250);
     return tokenTransactions;
-  },
-  async quoteExactOutput(params: AMMQuoteRequest): Promise<AMMQuoteResponse> {
-    await wait(200);
-    const reserveIn = BigInt(pool.reserveA);
-    const reserveOut = BigInt(pool.reserveB);
-    const amountOut = BigInt(params.exactOutputAmount || "0");
-    if (amountOut <= 0n || amountOut >= reserveOut) {
-      throw new Error("Invalid exact output amount");
-    }
-    const requiredInputAmount = (reserveIn * amountOut) / (reserveOut - amountOut);
-    const spot = Number(reserveOut) / Number(reserveIn);
-    const effective = Number(amountOut) / Number(requiredInputAmount || 1n);
-    const impact = Math.abs(((effective - spot) / spot) * 100);
-    return {
-      requiredInputAmount: requiredInputAmount.toString(),
-      priceImpactPct: Number(impact.toFixed(4)),
-      slippagePct: 0.5,
-    };
-  },
-  async getPoolStatus() {
-    await wait(250);
-    const a = Number(pool.reserveA);
-    const b = Number(pool.reserveB);
-    const ratio = a / (a + b);
-    return {
-      ...pool,
-      imbalanceFlag: ratio > 0.7 || ratio < 0.3,
-    };
-  },
-  async swapExactOutput(params: AMMQuoteRequest) {
-    const quote = await this.quoteExactOutput(params);
-    const reserveA = BigInt(pool.reserveA) + BigInt(quote.requiredInputAmount);
-    const reserveB = BigInt(pool.reserveB) - BigInt(params.exactOutputAmount);
-    pool = { ...pool, reserveA: reserveA.toString(), reserveB: reserveB.toString() };
-    return quote;
   },
   async getCredentials() {
     await wait(250);

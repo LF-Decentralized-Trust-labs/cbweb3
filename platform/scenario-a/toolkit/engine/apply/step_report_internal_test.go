@@ -31,6 +31,18 @@ func writeStepsDone(t *testing.T, dataDir string, steps []string) {
 	}
 }
 
+// ranOutcome is what the engine hands back: the steps whose Run it actually
+// called. A fake that writes state but returns an empty outcome is a fake of an
+// engine that resolved every step through Check — which is a legitimate run, and
+// the report must call those steps skipped.
+func ranOutcome(names ...string) orchestrator.RunOutcome {
+	out := orchestrator.RunOutcome{Ran: make(map[string]bool, len(names))}
+	for _, n := range names {
+		out.Ran[n] = true
+	}
+	return out
+}
+
 func reportedStepNames(steps []StepResult) []string {
 	names := make([]string, len(steps))
 	for i, s := range steps {
@@ -51,9 +63,9 @@ func TestRun_ProxyEnabled_ReportListsEveryExecutedStep(t *testing.T) {
 
 	executed := orchestrator.PlannedStepOrder(m.Spec.Mode, true)
 	fns := runnerFuncs{
-		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) error {
+		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) (orchestrator.RunOutcome, error) {
 			writeStepsDone(t, dataDir, executed)
-			return nil
+			return ranOutcome(executed...), nil
 		},
 		emitBundle: func(_ context.Context, _ bundle.BundleInput) (*bundle.JoinBundle, error) {
 			return validEmittedBundleForTest(), nil
@@ -86,8 +98,11 @@ func TestRun_ProxyEnabled_ReportListsEveryExecutedStep(t *testing.T) {
 	if proxy == nil {
 		t.Fatalf("%q executed but is absent from the report: %v", orchestrator.StepStartProxy, reported)
 	}
-	if proxy.Status != "skipped" {
-		t.Errorf("%q recorded done in state; report Status = %q, want skipped", orchestrator.StepStartProxy, proxy.Status)
+	// "executed", not "skipped": this run started with no prior state and did the
+	// work. The report used to say skipped for both cases, which is what this
+	// assertion was pinning before the distinction existed.
+	if proxy.Status != "executed" {
+		t.Errorf("%q was run by this apply; report Status = %q, want executed", orchestrator.StepStartProxy, proxy.Status)
 	}
 }
 
@@ -99,9 +114,9 @@ func TestRun_ProxyDisabled_ReportOmitsProxyStep(t *testing.T) {
 	m.Spec.Proxy = ""
 
 	fns := runnerFuncs{
-		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) error {
+		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) (orchestrator.RunOutcome, error) {
 			writeStepsDone(t, dataDir, orchestrator.CanonicalStepOrder)
-			return nil
+			return ranOutcome(orchestrator.CanonicalStepOrder...), nil
 		},
 		emitBundle: func(_ context.Context, _ bundle.BundleInput) (*bundle.JoinBundle, error) {
 			return validEmittedBundleForTest(), nil
@@ -132,7 +147,9 @@ func TestDryRunPlanMatchesApplyReport_ProxyEnabled(t *testing.T) {
 	}
 
 	fns := runnerFuncs{
-		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) error { return nil },
+		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) (orchestrator.RunOutcome, error) {
+			return orchestrator.RunOutcome{}, nil
+		},
 		emitBundle: func(_ context.Context, _ bundle.BundleInput) (*bundle.JoinBundle, error) {
 			return validEmittedBundleForTest(), nil
 		},
