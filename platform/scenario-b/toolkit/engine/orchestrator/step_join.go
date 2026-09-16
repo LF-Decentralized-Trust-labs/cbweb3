@@ -83,7 +83,7 @@ func joinWaitSyncTimeout() time.Duration {
 
 func (c *JoinConfig) WithDefaults() {
 	if c.BesuImage == "" {
-		c.BesuImage = "hyperledger/besu:25.8.0"
+		c.BesuImage = DefaultBesuImage
 	}
 	if c.VolumePrefix == "" {
 		c.VolumePrefix = c.BankID
@@ -164,18 +164,19 @@ var bankRoles = []string{"commercial_bank", "ROLE_COMMERCIAL_BANK"}
 func (c JoinConfig) provisionKeycloakRealm(ctx context.Context) error {
 	kc := "/opt/keycloak/bin/kcadm.sh"
 	var b strings.Builder
-	// Same password the compose env gave the Keycloak container; resolved from the
-	// entity secrets file, not a constant.
-	// Caveat, stated rather than glossed: kcadm takes the password as an argument, so
-	// it transits the Keycloak container's process list for the duration of this exec.
-	// There is no env equivalent for `kcadm config credentials` (unlike REDISCLI_AUTH,
-	// which is why Redis is handled differently). This is not new — the value used to be
-	// the constant admin — but the exposure window is real and belongs in a follow-up
-	// once realm provisioning moves to an imported realm file, as Scenario A does it.
 	b.WriteString(kcadmPreamble)
-	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password %[2]s && ",
-		kc, mustInfraSecret(c.DataDir, "KC_ADMIN_PASSWORD"))
+	fmt.Fprintf(&b, "%s && ", kcadmLogin(kc))
 	fmt.Fprintf(&b, "(%[1]s create realms -s realm=%[2]s -s enabled=true || kcw 'create realm') && ", kc, bankKeycloakRealm)
+	// Local lab uses plain HTTP and the portal does a browser-direct password grant, which
+	// Keycloak's default sslRequired=external rejects with "HTTPS required". Relax it for
+	// local (never in production), and cap the token lifespan the same way the other modes do.
+	//
+	// This is also a precondition of this script's own assertions: appendKeycloakAssertions
+	// checks the realm holds sslRequired=none, so omitting the update made the gate
+	// unsatisfiable and took every bank join down with
+	// "realm cbweb3 did not accept sslRequired=NONE".
+	fmt.Fprintf(&b, "(%[1]s update realms/%[2]s -s sslRequired=NONE -s accessTokenLifespan=%[3]d || kcw 'update realm settings') && ",
+		kc, bankKeycloakRealm, accessTokenLifespanSeconds)
 	fmt.Fprintf(&b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s secret=%[4]s -s enabled=true "+
 		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[5]s || kcw 'create backend client') && ",
 		kc, bankKeycloakRealm, bankKeycloakClient, bankKeycloakSecret, audienceMapperArg(keycloakBackendAudience))
@@ -244,23 +245,24 @@ func (c JoinConfig) corsOrigins() string {
 // NetName is this bank's external docker network (created by the infra step).
 func (c JoinConfig) NetName() string { return c.NetPrefix + "_net" }
 
-// bankFrontendContainer is the bank portal container name on the entity network
-// (must match entity-frontend.compose.yaml: <CONTAINER_PREFIX>-<ENTITY>-frontend).
-func (c JoinConfig) bankFrontendContainer() string {
-	return fmt.Sprintf("%s-%s-frontend", c.ContainerPrefix, c.Entity)
-}
+// bankFrontendAlias / apiGatewayAlias are the network aliases the reverse proxy resolves
+// this bank's portal and gateway by (must match entity-frontend.compose.yaml and
+// entity-backend.compose.yaml).
+//
+// Container names cannot serve: a DNS label stops at 63 octets (RFC 1035) and the
+// container name carries the full container prefix twice over, so a long enough entity id
+// makes it unresolvable and every proxied request answers 502. The alias is built from the
+// entity network prefix — unique per entity, and short.
+func (c JoinConfig) bankFrontendAlias() string { return c.NetPrefix + "-frontend" }
 
-// apiGatewayContainer is the api-gateway container name on the entity network.
-func (c JoinConfig) apiGatewayContainer() string {
-	return fmt.Sprintf("%s-%s-api-gateway", c.ContainerPrefix, c.Entity)
-}
+func (c JoinConfig) apiGatewayAlias() string { return c.NetPrefix + "-api-gateway" }
 
 // ProxyRoutes are the path routes the reverse proxy exposes for this bank: its portal +
 // the api-gateway.
 func (c JoinConfig) ProxyRoutes() []ProxyRoute {
 	return []ProxyRoute{
-		{Segment: "bank", Upstream: c.bankFrontendContainer() + ":80"},
-		{Segment: "api", Upstream: c.apiGatewayContainer() + ":8080", IsAPI: true},
+		{Segment: "bank", Upstream: c.bankFrontendAlias() + ":80"},
+		{Segment: "api", Upstream: c.apiGatewayAlias() + ":8080", IsAPI: true},
 	}
 }
 

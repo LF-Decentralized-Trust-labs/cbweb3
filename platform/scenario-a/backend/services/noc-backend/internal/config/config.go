@@ -20,7 +20,17 @@ type Config struct {
 	// KeycloakAudience is the expected "aud" claim (KEYCLOAK_AUDIENCE). Opt-in:
 	// empty disables the audience check. The issuer is always enforced.
 	KeycloakAudience string
-	JWKSCacheTTL     time.Duration
+	// CookieSecure marks the auth cookies Secure. Defaults to TRUE, matching the api
+	// gateways: a session cookie that can travel over plain HTTP is the exposure this whole
+	// change exists to remove. A local stack served over http MUST opt out explicitly —
+	// forgetting it presents as a login that succeeds and a session that never exists,
+	// because the browser silently discards a Secure cookie on an insecure origin.
+	CookieSecure bool
+	// CSRFSecret keys the HMAC binding a CSRF token to its session. Read from the
+	// environment rather than generated per process: a generated one would differ between
+	// replicas and across restarts, so a token minted by one would be refused by the next.
+	CSRFSecret           string
+	JWKSCacheTTL         time.Duration
 	AgentGraceMultiplier int
 	FrontendOrigin       string
 	// SkipAuth disables Keycloak JWT validation for local development.
@@ -38,6 +48,8 @@ func Load() (*Config, error) {
 		KeycloakClientID:     getEnv("KEYCLOAK_CLIENT_ID", "cbweb3-noc"),
 		KeycloakClientSecret: getEnv("KEYCLOAK_CLIENT_SECRET", ""),
 		KeycloakAudience:     getEnv("KEYCLOAK_AUDIENCE", ""),
+		CookieSecure:         getEnv("COOKIE_SECURE", "true") != "false",
+		CSRFSecret:           getEnv("CSRF_SECRET", ""),
 		JWKSCacheTTL:         5 * time.Minute,
 		FrontendOrigin:       getEnv("NOC_FRONTEND_ORIGIN", "http://localhost:5173"),
 		SkipAuth:             getEnv("NOC_SKIP_AUTH", "") == "true",

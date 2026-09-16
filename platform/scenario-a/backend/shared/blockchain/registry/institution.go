@@ -25,9 +25,9 @@ func InstitutionIDFromString(s string) [32]byte {
 // the id from bankCode is therefore what guarantees that all of an institution's wallets
 // resolve to the same institutionId regardless of which onboarding path registered them.
 //
-// That property is load-bearing for the AMM circuit-breaker resume quorum, which counts
-// distinct institutions rather than distinct addresses: one central bank operating two
-// governance wallets must not satisfy the 2-of-N on its own. Mixing in any other
+// That property is load-bearing for institution attribution, which counts distinct
+// institutions rather than distinct addresses: one central bank operating two governance
+// wallets must not present itself as two institutions. Mixing in any other
 // identifier (a legal entity id, a display name) would break it in the quiet direction —
 // two wallets of one institution receiving different ids depending on the path that
 // onboarded them, which reads as two institutions to the contract.

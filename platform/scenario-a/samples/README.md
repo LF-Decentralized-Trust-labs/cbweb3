@@ -7,20 +7,37 @@
 This directory contains ready-to-use `ParticipantDeployment` manifests for the
 `cbweb3` toolkit, demonstrating the complete scenario:
 
-- **Three independent spokes**, each founded by its own central bank:
+- **Independent spokes**, each founded by its own central bank:
   - `spoke-brl` — founded by `central-bank-brazil` (currency BRL, chainId 1337)
   - `spoke-cop` — founded by `central-bank-colombia` (currency COP, chainId 1338)
   - `spoke-ars` — founded by `central-bank-argentina` (currency ARS, chainId 1339)
+  - `spoke-costa-rica` — founded by `central-bank-costa-rica` (chainId 1340)
 - **Two commercial banks per spoke**, each joining via a join bundle:
   - Brazil: `bank-itau`, `bank-bradesco` → `spoke-brl`
   - Colombia: `bank-bancolombia`, `bank-davivienda` → `spoke-cop`
   - Argentina: `bank-galicia`, `bank-macro` → `spoke-ars`
+  - Costa Rica: `cb1`, `cb2` → `spoke-costa-rica`
+
+Not every spoke is in every bring-up:
+
+| Script | Spokes stood up |
+|---|---|
+| `deploy-all.sh` (default) | Brazil (`spoke-brl`) + Costa Rica (`spoke-costa-rica`) |
+| `deploy-three.sh` | Brazil (`spoke-brl`) + Colombia (`spoke-cop`) + Argentina (`spoke-ars`) |
+
+The default deliberately pairs a two-segment spoke id (`spoke-brl`) with a
+three-segment one (`spoke-costa-rica`): code that recovers a bank or spoke id by
+splitting a node name on `-` is right for the first and wrong for the second. Four
+defects of that root cause reached a deployed environment while every sample spoke
+had a two-segment id (PRs #210–#213). Costa Rica replaced Colombia in the default
+rather than being added to it, so the default covers the defect class at the same
+cost; Colombia remains available in `deploy-three.sh`.
 
 > The bank names are illustrative, used only to demonstrate provisioning.
 
 Everything is provisioned **by configuration** (YAML manifest), without editing
-code and without touching the reference network (`deploy/local` and the Makefile
-remain intact).
+code. The toolkit is the only bring-up path — the legacy `deploy/local` tree was
+removed from both scenarios.
 
 Covers PHASES 1B (toolkit `mode: found`) and 3 (`mode: join`). **PHASE 4**
 (staging/prod: real KMS, real CA, registry images) **is not implemented** — so
@@ -79,13 +96,26 @@ Each Besu node needs distinct host ports. This is the allocation used by the man
 | central-bank-colombia   | spoke-cop  | found | 8745 | 8755 | 31403 | 1338    |
 | bank-bancolombia        | spoke-cop  | join  | 8746 | 8756 | 31404 | 1338    |
 | bank-davivienda         | spoke-cop  | join  | 8747 | 8757 | 31405 | 1338    |
-| central-bank-argentina  | spoke-ars  | found | 8845 | 8855 | 31503 | 1339    |
-| bank-galicia            | spoke-ars  | join  | 8846 | 8856 | 31504 | 1339    |
-| bank-macro              | spoke-ars  | join  | 8847 | 8857 | 31505 | 1339    |
+| central-bank-argentina  | spoke-ars  | found | 8665 | 8675 | 31503 | 1339    |
+| bank-galicia            | spoke-ars  | join  | 8666 | 8676 | 31504 | 1339    |
+| bank-macro              | spoke-ars  | join  | 8667 | 8677 | 31505 | 1339    |
 
 Each entity's operator portals derive from its RPC port by a fixed offset:
 governance/bank `+17000`, treasury `+18000`, supervisor `+22000`, NOC `+24000` (e.g.
 central-bank-brazil governance `25645`, bank-itau portal `25646`).
+
+Bases sit on the `8645 + 20k` track, and the ceiling is **8767**: the NOC portal is
+base `+24000`, so any higher base pushes it into the kernel's ephemeral range
+(`net.ipv4.ip_local_port_range`, default `32768-60999`), where a published port races
+every outbound connection on the machine and a bring-up fails at a random step with
+`address already in use`. That is why Argentina (`8665`) and Costa Rica (`8685`) sit
+below Colombia (`8745`) rather than above it — the numbering is not monotonic by country
+and does not need to be. On this single-host topology Scenario A owns the `x645`-`x767`
+lane and Scenario B the `x145`-`x557` one, so both run side by side. (`deploy-lnet` runs
+one entity per VM and separates them differently — A on suffix `645`, B on suffix `845` —
+so the lane split is a property of these samples, not of the platform; the ceiling applies
+to both.) `ports_ephemeral_test.go` enforces the ceiling on both trees, and the lane on
+these samples; see [`docs/scenario-drift.md`](../../docs/scenario-drift.md) §10.
 
 ### Per-entity launcher (distributed A/B entry point)
 
@@ -148,10 +178,10 @@ binary **outside** the repository, point it at the root with `CBWEB3_HOME`:
 export CBWEB3_HOME="$(cd ../ && pwd)"   # scenario-a root
 ```
 
-> The templates (`provisioning/templates/...`) and scripts (`deploy/local/...`) are
-> canonical toolkit assets — they are not copied into `samples/`. `deploy-contracts`
-> runs `go test` against those scripts, so the engine always requires the repository
-> to be present.
+> The templates (`provisioning/templates/...`) and scripts
+> (`provisioning/paladin/scripts/...`) are canonical toolkit assets — they are not
+> copied into `samples/`. `deploy-contracts` runs `go test` against those scripts, so
+> the engine always requires the repository to be present.
 
 For the whole session, set the directory where join bundles are emitted —
 pointing it at this `samples/` folder, so that `mode: join` manifests find the
@@ -244,7 +274,7 @@ sample manifests already point `spec.relay.endpoint` at `http://localhost:4000`.
 
 `found` is **CB-only**: it creates the country network (central bank) from the
 manifest — without bringing up Besu manually and **without** fixed bank nodes. The
-engine runs the idempotent sequence of **17 steps**:
+engine runs the idempotent sequence of **19 steps**:
 
 1. `start-besu` — brings up the Besu bootnode and **generates the genesis** on the first run (idempotent; never regenerated)
 2. `deploy-contracts` — Paladin node registry, ZetoFactory, PenteFactory
@@ -258,15 +288,17 @@ engine runs the idempotent sequence of **17 steps**:
 10. `deploy-htlc` — deploys `HashTimeLockedContract`; its constructor takes the `IdentityRegistry` from step 8
 11. `render-cb-env` — renders the CB operational stack's env file
 12. `start-cb-infra` — dedicated Postgres + Redis for this entity
-13. `provision-keycloak` — central-bank and `cbweb3`/NOC realms
-14. `start-cb-backend` — the backend services, in central-bank mode
-15. `start-cb-frontend` — governance, treasury, supervisor and NOC portals
-16. `register-relay` — registers the spoke on the Cacti relay (hard: fails if the relay does not respond)
-17. `start-launcher` — the per-entity A/B entry point (soft: a missing image does not fail the apply)
+13. `provision-keycloak` — central-bank and `cbweb3`/NOC realms. Creates a declared realm the container's startup import skipped (`--import-realm` never reapplies), so a realm added to the plan reaches an entity that was already provisioned
+14. `reconcile-admin-users` — converges `spec.adminUsers`: realm roles, users, passwords and grants, on every apply
+15. `reconcile-keycloak-realm` — converges what the import cannot reapply for a realm that exists: each client's `webOrigins`/`redirectUris` and the realm's `sslRequired` and access-token lifespan. Client secrets are deliberately **not** converged (rotating one breaks every backend holding the old value)
+16. `start-cb-backend` — the backend services, in central-bank mode
+17. `start-cb-frontend` — governance, treasury, supervisor and NOC portals
+18. `register-relay` — registers the spoke on the Cacti relay (hard: fails if the relay does not respond)
+19. `start-launcher` — the per-entity A/B entry point (soft: a missing image does not fail the apply)
 
 > `register-relay` runs **after** the frontend, not right after the contract
 > deploys: the relay is handed this CB's coordinator endpoints (gRPC + gateway), so
-> those services must be up first. A manifest with `proxy: enable` appends an 18th
+> those services must be up first. A manifest with `proxy: enable` appends a 20th
 > step, `start-proxy` (soft).
 
 > The **Pente** context and the **FXAgreement** (bilateral) are **not** created in
@@ -298,7 +330,7 @@ With the `spoke-brl` bundle emitted, provision the two banks:
 "$CBWEB3" apply -f ../samples/brazil/bank-bradesco.yaml --output yaml
 ```
 
-The join engine runs **16 steps**, in four blocks:
+The join engine runs **18 steps**, in four blocks:
 
 - **Entering the Besu network (1–3):** `write-genesis` (copies the bundle's genesis,
   non-destructive, guarded by a sha256 comparison), `start-besu-join` (brings up
@@ -309,16 +341,20 @@ The join engine runs **16 steps**, in four blocks:
   node, derived from `bankId`), `render-config-join`, `start-paladin-join`
   (brings up the bank's Paladin), `register-paladin-node` (registers the node
   identity on-chain — native logic, no fixed bank name).
-- **Bank operational stack (8–12):** `render-bank-env`, `start-bank-infra`
+- **Bank operational stack (8–14):** `render-bank-env`, `start-bank-infra`
   (dedicated Postgres + Redis), `provision-bank-keycloak` (bank realm),
-  `start-backend` (the backend services in commercial-bank mode),
-  `start-bank-frontend` (the bank portal).
-- **Deferred tail (13–16):** `create-pente-context` (bilateral CB↔bank Pente
+  `reconcile-admin-users` and `reconcile-keycloak-realm` (converge the bank's
+  realm on every apply — the import applies only to a realm that does not yet
+  exist, so a role newly declared in `spec.adminUsers` and the client origins
+  derived from `spec.frontendHost` / `spec.proxy` would otherwise never reach a
+  bank that is already provisioned), `start-backend` (the backend services in
+  commercial-bank mode), `start-bank-frontend` (the bank portal).
+- **Deferred tail (15–18):** `create-pente-context` (bilateral CB↔bank Pente
   group) and `deploy-fxa-pente` (FXAgreement inside the group), both non-fatal —
   a failure is recorded as `pending` and the join still reports success; then
   `gen-csr` and `start-launcher` (soft).
 
-> `proxy: enable` appends a 17th step, `start-proxy` (soft).
+> `proxy: enable` appends a 19th step, `start-proxy` (soft).
 
 > **Onboarding is not a join step.** The join produces the CSR (`gen-csr`) and
 > stops there. The bank completes onboarding at **runtime** through the CB's
@@ -387,7 +423,7 @@ export CBWEB3_PALADIN_CB_URL="http://localhost:31848"
 Query the block number on each node by its RPC port (matrix above):
 
 ```bash
-for p in 8645 8646 8647 8745 8746 8747 8845 8846 8847; do
+for p in 8645 8646 8647 8665 8666 8667 8745 8746 8747; do
   echo -n "port $p: "
   curl -s -X POST "http://localhost:$p" \
     -H 'Content-Type: application/json' \
@@ -425,8 +461,8 @@ step (`success` / `skipped` / `failed` / `pending`).
   `provisioning/docs/adr-001-cross-stack-enode-addressing.md`). In a multi-stack
   local deployment, participants of the same spoke share the Docker network
   `cbweb3-<spoke-id>-besu`.
-- **Reference network untouched.** This toolkit does not modify or depend on
-  `deploy/local` or `make/*.mk` — they remain the sample network.
+- **No legacy bring-up.** The `deploy/local` tree was removed; this toolkit is the
+  only path that stands a stack up, and it does not depend on `make/*.mk`.
 
 ---
 

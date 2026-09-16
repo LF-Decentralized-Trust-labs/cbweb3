@@ -669,11 +669,11 @@ if [[ -n "${SA_HTLC:-}" || -n "${SB_HTLC:-}" || -n "${LCR_ADDRESS:-}" ]]; then
   # 001-hub-network-isolation: Hub Besu RPC for the LiquidityCommitWatcher AND the
   # cross-currency bridge-out circuit-breaker gate (isPaused()). The relay is a sibling
   # container, so it reaches the Hub over host.docker.internal at the HOST-mapped port —
-  # 33845 for the Scenario B sample (Hub in-container RPC 8845, host ports shifted +25000),
+  # 9345 for the Scenario B sample (Hub in-container RPC 8845, host ports shifted +500),
   # NOT the in-container 8845 (which is connection-refused from another container and makes
   # the breaker fail-safe, silently blocking every bridge-out). Matches the cacti
   # docker-compose default and the host-mapped GATEWAY_INTERNAL_URLS above.
-  _HUB_BESU_RPC="${HUB_BESU_RPC:-http://host.docker.internal:33845}"
+  _HUB_BESU_RPC="${HUB_BESU_RPC:-http://host.docker.internal:9345}"
   upsert_env "${CACTI_ENV}" "HUB_BESU_RPC" "${_HUB_BESU_RPC}"
 
   CACTI_UPDATED=1

@@ -29,7 +29,7 @@ deviation must be recorded in [Recorded deviations](#recorded-deviations) with a
 | **bash** | 5+ | The deployment and check scripts. Run `tools/check-license-headers.sh` with **bash**, never zsh |
 
 Pinned container images are not developer prerequisites — they are pulled automatically:
-`hyperledger/besu:25.8.0`, Paladin Core (`docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1`),
+`hyperledger/besu:25.8.0`, Paladin Core (`docker.io/lfdecentralizedtrust/paladin:v1.0.0`),
 Keycloak, Postgres, `redis:7.2-alpine`.
 
 > **The Redis pin is a licensing pin, not a version preference.** Redis releases through
@@ -41,10 +41,14 @@ Keycloak, Postgres, `redis:7.2-alpine`.
 > prefer [Valkey](https://valkey.io/) (`valkey/valkey:8-alpine`, BSD-3-Clause), which speaks
 > the same protocol and works unchanged with the `go-redis` client.
 
-> **The Paladin pin is known to be behind and must be upgraded.** `v0.15.0-rc.1` carries a
-> Zeto `transferLocked` defect that permanently strands a private lock in ~1 of every 256
-> attempts; it is fixed upstream from `v1.0.0-rc.8`. Read
-> [`docs/paladin-upgrade.md`](paladin-upgrade.md) before changing, or relying on, this pin.
+> **The pin moved to `v1.0.0` to close the Zeto `transferLocked` defect**, which on
+> `v0.15.0-rc.1` permanently stranded a private lock whenever the locked state id began with a
+> zero byte — measured at **~4% of locks (3 in 71)**, not the ~1 in 256 previously documented
+> (fixed upstream from `v1.0.0-rc.8`). `v1.0.0` was brought up from a clean host on both spokes
+> with no configuration change, and three affected states were then settled three-for-three
+> with receipts read. The `locked_state_id.go` guard that refused such locks has been removed
+> with the defect it guarded; the evidence is in
+> [`docs/paladin-upgrade.md`](paladin-upgrade.md). Read it before relying on this pin.
 
 ---
 
@@ -65,7 +69,7 @@ the mechanism that actually fails the build when the floor is violated.
 | Node 22 | CI: `actions/setup-node` with `node-version: "22"` | |
 | Besu 25.8.0 | `BESU_IMAGE` default in the compose templates | Pinned; not a developer prerequisite |
 | Alpine 3.23 | `alpine:3.23` everywhere: the shipped runtime `Dockerfile` stages, the toolkit helper-image constants (`dockervolume.HelperImage` in Scenario A, `volHelperImage` in Scenario B) and the helper `docker run`/compose services | Gated by `tools/check-alpine-version.sh`, which reads this row as the pin. Supported until 2027-11-01 |
-| Paladin v0.15.0-rc.1 | Nothing — the tag is hardcoded in five files across Scenario A | Not enforced, and Scenario B's provisioning templates still default to a floating `latest` on a different image repository. See [`docs/paladin-upgrade.md`](paladin-upgrade.md) |
+| Paladin v1.0.0 | Nothing — the tag is hardcoded in seven files across both scenarios | Not enforced by a gate, but no `latest` remains: Scenario B's two rows previously defaulted to a floating tag on `lfdt-labs/paladin`, a repository that does not exist on Docker Hub. See [`docs/paladin-upgrade.md`](paladin-upgrade.md) |
 
 Verify the whole matrix is still self-consistent:
 

@@ -153,7 +153,11 @@ bank's bridge delivers tCeBM to Bank B.
 |---|---|---|---|---|
 | F1 | Relay | (automatic) | Relay processes the outbound leg; CB-B bridge position reaches BURNED | Counterpart tCeBM (ARS) minted to Bank B |
 | F2 | Bank B operator | Bank → [Dashboard](./bank.md#41-dashboard) | Refresh | tCeBM balance is non-zero — the payment is received |
-| F3 | CB governance | Governance → [Swap Monitor](./governance.md#54-swap-monitor) | Review | The swap shows as completed end-to-end |
+| F3 | Bank A operator | Bank → [Bridge History](./bank.md#43-bridge-history-bridgehistory) | Review | The swap shows as completed end-to-end |
+
+> The paying bank verifies this step, not the central bank: a swap read is answered only to the
+> bank that owns the swap, so a governance session cannot inspect it. This step used to name the
+> Governance Portal's Swap Monitor, which was refused on every lookup and has been removed.
 
 ![Bank B Dashboard showing the received tCeBM balance after the cross-currency payment settles](../img/scenario-b/end-to-end-walkthrough/03-bank-b-receipt.png)
 

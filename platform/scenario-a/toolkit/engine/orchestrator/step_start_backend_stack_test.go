@@ -101,14 +101,14 @@ func TestCactiContainerURL(t *testing.T) {
 // over the host.docker.internal default.
 func TestStartBackendStackStep_ComposeEnv_ExternalRelay(t *testing.T) {
 	s := newStartBackendStackStep("start-cb-backend", backendStackParams{
-		EntityPrefix: "cbweb3-central-bank-brazil",
-		NetName:      "cbweb3-central-bank-brazil-net",
-		BankCode:     "central-bank-brazil",
-		CactiURL:     "http://18.208.191.195:4000",
-		APIPort:      18645,
-		AuthPort:     19645,
+		EntityPrefix:   "cbweb3-central-bank-brazil",
+		NetName:        "cbweb3-central-bank-brazil-net",
+		BankCode:       "central-bank-brazil",
+		CactiURL:       "http://18.208.191.195:4000",
+		APIPort:        18645,
+		AuthPort:       19645,
 		CompliancePort: 20645,
-		PaymentPort:  21645,
+		PaymentPort:    21645,
 	}).(*startBackendStackStep)
 
 	env := strings.Join(s.composeEnv(), "\n")

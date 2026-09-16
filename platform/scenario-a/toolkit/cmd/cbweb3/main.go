@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // cbweb3 is the CLI for the Scenario A provisioning toolkit.
-// Usage: cbweb3 apply -f <manifest.yaml> [--dry-run] [--output json|yaml]
+// Usage: cbweb3 apply -f <manifest.yaml> [--dry-run] [--rebuild] [--output json|yaml]
+//
+//	--rebuild rebuilds this entity's service and portal images from the current
+//	source and recreates their containers. Needed because the build steps are
+//	gated on a health probe: a container running last week's binary answers it
+//	just as well as a current one, so an ordinary apply reports the step
+//	satisfied and never runs the build inside it.
 package main
 
 import (
@@ -41,12 +47,14 @@ func runApply(args []string) int {
 	var (
 		manifestFile string
 		dryRun       bool
+		rebuild      bool
 		outputFmt    string
 	)
 	fs.StringVar(&manifestFile, "f", "", "path to the ParticipantDeployment YAML manifest (required)")
 	fs.StringVar(&manifestFile, "file", "", "path to the ParticipantDeployment YAML manifest (required)")
 	fs.BoolVar(&dryRun, "dry-run", false, "show plan without executing")
 	fs.BoolVar(&dryRun, "n", false, "alias for --dry-run")
+	fs.BoolVar(&rebuild, "rebuild", false, "rebuild this entity's service/portal images from source and recreate their containers (the build steps are gated on a health probe, which a stale container still passes)")
 	fs.StringVar(&outputFmt, "output", "yaml", "output format: json | yaml")
 	fs.StringVar(&outputFmt, "o", "yaml", "alias for --output")
 
@@ -131,6 +139,7 @@ func runApply(args []string) int {
 	in := apply.ApplyInput{
 		Manifest:                         m,
 		DryRun:                           dryRun,
+		Rebuild:                          rebuild,
 		OutputFmt:                        outputFmt,
 		OutputDir:                        profile.OutputDir,
 		BesuRPCURL:                       profile.BesuRPCURL,

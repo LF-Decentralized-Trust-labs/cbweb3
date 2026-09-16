@@ -80,6 +80,8 @@ The portal uses a left-hand sidebar with the following items. All routes require
 
 Unauthenticated requests to any protected route redirect to `/login`. Unknown routes redirect to the Dashboard.
 
+Below the navigation items the sidebar shows a **System State** badge: `LIVE` by default, or `HALTED` in red when the circuit breaker reports that state. The badge reflects the breaker status the portal polls; it is not a control, and clicking it does nothing.
+
 ---
 
 ## 4. Screens
@@ -336,7 +338,7 @@ Use this workflow when investigating a past governance action for compliance or 
 ### Dashboard shows zeros for all cards
 
 - The Dashboard loads data from the live backend on each page load. If all cards show zero immediately after login, check that the backend registry and audit services are reachable.
-- If running in mock mode (`VITE_USE_MOCKS=true`), synthetic data should populate immediately. If it does not, check the browser console for errors.
+- This portal has no mock mode, so zeros always mean the backend returned nothing. Setting `VITE_USE_MOCKS` has no effect here — see the **Data source** note at the top of this manual. Check the browser console for failed requests.
 
 ### Pending KYC table is empty but you expect requests
 

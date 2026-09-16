@@ -109,6 +109,7 @@ func TestRequireRoleBlocksCommercialBank(t *testing.T) {
 	for _, tc := range protectedRoutes {
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))
 		req.AddCookie(&http.Cookie{Name: "access_token", Value: "fake-token"})
+		attachCSRF(t, req, "fake-token")
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := app.Test(req)
 		if err != nil {
@@ -162,6 +163,7 @@ func TestHTLCMutatingRoutesRoleGate(t *testing.T) {
 			})
 			req := httptest.NewRequest(http.MethodPost, route, strings.NewReader(`{"contract_id":"x","amount":"1","receiver":"r","secret":"00"}`))
 			req.AddCookie(&http.Cookie{Name: "access_token", Value: "fake-token"})
+			attachCSRF(t, req, "fake-token")
 			req.Header.Set("Content-Type", "application/json")
 			resp, testErr := app.Test(req)
 			if testErr != nil {
@@ -236,6 +238,7 @@ func TestMeRouteRequiresToken(t *testing.T) {
 	// With cookie → 200 (stub always validates).
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
 	req.AddCookie(&http.Cookie{Name: "access_token", Value: "valid-token"})
+	attachCSRF(t, req, "valid-token")
 	resp2, err := app.Test(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -266,6 +269,7 @@ func TestGovernanceRoutesNotRegisteredWithoutHandler(t *testing.T) {
 	} {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
 		req.AddCookie(&http.Cookie{Name: "access_token", Value: "fake-token"})
+		attachCSRF(t, req, "fake-token")
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := app.Test(req)
 		if err != nil {
@@ -360,6 +364,7 @@ func TestTransferLimitRoutesRegisteredOnCB(t *testing.T) {
 	for _, tc := range routes {
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))
 		req.AddCookie(&http.Cookie{Name: "access_token", Value: "tok"})
+		attachCSRF(t, req, "tok")
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := app.Test(req)
 		if err != nil {
@@ -393,6 +398,7 @@ func TestTransferLimitRoutesNotRegisteredOnCommercialBank(t *testing.T) {
 	} {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
 		req.AddCookie(&http.Cookie{Name: "access_token", Value: "tok"})
+		attachCSRF(t, req, "tok")
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := app.Test(req)
 		if err != nil {
@@ -428,6 +434,7 @@ func TestTransferLimitRoutesRequireTreasuryRole(t *testing.T) {
 	for _, tc := range routes {
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))
 		req.AddCookie(&http.Cookie{Name: "access_token", Value: "tok"})
+		attachCSRF(t, req, "tok")
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := app.Test(req)
 		if err != nil {

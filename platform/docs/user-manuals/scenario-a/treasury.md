@@ -482,7 +482,7 @@ If a contract is stuck in `PENDING_SETTLEMENT` past its expiry, the counterparty
 - Verify that the Username and Password are correct.
 - Confirm the treasury operator account exists and carries the `ROLE_TREASURY` claim. Accounts without this claim will be rejected after authentication.
 - Accounts requiring PKI-certificate authentication cannot log in here. Use a standard username/password treasury account.
-- Confirm the spoke backend services are running (`docker compose ps` from the relevant `deploy/local/` directory).
+- Confirm the spoke backend services are running (`docker compose ps`, or `docker ps` filtered on your entity's container prefix — the toolkit names containers `<prefix>-<entity>-<service>`).
 
 ### An approval request does not appear in the queue
 

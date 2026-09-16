@@ -26,7 +26,6 @@ const links = [
   { to: "/redeems", label: "Redeems", icon: ArrowUpFromLine },
   { to: "/agreements", label: "Trade Agreements", icon: Handshake },
   { to: "/htlc", label: "PvP Settlement", icon: ArrowRightLeft },
-  // { to: "/amm", label: "Automated FX Trading", icon: Scale },
   // { to: "/compliance", label: "Compliance", icon: ShieldCheck },
   { to: "/onboarding", label: "Onboarding", icon: ClipboardList },
   // { to: "/settings", label: "Settings", icon: Settings },

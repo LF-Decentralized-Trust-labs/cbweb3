@@ -11,6 +11,7 @@ import type {
   SearchHTLCParams,
   SearchHTLCResponse,
 } from "../types";
+import { apiErrorMessage } from "@cbweb3/ui";
 
 type HTLCState = {
   locks: HTLCLock[];
@@ -37,7 +38,7 @@ export const useHtlcStore = create<HTLCState>((set) => ({
       const response = await htlcApi.search({});
       set({ locks: response.locks, total: response.total, status: "idle" });
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to load HTLC data" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to load HTLC data") });
     }
   },
   search: async (params) => {
@@ -57,7 +58,7 @@ export const useHtlcStore = create<HTLCState>((set) => ({
       set({ locks: searchResponse.locks, total: searchResponse.total, status: "idle" });
       return response;
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to lock funds" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to lock funds") });
       throw error;
     }
   },
@@ -72,7 +73,7 @@ export const useHtlcStore = create<HTLCState>((set) => ({
       set({ locks: searchResponse.locks, total: searchResponse.total, status: "idle" });
       return response;
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to lock funds with hash" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to lock funds with hash") });
       throw error;
     }
   },
@@ -87,7 +88,7 @@ export const useHtlcStore = create<HTLCState>((set) => ({
         set({ status: "idle" });
       }
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to settle lock" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to settle lock") });
       throw error;
     }
   },
@@ -102,7 +103,7 @@ export const useHtlcStore = create<HTLCState>((set) => ({
         set({ status: "idle" });
       }
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to refund lock" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to refund lock") });
       throw error;
     }
   },

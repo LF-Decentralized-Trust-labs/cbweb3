@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  amountRefusalMessage,
+  apiErrorMessage,
   Badge,
   Button,
   Card,
@@ -10,6 +12,7 @@ import {
   CardTitle,
   Input,
   Label,
+  parseCurrencyAmount,
   Table,
   TableBody,
   TableCell,
@@ -22,12 +25,15 @@ import { useEffect, useMemo, useState } from "react";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import { usePaymentStore } from "../stores";
 import {
-  PaymentStatus,
+  currencyFromTokenSymbol,
+  displayToBase,
   fiatUnitLabel,
+  formatFiatDisplayUnits,
   formatFiatUnits,
   getPaymentStatusLabel,
   getPaymentStatusVariant,
   normalizePaymentStatus,
+  PaymentStatus,
 } from "../types";
 
 const shortHash = (value: string) => (value ? `${value.slice(0, 10)}...${value.slice(-8)}` : "-");
@@ -37,11 +43,29 @@ export function DepositsPage() {
   const registerDeposit = usePaymentStore((state) => state.registerDeposit);
   const deposits = usePaymentStore((state) => state.deposits);
   const balance = usePaymentStore((state) => state.balance);
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
   const fiatBalance = usePaymentStore((state) => state.fiatBalance);
+  const fiatDecimals = usePaymentStore((state) => state.fiatDecimals);
+  const fiatSymbol = usePaymentStore((state) => state.fiatSymbol);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
 
   const [amount, setAmount] = useState("0");
+
+  // Parsed once. This field carries whole base units, the same unit as the
+  // HTLC leg and the FX proposal, so the rule lives in @cbweb3/ui (lib/amount.ts)
+  // rather than in an inline regex — and the field is plain text, because
+  // <input type="number"> reads keystrokes through the browser locale.
+  // Parsed under the ISO 20022 rule, then scaled by the token's own decimals before
+  // it leaves the form. Until ADR-009 this was a whole count of raw base units, so
+  // a fiat amount of 100.20 could not be expressed at all.
+  // Bounded by the spoke currency's ISO 4217 minor unit, not by a fixed two places:
+  // two of the currencies this pilot offers (CLP, PYG) have no subunit at all.
+  const spokeCurrency = currencyFromTokenSymbol(fiatSymbol);
+  const parsedAmount = useMemo(
+    () => parseCurrencyAmount(amount, spokeCurrency),
+    [amount, spokeCurrency],
+  );
   const [confirmRequest, setConfirmRequest] = useState(false);
 
   useEffect(() => {
@@ -54,24 +78,24 @@ export function DepositsPage() {
   );
 
   const onSubmit = async () => {
-    if (!/^\d+$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive integer.");
+    if (!parsedAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedAmount.refusal));
       return;
     }
 
     try {
-      const depositId = await registerDeposit(amount);
+      const depositId = await registerDeposit(displayToBase(parsedAmount.canonical, fiatDecimals));
       toast.success(`Issuance request submitted: ${depositId}`);
       setAmount("0");
       setConfirmRequest(false);
     } catch (submitError) {
-      toast.error(submitError instanceof Error ? submitError.message : "Unable to submit issuance request");
+      toast.error(apiErrorMessage(submitError, "Unable to submit issuance request"));
     }
   };
 
   const onPrepareSubmit = () => {
-    if (!/^\d+$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive integer.");
+    if (!parsedAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedAmount.refusal));
       return;
     }
     setConfirmRequest(true);
@@ -80,11 +104,11 @@ export function DepositsPage() {
   return (
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-3">
-        <BalanceWidget balance={balance} loading={status === "loading" && balance === null} />
+        <BalanceWidget balance={balance} decimals={tCeBMDecimals} loading={status === "loading" && balance === null} />
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Fiat Reserve Balance</CardDescription>
-            <CardTitle>{status === "loading" && fiatBalance === null ? "Loading..." : formatFiatUnits(fiatBalance ?? "0")}</CardTitle>
+            <CardTitle>{status === "loading" && fiatBalance === null ? "Loading..." : formatFiatUnits(fiatBalance ?? "0", fiatDecimals, fiatSymbol)}</CardTitle>
           </CardHeader>
           <CardContent>
             <Badge variant="outline">Mirrors commercial bank fiat reserves</Badge>
@@ -108,9 +132,9 @@ export function DepositsPage() {
             <Label htmlFor="deposit-amount">Amount ({fiatUnitLabel})</Label>
             <Input
               id="deposit-amount"
-              type="number"
-              min="0"
-              step="1"
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
             />
@@ -131,7 +155,7 @@ export function DepositsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Confirm Issuance Request</CardTitle>
-            <CardDescription>{formatFiatUnits(amount)} will be submitted for central bank approval.</CardDescription>
+            <CardDescription>{formatFiatDisplayUnits(amount, fiatDecimals, fiatSymbol)} will be submitted for central bank approval.</CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
             <Button onClick={() => void onSubmit()} disabled={status === "loading"}>
@@ -165,7 +189,7 @@ export function DepositsPage() {
               {deposits.map((deposit) => (
                 <TableRow key={deposit.id}>
                   <TableCell className="font-medium">{deposit.id}</TableCell>
-                  <TableCell>{formatFiatUnits(deposit.amount)}</TableCell>
+                  <TableCell>{formatFiatUnits(deposit.amount, fiatDecimals, fiatSymbol)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(deposit.status)}>{getPaymentStatusLabel(deposit.status)}</Badge>
                   </TableCell>

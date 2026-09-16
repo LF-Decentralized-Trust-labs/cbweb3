@@ -11,6 +11,7 @@ import type {
   OnboardingRequestStatus,
   OnboardingStatusResponse,
 } from "../../../types";
+import { apiErrorMessage } from "@cbweb3/ui";
 
 type Step = 1 | 2 | 3 | 4;
 
@@ -93,7 +94,7 @@ export const useOnboardingStore = create<OnboardingState>((set, get) => ({
     } catch (error) {
       set({
         status: "error",
-        error: error instanceof Error ? error.message : "Unable to initiate onboarding",
+        error: apiErrorMessage(error, "Unable to initiate onboarding"),
       });
       return false;
     }
@@ -157,7 +158,7 @@ export const useOnboardingStore = create<OnboardingState>((set, get) => ({
 
       set({
         status: "error",
-        error: error instanceof Error ? error.message : "Unable to fetch onboarding status",
+        error: apiErrorMessage(error, "Unable to fetch onboarding status"),
       });
       return null;
     }
@@ -179,7 +180,7 @@ export const useOnboardingStore = create<OnboardingState>((set, get) => ({
       });
       return response;
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : "Unable to fetch onboarding status" });
+      set({ error: apiErrorMessage(error, "Unable to fetch onboarding status") });
       return null;
     }
   },
@@ -210,7 +211,7 @@ export const useOnboardingStore = create<OnboardingState>((set, get) => ({
     } catch (error) {
       set({
         completionStatus: "error",
-        error: error instanceof Error ? error.message : "Unable to complete onboarding",
+        error: apiErrorMessage(error, "Unable to complete onboarding"),
       });
       return null;
     }

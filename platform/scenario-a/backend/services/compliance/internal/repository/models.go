@@ -47,7 +47,7 @@ type AuditLogModel struct {
 
 func (AuditLogModel) TableName() string { return "audit_logs" }
 
-// SystemParameterModel stores key-value system configuration (AMM params, etc.).
+// SystemParameterModel stores key-value system configuration (limits, the circuit-breaker flag, etc.).
 type SystemParameterModel struct {
 	Key       string    `gorm:"column:key;primaryKey"`
 	Value     string    `gorm:"column:value;type:text"`

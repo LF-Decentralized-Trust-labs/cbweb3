@@ -458,3 +458,45 @@ func TestNOCPortalOriginsAcceptsPlainOrigins(t *testing.T) {
 		t.Fatalf("valid portal origins were rejected: %+v", res.Errors)
 	}
 }
+
+// TestRejectRoleThatContradictsMode pins the mode/role pairing.
+//
+// role becomes ENTITY, and the compose templates build container, volume and PKI filenames
+// from it — several of them assuming a specific role. CA_CERT_FILE is the sharp case: it
+// names central-bank-ca.* while the compliance bootstrap derives its filenames from
+// BANK_CODE (= ENTITY), so a found-spoke deployment carrying any other role sends the
+// service looking for a CA under a name nothing creates, and that load is fatal. Nothing at
+// runtime relates the two fields, so this is where the mismatch has to die.
+func TestRejectRoleThatContradictsMode(t *testing.T) {
+	for _, tc := range []struct{ fixture, badRole string }{
+		{"found-hub.yaml", "central-bank"},
+		{"found-spoke.yaml", "commercial-bank"},
+		{"join.yaml", "central-bank"},
+		{"observe.yaml", "hub"},
+	} {
+		t.Run(tc.fixture+" as "+tc.badRole, func(t *testing.T) {
+			pd := mustLoad(t, tc.fixture)
+			pd.Spec.Topology.Role = tc.badRole
+			res := Validate(pd)
+			if !findErr(res, "spec.topology.role") {
+				t.Errorf("mode %q accepted role %q; the entity would provision under filenames "+
+					"built for another role, got %+v", pd.Spec.Mode, tc.badRole, res.Errors)
+			}
+		})
+	}
+}
+
+// TestEveryModePairsWithARole keeps the check above from being satisfied by a map with
+// holes: a mode absent from RoleByMode silently accepts any role.
+func TestEveryModePairsWithARole(t *testing.T) {
+	for _, m := range Modes {
+		want, ok := RoleByMode[m]
+		if !ok {
+			t.Errorf("mode %q has no role in RoleByMode, so it accepts any role", m)
+			continue
+		}
+		if !contains(Roles, want) {
+			t.Errorf("RoleByMode[%q] is %q, which is not a recognized role", m, want)
+		}
+	}
+}

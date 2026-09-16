@@ -63,7 +63,11 @@ func TestLogin_PKIFallthroughToDirect(t *testing.T) {
 	t.Parallel()
 	// PKI not required → fall through to direct auth (which succeeds).
 	prov := pkiAuthProviderStub{
-		nonceErr:         status.Error(codes.FailedPrecondition, "PKI_NOT_REQUIRED"),
+		// PermissionDenied, not FailedPrecondition: that is what the auth service actually returns
+		// (auth/internal/grpc/server/server.go:463). The stub encoded a code nothing sends, and the
+		// handler's old message-based matching accepted it anyway — so this test passed for the
+		// wrong reason until the classification moved to the code.
+		nonceErr:         status.Error(codes.PermissionDenied, "PKI_NOT_REQUIRED"),
 		authProviderStub: authProviderStub{token: domain.AuthToken{AccessToken: "t", TokenType: "Bearer", ExpiresIn: 1}},
 	}
 	h := NewAuthHandler(prov, kycCheckerStub{}, false)

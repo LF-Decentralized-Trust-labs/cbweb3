@@ -15,6 +15,9 @@
 # these samples stand up ONE NOC (Brazil). central-bank-colombia's NOC portal
 # (:32745) points at the same :28645 backend; a second, distinct NOC needs a
 # separate host (see deploy-lnet/) or per-entity NOC ports.
+#
+# Because the session is a cookie, every one of those portals has to be named in
+# spec.noc.portalOrigins below — sharing the backend is not enough on its own.
 apiVersion: cbweb3/v1
 kind: ParticipantDeployment
 metadata:
@@ -33,3 +36,21 @@ spec:
   noc:
     pushIntervalSeconds: 15
     components: [BESU]
+    # Browser origins allowed to log in to this backend.
+    #
+    # Every CB portal on this host points at THIS backend (:28645), and the NOC session is
+    # a cookie: a browser demands an exact origin match and refuses to send credentials to
+    # a wildcard. An unlisted portal logs in and is then anonymous on every request, with
+    # no error to explain it — so each portal any sample script may publish is named here,
+    # not just Brazil's. Each is <CB Besu RPC port> + 24000 (see toolkit ports.go).
+    portalOrigins:
+      - http://localhost:32645   # central-bank-brazil     (8645) — deploy-all.sh, deploy-three.sh
+      - http://localhost:32745   # central-bank-colombia   (8745) — deploy-three.sh
+      - http://localhost:32845   # central-bank-argentina  (8845) — deploy-three.sh
+      - http://localhost:32945   # central-bank-costa-rica (8945) — deploy-all.sh
+    # Realm the BACKEND performs the password grant against (it moved off the browser when
+    # the session became an HttpOnly cookie). central-bank-brazil's Keycloak: its Besu RPC
+    # port + 16000. Unused while the stack runs with NOC_SKIP_AUTH=true (the default), and
+    # what NOC_SKIP_AUTH=false needs in order to be reachable at all. The toolkit rewrites
+    # "localhost" to host.docker.internal, because the grant now runs inside a container.
+    keycloakURL: http://localhost:24645

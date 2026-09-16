@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { statementApi } from "../services/api/statement.api";
 import type { Movement } from "../types";
+import { apiErrorMessage } from "@cbweb3/ui";
 
 type StatementState = {
   movements: Movement[];
@@ -21,7 +22,7 @@ export const useStatementStore = create<StatementState>((set) => ({
       const movements = await statementApi.list();
       set({ movements, status: "idle" });
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to load statement" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to load statement") });
     }
   },
 }));

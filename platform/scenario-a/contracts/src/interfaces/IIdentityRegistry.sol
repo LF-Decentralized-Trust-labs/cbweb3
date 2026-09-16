@@ -5,7 +5,7 @@ import {IdentityRegistryLibrary} from "../libraries/IdentityRegistryLibrary.sol"
 
 /// @title IIdentityRegistry
 /// @notice Interface for the central Identity and Compliance Registry.
-/// @dev Standardizes how external modules (AMM, HTLC) interact with identity data.
+/// @dev Standardizes how external modules (HTLC) interact with identity data.
 interface IIdentityRegistry {
     /// @notice Emitted when a new institution is onboarded to the network.
     event ParticipantRegistered(address indexed account, IdentityRegistryLibrary.ParticipantRole role, string name);

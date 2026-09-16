@@ -1,0 +1,45 @@
+# yaml-language-server: $schema=../../provisioning/schema/v1/participant-deployment.schema.yaml
+#
+# Banco comercial costarriquenho 2 — junta-se ao spoke-costa-rica.
+#
+# The bank id is the BARE form ("cb2", not "bank-..."), matching LNET. Together
+# with this spoke's hyphenated id it produces the node name that breaks a positional
+# split: spoke-costa-rica-cb2 reads as bankId "rica-cb2" under the old rule and
+# "cb2" under the correct one. See the note in central-bank-costa-rica.yaml.
+#
+# mode: join  → consome o join bundle emitido pelo central-bank-costa-rica.
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: cb2
+spec:
+  scenario: a
+  environment: local
+  role: commercial-bank
+  mode: join
+  bankId: cb2
+  displayName: Banco Comercial 2 (Costa Rica)
+  spoke:
+    id: spoke-costa-rica
+    chainId: 1340
+    currency: CRC
+  joinBundleRef: ../bundles/spoke-costa-rica.bundle.yaml
+  node:
+    advertisedHost: cbweb3-spoke-costa-rica-besu.cb2
+    rpc:
+      port: 8687
+    ws:
+      port: 8697
+    p2p:
+      port: 31605
+    dataDir: cbweb3-data/cb2
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  launcher: enable
+  launcherPort: 5202
+  adminUsers:
+    - role: ROLE_BANK
+      username: admin@cb2.costarica.com
+      password: cb2-bank-local
+  proxy: disable

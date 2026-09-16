@@ -36,14 +36,6 @@ The cryptographic escrow engine facilitating trustless cross-border atomic swaps
 - **Cryptographic Checks:** Validates the exact SHA-256 preimage before settling funds.
 - **Time-Locks:** Prevents `refund()` execution until the exact timestamp expiry is reached.
 
-### 3. Automated Market Maker (AMM) - _Scenario B_
-
-A Constant Product Liquidity Pool ($x \cdot y = k$) enabling seamless foreign exchange (FX) settlement.
-
-- **Exact-Output Pricing:** Calculates the precise input (`amountIn`) required to purchase an exact output (`amountOut`).
-- **Slippage Protection:** Reverts transactions if the mathematically required input exceeds the payer's acceptable `maxAmountIn`.
-- **Circuit Breaker:** Implements OpenZeppelin's `Pausable` modifier, allowing governance-capable participants (verified via `IdentityRegistry`) to halt all pool operations in emergency scenarios.
-
 ## 🛡️ Security & Standards
 
 Security is a primary directive in this repository. The codebase strictly enforces:
@@ -119,7 +111,7 @@ Two deployment scripts are provided — one for the hub (full platform) and one 
 # Load environment variables
 source .env
 
-# Deploy hub contracts (IdentityRegistry + tCeBM_BRL + tCeBM_EUR + HTLC + AMM)
+# Deploy hub contracts (IdentityRegistry + tCeBM_BRL + tCeBM_EUR + HTLC)
 make contracts.deploy-hub
 
 # Deploy spoke-a contracts (IdentityRegistry + tCeBM_BRL)

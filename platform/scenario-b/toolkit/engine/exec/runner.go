@@ -16,14 +16,28 @@ import (
 )
 
 // CommandRunner runs an external command and returns its combined output.
+//
+// RunWithEnv is the same, plus environment ("NAME=value") for that one call. It exists because a
+// secret must be able to reach a child process WITHOUT passing through an argument: an argument
+// vector is world-readable through `ps`, an environment is not. The Keycloak steps use it to set
+// operator passwords; see step_found_spoke.go.
+//
+// It is on the interface rather than a separate optional one on purpose. A type assertion with a
+// fallback would mean a runner that forgot to implement it silently took the argv path — which is
+// the defect, arriving quietly.
 type CommandRunner interface {
 	Run(ctx context.Context, name string, args ...string) ([]byte, error)
+	RunWithEnv(ctx context.Context, env []string, name string, args ...string) ([]byte, error)
 }
 
 // Call records one command invocation (fake/dry runners).
+//
+// Env is what RunWithEnv was given, so a test can assert both halves: that the value is in the
+// environment and that it is NOT in Args.
 type Call struct {
 	Name string
 	Args []string
+	Env  []string
 }
 
 // realRunner shells out via os/exec.
@@ -39,12 +53,16 @@ func NewReal(dir string, env []string) CommandRunner {
 }
 
 func (r *realRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return r.RunWithEnv(ctx, nil, name, args...)
+}
+
+func (r *realRunner) RunWithEnv(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if r.dir != "" {
 		cmd.Dir = r.dir
 	}
-	if len(r.env) > 0 {
-		cmd.Env = append(os.Environ(), r.env...)
+	if len(r.env) > 0 || len(env) > 0 {
+		cmd.Env = append(append(os.Environ(), r.env...), env...)
 	}
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -70,8 +88,12 @@ type FakeRunner struct {
 	Errs    map[string]error
 }
 
-func (f *FakeRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
-	f.Calls = append(f.Calls, Call{Name: name, Args: args})
+func (f *FakeRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return f.RunWithEnv(ctx, nil, name, args...)
+}
+
+func (f *FakeRunner) RunWithEnv(_ context.Context, env []string, name string, args ...string) ([]byte, error) {
+	f.Calls = append(f.Calls, Call{Name: name, Args: args, Env: env})
 	if f.Errs != nil {
 		if err := f.Errs[name]; err != nil {
 			return nil, err
@@ -88,7 +110,14 @@ type DryRunner struct {
 	Planned []Call
 }
 
-func (d *DryRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
-	d.Planned = append(d.Planned, Call{Name: name, Args: args})
+func (d *DryRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return d.RunWithEnv(ctx, nil, name, args...)
+}
+
+// RunWithEnv records the environment alongside the call. A dry run prints its plan, so a secret
+// recorded here would be printed — callers must keep passing values through env and names through
+// args, which is what the exposure guards assert.
+func (d *DryRunner) RunWithEnv(_ context.Context, env []string, name string, args ...string) ([]byte, error) {
+	d.Planned = append(d.Planned, Call{Name: name, Args: args, Env: env})
 	return nil, nil
 }

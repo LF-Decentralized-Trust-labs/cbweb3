@@ -31,7 +31,7 @@ func genGenesisStep(name string, chainID uint64, genesisVolume, besuDataVolume s
 		validators = 1
 	}
 	if image == "" {
-		image = "hyperledger/besu:25.8.0"
+		image = DefaultBesuImage
 	}
 	return Step{
 		Name: name,

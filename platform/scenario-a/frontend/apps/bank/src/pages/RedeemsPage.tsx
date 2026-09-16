@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  amountRefusalMessage,
+  apiErrorMessage,
   Badge,
   Button,
   Card,
@@ -10,6 +12,7 @@ import {
   CardTitle,
   Input,
   Label,
+  parseCurrencyAmount,
   Table,
   TableBody,
   TableCell,
@@ -22,13 +25,16 @@ import { useEffect, useMemo, useState } from "react";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import { usePaymentStore } from "../stores";
 import {
-  PaymentStatus,
+  currencyFromTokenSymbol,
+  displayToBase,
   fiatUnitLabel,
   formatCeBM,
+  formatCeBMDisplay,
   formatFiatUnits,
   getPaymentStatusLabel,
   getPaymentStatusVariant,
   normalizePaymentStatus,
+  PaymentStatus,
 } from "../types";
 
 const shortHash = (value: string) =>
@@ -40,10 +46,28 @@ export function RedeemsPage() {
   const redeems = usePaymentStore((state) => state.redeems);
   const balance = usePaymentStore((state) => state.balance);
   const fiatBalance = usePaymentStore((state) => state.fiatBalance);
+  const fiatDecimals = usePaymentStore((state) => state.fiatDecimals);
+  const fiatSymbol = usePaymentStore((state) => state.fiatSymbol);
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
 
   const [amount, setAmount] = useState("0");
+
+  // Parsed once. This field carries whole base units, the same unit as the
+  // HTLC leg and the FX proposal, so the rule lives in @cbweb3/ui (lib/amount.ts)
+  // rather than in an inline regex — and the field is plain text, because
+  // <input type="number"> reads keystrokes through the browser locale.
+  // Parsed under the ISO 20022 rule, then scaled by the token's own decimals before
+  // it leaves the form. Until ADR-009 this was a whole count of raw base units, so
+  // a tCeBM amount of 100.20 could not be expressed at all.
+  // Bounded by the spoke currency's ISO 4217 minor unit, not by a fixed two places:
+  // two of the currencies this pilot offers (CLP, PYG) have no subunit at all.
+  const spokeCurrency = currencyFromTokenSymbol(fiatSymbol);
+  const parsedAmount = useMemo(
+    () => parseCurrencyAmount(amount, spokeCurrency),
+    [amount, spokeCurrency],
+  );
   const [confirmRequest, setConfirmRequest] = useState(false);
 
   useEffect(() => {
@@ -59,28 +83,24 @@ export function RedeemsPage() {
   );
 
   const onSubmit = async () => {
-    if (!/^\d+$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive integer.");
+    if (!parsedAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedAmount.refusal));
       return;
     }
 
     try {
-      const redeemId = await requestRedeem(amount);
+      const redeemId = await requestRedeem(displayToBase(parsedAmount.canonical, tCeBMDecimals));
       toast.success(`Redeem request submitted: ${redeemId}`);
       setAmount("0");
       setConfirmRequest(false);
     } catch (submitError) {
-      toast.error(
-        submitError instanceof Error
-          ? submitError.message
-          : "Unable to request redeem",
-      );
+      toast.error(apiErrorMessage(submitError, "Unable to request redeem"));
     }
   };
 
   const onPrepareSubmit = () => {
-    if (!/^\d+$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive integer.");
+    if (!parsedAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedAmount.refusal));
       return;
     }
     setConfirmRequest(true);
@@ -91,6 +111,7 @@ export function RedeemsPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <BalanceWidget
           balance={balance}
+          decimals={tCeBMDecimals}
           loading={status === "loading" && balance === null}
         />
         <Card>
@@ -99,7 +120,7 @@ export function RedeemsPage() {
             <CardTitle>
               {status === "loading" && fiatBalance === null
                 ? "Loading..."
-                : formatFiatUnits(fiatBalance ?? "0")}
+                : formatFiatUnits(fiatBalance ?? "0", fiatDecimals, fiatSymbol)}
             </CardTitle>
           </CardHeader>
         </Card>
@@ -124,9 +145,9 @@ export function RedeemsPage() {
             <Label htmlFor="redeem-amount">Amount (tCeBM units)</Label>
             <Input
               id="redeem-amount"
-              type="number"
-              min="0"
-              step="1"
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
             />
@@ -152,7 +173,7 @@ export function RedeemsPage() {
           <CardHeader>
             <CardTitle>Confirm Redeem Request</CardTitle>
             <CardDescription>
-              {formatCeBM(amount)} will be submitted for central bank fiat
+              {formatCeBMDisplay(amount, tCeBMDecimals)} will be submitted for central bank fiat
               reserve release approval.
             </CardDescription>
           </CardHeader>
@@ -192,7 +213,7 @@ export function RedeemsPage() {
               {redeems.map((redeem) => (
                 <TableRow key={redeem.id}>
                   <TableCell className="font-medium">{redeem.id}</TableCell>
-                  <TableCell>{formatCeBM(redeem.amount)}</TableCell>
+                  <TableCell>{formatCeBM(redeem.amount, tCeBMDecimals)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(redeem.status)}>
                       {getPaymentStatusLabel(redeem.status)}

@@ -38,6 +38,9 @@ spec:
     - role: ROLE_SUPERVISOR
       username: admin@brasil.supervisor.gov
       password: supervisor-local
+    - role: ROLE_ADMISSION
+      username: admin@brasil.admission.gov
+      password: admission-local
     - role: ROLE_NOC_ADMIN
       username: admin@brasil.noc.gov
       password: noc-local

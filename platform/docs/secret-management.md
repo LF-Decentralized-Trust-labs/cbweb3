@@ -159,9 +159,10 @@ tier must stay valueless.
 
 The realms the toolkit provisions used to ship three permissive defaults, identical on a
 laptop and on a routable host: `redirectUris: ["*"]`, `webOrigins: ["*"]` and
-`sslRequired: "none"`. Two rules now govern them — and a third governs the `deploy/local`
+`sslRequired: "none"`. Two rules now govern them — and a third governed the `deploy/local`
 realms, provisioned by a different path, which carried a permissive token lifespan of
-their own.
+their own. That path has since been removed, so the toolkit is now the only realm
+provisioner; the third rule is recorded below as history, not as a live second surface.
 
 **Browser origins come from one source.** A realm's `redirectUris` and `webOrigins` are
 derived from the same origin list the entity's api-gateway receives as
@@ -214,7 +215,7 @@ cause.
 
 **Access-token lifespan.** The realms the toolkit provisions never set
 `accessTokenLifespan`, so they inherit Keycloak's own default of 300 seconds. The
-`deploy/local` path is a **second enforcement point**, and it did set one: `init.sh` — the
+`deploy/local` path was a **second enforcement point** while it existed, and it did set one: `init.sh` — the
 Keycloak container's entrypoint, so every `make *.up` — defaulted to 21600 (six hours),
 and `setup-noc-realm.sh` created the NOC realm at 86400 (twenty-four). Both now default to
 300, overridable through `KC_ACCESS_TOKEN_LIFESPAN`.

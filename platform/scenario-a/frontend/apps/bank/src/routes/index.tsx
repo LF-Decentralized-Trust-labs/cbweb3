@@ -52,7 +52,6 @@ export const routes: RouteObject[] = [
               { path: ":contractId", element: <HTLCDetailPage /> },
             ],
           },
-          // { path: "amm", element: <AMMTradingPage /> },
           // { path: "compliance", element: <ComplianceCenterPage /> },
           { path: "onboarding", element: <OnboardingPage /> },
           // { path: "settings", element: <SettingsPage /> },

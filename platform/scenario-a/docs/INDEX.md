@@ -130,7 +130,7 @@ Per-module documentation maintained alongside source code.
 | — payment-orchestrator | [../backend/services/payment-orchestrator/README.md](../backend/services/payment-orchestrator/README.md) | HTLC, FX Agreement, Zeto escrow, Cacti integration |
 | — noc-agent | [../backend/services/noc-agent/README.md](../backend/services/noc-agent/README.md) | Monitoring daemon |
 | — noc-backend | [../backend/services/noc-backend/README.md](../backend/services/noc-backend/README.md) | NOC dashboard API |
-| Contracts | [../contracts/README.md](../contracts/README.md) | Solidity smart contracts (Foundry) — HTLC, tCeBM, IdentityRegistry, FXAgreement, AMM |
+| Contracts | [../contracts/README.md](../contracts/README.md) | Solidity smart contracts (Foundry) — HTLC, tCeBM, IdentityRegistry, FXAgreement |
 | Interoperability | [../interop/README.md](../interop/README.md) | Cacti relay and cross-spoke bridge |
 | Infrastructure | [../deploy/README.md](../deploy/README.md) | Docker Compose deployment profiles |
 | PKI | [../backend/config/pki/README.md](../backend/config/pki/README.md) | X.509 certificate generation and management |

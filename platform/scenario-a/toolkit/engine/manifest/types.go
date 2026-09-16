@@ -124,6 +124,15 @@ type NOC struct {
 	KeycloakURL string `yaml:"keycloakURL,omitempty"`
 	// LauncherURL is baked as the portal's VITE_LAUNCHER_URL (back-to-launcher).
 	LauncherURL string `yaml:"launcherURL,omitempty"`
+	// PortalOrigins are the browser origins allowed to call this NOC backend WITH
+	// credentials.
+	//
+	// A list, because one NOC backend is shared: every CB on the host serves its own NOC
+	// portal and they all point at the same backend port. The session is a cookie now, and
+	// a browser refuses to send credentials to a wildcard origin — so each portal that may
+	// log in has to be named, and a missing entry presents as a portal that logs in and is
+	// then anonymous, with no error to explain it.
+	PortalOrigins []string `yaml:"portalOrigins,omitempty"`
 	// PushIntervalSeconds overrides the agent push cadence (default 15).
 	PushIntervalSeconds int `yaml:"pushIntervalSeconds,omitempty"`
 	// Components optionally filters the monitored component set by type

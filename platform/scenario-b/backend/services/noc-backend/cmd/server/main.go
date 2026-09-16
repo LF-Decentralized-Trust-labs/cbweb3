@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log"
 	"os"
@@ -48,6 +49,11 @@ func main() {
 			Realm:        cfg.KeycloakRealm,
 			Audience:     cfg.KeycloakAudience,
 			JWKSCacheTTL: cfg.JWKSCacheTTL,
+			// Needed by the password grant the login performs. noc-portal is a public
+			// client in the realms the toolkit provisions, so the secret is normally
+			// empty and is then omitted from the form rather than sent blank.
+			ClientID:     cfg.KeycloakClientID,
+			ClientSecret: cfg.KeycloakClientSecret,
 		})
 		if err != nil {
 			log.Fatalf("keycloak: %v", err)
@@ -80,12 +86,41 @@ func main() {
 		},
 	})
 
+	// The CSRF secret keys the HMAC binding each token to its session. Warned about loudly
+	// rather than generated quietly: a per-process secret works in a single container and
+	// then refuses every token the moment there are two replicas, or the moment one
+	// restarts — a failure that looks like a browser bug, not a configuration gap.
+	csrfSecret := []byte(cfg.CSRFSecret)
+	if len(csrfSecret) == 0 {
+		log.Println("WARNING: CSRF_SECRET is not set — generating a per-process secret. " +
+			"Every CSRF token becomes invalid on restart, and replicas will reject each other's.")
+		csrfSecret = make([]byte, 32)
+		if _, rErr := rand.Read(csrfSecret); rErr != nil {
+			log.Fatalf("csrf: could not generate a secret: %v", rErr)
+		}
+	}
+	if !cfg.CookieSecure {
+		log.Println("WARNING: COOKIE_SECURE=false — auth cookies are sent over plain HTTP. " +
+			"Local development only.")
+	}
+
 	app.Use(recover.New())
 	app.Use(logger.New())
+	// AllowCredentials is mandatory now that the session is a cookie: a browser does NOT
+	// attach cookies to a cross-origin request unless the response says so, and the NOC
+	// portal is served from a different origin than this API. Without it the portal logs in,
+	// receives its cookies, and is then anonymous on every subsequent request — with no
+	// error anywhere to explain it.
+	//
+	// It also forbids AllowOrigins "*": the browser refuses credentials against a wildcard,
+	// so FrontendOrigin has to name the portal explicitly.
+	//
+	// X-XSRF-TOKEN joins the allowed headers because the double-submit check reads it.
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: cfg.FrontendOrigin,
-		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
-		AllowMethods: "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+		AllowOrigins:     cfg.FrontendOrigin,
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, X-XSRF-TOKEN",
+		AllowMethods:     "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+		AllowCredentials: true,
 	}))
 
 	// Repositories
@@ -118,7 +153,8 @@ func main() {
 		Push:   pushHandler,
 		Admin:  []routeRegistrar{spokesHandler, keysHandler},
 		Portal: []routeRegistrar{dashHandler, poolsHandler},
-	})
+		Auth:   api.NewAuthHandler(kc, cfg.CookieSecure, csrfSecret),
+	}, csrfSecret)
 
 	// Health probe
 	app.Get("/health", func(c *fiber.Ctx) error {

@@ -28,6 +28,21 @@ var Modes = []string{ModeFoundHub, ModeFoundSpoke, ModeJoin, ModeObserve}
 // Roles lists the recognized spec.topology.role values.
 var Roles = []string{"hub", "central-bank", "commercial-bank", "noc"}
 
+// RoleByMode is the role each mode provisions. The pairing is not a convention: mode picks
+// the orchestration path and role becomes ENTITY, which the compose templates use to name
+// containers, volumes and PKI files — and several of those names are written on the
+// assumption of a specific role. CA_CERT_FILE is the sharp one: it names central-bank-ca.*
+// while the compliance bootstrap derives its filenames from BANK_CODE (= ENTITY), so a
+// found-spoke manifest carrying any other role would have the service look for a CA under a
+// name nothing creates, and the load is fatal. Nothing else relates the two fields, so
+// reject the mismatch at the manifest instead of at a container's third restart.
+var RoleByMode = map[string]string{
+	ModeFoundHub:   "hub",
+	ModeFoundSpoke: "central-bank",
+	ModeJoin:       "commercial-bank",
+	ModeObserve:    "noc",
+}
+
 // RequiredByMode is the per-mode set of spec fields that MUST be present.
 // It is the source of truth for the required half of the per-mode matrix and is
 // compared against the published JSON-Schema by the parity test (SC-004).
@@ -73,6 +88,31 @@ func isSupportedKeyProvider(uri string) bool {
 // Validate checks a single manifest and returns all findings (errors +
 // warnings), collected in one pass (FR-011). A manifest is valid when the
 // returned Result has no errors; warnings do not make it invalid.
+// dnsLabelMax is the hard limit on one DNS label (RFC 1035 §2.3.4). Docker's embedded resolver
+// enforces it: a longer name is refused outright, so the caller never even gets a connection
+// error to explain the failure.
+const dnsLabelMax = 63
+
+// longestAliasSuffix is the longest suffix the toolkit appends to an entity's network prefix
+// when it declares a proxy alias — "-noc-backend" and "-api-gateway", both 12 octets.
+//
+// The prefix is sanitizePrefix(metadata.name), which substitutes characters without changing
+// length, so the budget below is a bound on metadata.name itself.
+//
+// This number is held against the templates by TestMaxMetadataNameLenMatchesTheLongestAlias in
+// engine/orchestrator, which reads the suffixes out of the compose files. A new, longer service
+// suffix tightens the budget and fails there rather than silently shrinking the margin.
+const longestAliasSuffix = len("-noc-backend")
+
+// MaxMetadataNameLen is the longest metadata.name that still yields a resolvable proxy alias.
+//
+// PR #226 moved the proxy's upstreams onto short aliases and described the result as short
+// whatever the entity is called. It was not so by construction: nothing rejected a long name,
+// and the only protection was a spot-check of four names chosen by hand. A 60-character name
+// passed validation and produced an alias Docker's resolver refuses — the same 502 that PR
+// closed, with nothing reporting it.
+const MaxMetadataNameLen = dnsLabelMax - longestAliasSuffix
+
 func Validate(pd *ParticipantDeployment) Result {
 	var r Result
 	if pd == nil {
@@ -96,6 +136,15 @@ func Validate(pd *ParticipantDeployment) Result {
 	// metadata.name
 	if pd.Metadata.Name == "" {
 		r.AddError("metadata.name", "required field is missing")
+	} else if n := len(pd.Metadata.Name); n > MaxMetadataNameLen {
+		// Refused here, before anything is created. An apply that fails halfway leaves
+		// containers behind; a manifest rejected at validation leaves nothing.
+		r.AddError("metadata.name", fmt.Sprintf(
+			"is %d octets; the limit is %d. The toolkit derives every proxy alias from this name "+
+				"(longest suffix %q), and a DNS label stops at %d octets (RFC 1035) — a longer name "+
+				"produces an alias Docker's resolver refuses, so the portals answer 502 against "+
+				"containers that are running and healthy",
+			n, MaxMetadataNameLen, "-noc-backend", dnsLabelMax))
 	}
 
 	spec := pd.Spec
@@ -117,6 +166,10 @@ func Validate(pd *ParticipantDeployment) Result {
 		r.AddError("spec.topology.role", "required field is missing")
 	} else if !contains(Roles, spec.Topology.Role) {
 		r.AddError("spec.topology.role", fmt.Sprintf("invalid value %q; accepted values are: %s", spec.Topology.Role, strings.Join(Roles, ", ")))
+	} else if want, ok := RoleByMode[spec.Mode]; ok && spec.Topology.Role != want {
+		r.AddError("spec.topology.role", fmt.Sprintf(
+			"invalid value %q for mode %q; that mode provisions a %s and the two cannot differ",
+			spec.Topology.Role, spec.Mode, want))
 	}
 
 	// FR-005: environment must be local in this phase.
@@ -166,7 +219,7 @@ func Validate(pd *ParticipantDeployment) Result {
 	if spec.FrontendHost == "" {
 		r.AddError("spec.frontendHost", "required field is missing")
 	}
-	validateAdminUsers(spec.AdminUsers, &r)
+	validateAdminUsers(spec.AdminUsers, spec.Topology.Role, &r)
 	validateNOC(spec.NOC, &r)
 
 	// Launcher (optional): enable | disable when present.
@@ -242,11 +295,24 @@ func validateRelay(rel *Relay, r *Result) {
 	}
 }
 
-func validateAdminUsers(users []AdminUser, r *Result) {
+// requiredAdminRolesByTopologyRole lists the manifest admin-user roles an entity
+// MUST declare, keyed on spec.topology.role. Only the central bank onboards
+// commercial banks, so only it must declare an ADMISSION operator (spec 042):
+// the hub is not an onboarding authority (banks join spokes, not the hub) and a
+// commercial bank is not one either, so both stay exempt.
+var requiredAdminRolesByTopologyRole = map[string][]string{
+	"central-bank": {"ADMISSION"},
+}
+
+// validateAdminUsers checks the per-role operator accounts. topologyRole is
+// spec.topology.role and selects the per-entity required set above; pass "" to skip
+// the entity-specific requirement (shape checks still run).
+func validateAdminUsers(users []AdminUser, topologyRole string, r *Result) {
 	if len(users) == 0 {
 		r.AddError("spec.adminUsers", "required field is missing; declare at least one operator account")
 		return
 	}
+	declared := make(map[string]bool, len(users))
 	for i, u := range users {
 		if u.Role == "" {
 			r.AddError(fmt.Sprintf("spec.adminUsers[%d].role", i), "required field is missing")
@@ -256,6 +322,13 @@ func validateAdminUsers(users []AdminUser, r *Result) {
 		}
 		if u.Password == "" {
 			r.AddError(fmt.Sprintf("spec.adminUsers[%d].password", i), "required field is missing")
+		}
+		declared[strings.ToUpper(strings.TrimSpace(u.Role))] = true
+	}
+	for _, required := range requiredAdminRolesByTopologyRole[strings.TrimSpace(topologyRole)] {
+		if !declared[required] {
+			r.AddError("spec.adminUsers", fmt.Sprintf(
+				"topology.role %q must declare an operator account with role %q", topologyRole, required))
 		}
 	}
 }

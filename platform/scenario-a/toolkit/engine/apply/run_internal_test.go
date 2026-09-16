@@ -101,8 +101,8 @@ func TestRun_SuccessPath(t *testing.T) {
 
 	bundleCalled := false
 	fns := runnerFuncs{
-		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) error {
-			return nil
+		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) (orchestrator.RunOutcome, error) {
+			return orchestrator.RunOutcome{}, nil
 		},
 		emitBundle: func(_ context.Context, _ bundle.BundleInput) (*bundle.JoinBundle, error) {
 			bundleCalled = true
@@ -121,8 +121,10 @@ func TestRun_SuccessPath(t *testing.T) {
 	if result.Bundle == nil || result.Bundle.Path == "" {
 		t.Error("Bundle.Path should not be empty on success")
 	}
-	if len(result.Steps) != 17 {
-		t.Errorf("Steps len = %d; want 17", len(result.Steps))
+	// 18 since reconcile-admin-users joined the found pipeline: the realm import only applies to
+	// a realm that does not yet exist, so declared operators need a step that converges every run.
+	if len(result.Steps) != 19 {
+		t.Errorf("Steps len = %d; want 19", len(result.Steps))
 	}
 	if !bundleCalled {
 		t.Error("emitBundle was not called on success path")
@@ -135,8 +137,8 @@ func TestRun_FailurePath(t *testing.T) {
 	m := loadRunManifest(t, dataDir)
 
 	fns := runnerFuncs{
-		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) error {
-			return fmt.Errorf("step %s: injected failure", orchestrator.CanonicalStepOrder[2])
+		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) (orchestrator.RunOutcome, error) {
+			return orchestrator.RunOutcome{}, fmt.Errorf("step %s: injected failure", orchestrator.CanonicalStepOrder[2])
 		},
 		emitBundle: func(_ context.Context, _ bundle.BundleInput) (*bundle.JoinBundle, error) {
 			t.Error("emitBundle must not be called when runFound fails")
@@ -168,8 +170,8 @@ func TestRun_IdempotenceAllDone(t *testing.T) {
 
 	bundleCallCount := 0
 	fns := runnerFuncs{
-		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) error {
-			return nil
+		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) (orchestrator.RunOutcome, error) {
+			return orchestrator.RunOutcome{}, nil
 		},
 		emitBundle: func(_ context.Context, _ bundle.BundleInput) (*bundle.JoinBundle, error) {
 			bundleCallCount++
@@ -201,8 +203,8 @@ func TestRun_BundlePathAfterSuccess(t *testing.T) {
 	m := loadRunManifest(t, dataDir)
 
 	fns := runnerFuncs{
-		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) error {
-			return nil
+		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) (orchestrator.RunOutcome, error) {
+			return orchestrator.RunOutcome{}, nil
 		},
 		emitBundle: func(_ context.Context, _ bundle.BundleInput) (*bundle.JoinBundle, error) {
 			return validEmittedBundleForTest(), nil
@@ -231,11 +233,13 @@ func TestRun_InterruptedStepStatus(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	fns := runnerFuncs{
-		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) error {
+		runFound: func(_ context.Context, _ *manifest.Manifest, _ orchestrator.Deps) (orchestrator.RunOutcome, error) {
 			// Simulate orchestrator: 2 steps done, step 3 was in progress and marked failed.
 			writeDoneAndFailed(t, dataDir, 2, orchestrator.CanonicalStepOrder[2])
 			cancel()
-			return context.Canceled
+			// The engine reports what it ran even when the run aborts — the two
+			// finished steps are the reason the report can call them executed.
+			return ranOutcome(orchestrator.CanonicalStepOrder[:2]...), context.Canceled
 		},
 		emitBundle: func(_ context.Context, _ bundle.BundleInput) (*bundle.JoinBundle, error) {
 			t.Error("emitBundle must not be called on interrupt")
@@ -248,11 +252,14 @@ func TestRun_InterruptedStepStatus(t *testing.T) {
 	if result.Status != "interrupted" {
 		t.Errorf("result.Status = %q; want interrupted", result.Status)
 	}
-	if result.Steps[0].Status != "skipped" {
-		t.Errorf("step[0] %s: Status = %q; want skipped", result.Steps[0].Name, result.Steps[0].Status)
+	// The two steps that finished before the interrupt are reported as executed:
+	// this run did them. They read "skipped" until the report learned to tell work
+	// it performed from work it found already done.
+	if result.Steps[0].Status != "executed" {
+		t.Errorf("step[0] %s: Status = %q; want executed", result.Steps[0].Name, result.Steps[0].Status)
 	}
-	if result.Steps[1].Status != "skipped" {
-		t.Errorf("step[1] %s: Status = %q; want skipped", result.Steps[1].Name, result.Steps[1].Status)
+	if result.Steps[1].Status != "executed" {
+		t.Errorf("step[1] %s: Status = %q; want executed", result.Steps[1].Name, result.Steps[1].Status)
 	}
 	if result.Steps[2].Status != "interrupted" {
 		t.Errorf("step[2] %s: Status = %q; want interrupted", result.Steps[2].Name, result.Steps[2].Status)

@@ -93,7 +93,7 @@ func (s *startPaladinJoinStep) Run(ctx context.Context) error {
 func (s *startPaladinJoinStep) composeEnv() []string {
 	image := s.paladinImage
 	if image == "" {
-		image = defaultPaladinImage
+		image = DefaultPaladinImage
 	}
 	// gRPC PEER port: single-host banks share the host and reach each other by
 	// container name over the shared spoke network, so the host-published gRPC port

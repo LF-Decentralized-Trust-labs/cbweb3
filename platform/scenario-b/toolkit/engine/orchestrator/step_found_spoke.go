@@ -102,7 +102,7 @@ func (c *SpokeConfig) WithDefaults() {
 		c.ValidatorCount = 1
 	}
 	if c.BesuImage == "" {
-		c.BesuImage = "hyperledger/besu:25.8.0"
+		c.BesuImage = DefaultBesuImage
 	}
 	if c.GenesisDir == "" {
 		c.GenesisDir = filepath.Join(c.OutDir, "genesis-"+c.SpokeID)
@@ -432,15 +432,8 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	var b strings.Builder
 	// Same password the compose env gave the Keycloak container; resolved from the
 	// entity secrets file, not a constant.
-	// Caveat, stated rather than glossed: kcadm takes the password as an argument, so
-	// it transits the Keycloak container's process list for the duration of this exec.
-	// There is no env equivalent for `kcadm config credentials` (unlike REDISCLI_AUTH,
-	// which is why Redis is handled differently). This is not new — the value used to be
-	// the constant admin — but the exposure window is real and belongs in a follow-up
-	// once realm provisioning moves to an imported realm file, as Scenario A does it.
 	b.WriteString(kcadmPreamble)
-	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password %[2]s && ",
-		kc, mustInfraSecret(secretsDirOf(c.SpokeEnvFile), "KC_ADMIN_PASSWORD"))
+	fmt.Fprintf(&b, "%s && ", kcadmLogin(kc))
 	fmt.Fprintf(&b, "(%[1]s create realms -s realm=%[2]s -s enabled=true || kcw 'create realm') && ", kc, spokeKeycloakRealm)
 	// Local lab uses plain HTTP; the NOC portal does a browser-direct password
 	// grant from the entity's IP, which Keycloak's default sslRequired=external
@@ -463,13 +456,14 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	// Per-role operator accounts from the manifest (spec.adminUsers). Fall back to a
 	// single default CB admin when the manifest declares none. Each user's manifest
 	// role maps to the realm roles the api-gateway checks (realmRolesForAdminRole).
-	users := c.AdminUsers
-	if len(users) == 0 {
-		users = []AdminUser{{Role: "GOVERNANCE", Username: spokeCBUser, Password: spokeCBPass}}
-	}
+	users := c.reconcilableAdminUsers()
 	appendKeycloakUsers(&b, kc, spokeKeycloakRealm, users)
 	appendKeycloakAssertions(&b, kc, spokeKeycloakRealm, spokeKeycloakClient, users)
-	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", b.String())
+	// RunWithEnv, not Run: the operator passwords travel in the child's environment, and only
+	// their variable NAMES appear in the docker arguments.
+	env := operatorPasswordEnv(users)
+	_, err := c.Runner.RunWithEnv(ctx, env,
+		"docker", dockerExecArgs(c.keycloakContainer(), b.String(), env)...)
 	return err
 }
 
@@ -546,6 +540,17 @@ func jsonStringArray(values []string) (string, error) {
 	return string(encoded), nil
 }
 
+// reconcilableAdminUsers is the operator set provisioning intends to exist: the manifest's
+// spec.adminUsers, or the single default CB admin when the manifest declares none. Shared with
+// provisionKeycloakRealm so the initial creation and the reconciliation cannot disagree about who
+// should exist.
+func (c SpokeConfig) reconcilableAdminUsers() []AdminUser {
+	if len(c.AdminUsers) == 0 {
+		return []AdminUser{{Role: "GOVERNANCE", Username: spokeCBUser, Password: spokeCBPass}}
+	}
+	return c.AdminUsers
+}
+
 // appendKeycloakUsers appends idempotent kcadm commands that create each admin user
 // (username == email; firstName/lastName/emailVerified are REQUIRED so Keycloak 26's
 // declarative user profile accepts the password grant), set its password, and grant
@@ -560,11 +565,24 @@ func appendKeycloakUsers(b *strings.Builder, kc, realm string, users []AdminUser
 			}
 		}
 	}
-	for _, u := range users {
+	for i, u := range users {
 		fmt.Fprintf(b, "(%[1]s create users -r %[2]s -s username=%[3]s -s enabled=true "+
 			"-s emailVerified=true -s email=%[3]s -s firstName=%[4]s -s lastName=Operator || kcw 'create operator user') && ",
 			kc, realm, u.Username, strings.ToLower(u.Role))
-		fmt.Fprintf(b, "(%[1]s set-password -r %[2]s --username %[3]s --new-password %[4]s || kcw 'set operator password')", kc, realm, u.Username, u.Password)
+		// The password is NOT written here. `--new-password <value>` puts it in the kcadm JVM's
+		// argv inside the container and, because this whole script is one argument to
+		// `docker exec … bash -c`, in the docker client's argv on the host too — `ps` shows both
+		// to any user. kcadm reads KC_CLI_PASSWORD when the flag is absent (its own
+		// `set-password --help` says so), and a per-command prefix puts the value in that one
+		// process's environment rather than in anyone's argv.
+		//
+		// The value reaches the container through `docker exec -e <name>` (operatorPasswordEnv +
+		// dockerExecArgs), the pass-through form, which names the variable without its value.
+		//
+		// Same rule as Scenario A's keycloak_admin_users_reconcile.go — a deliberate copy, since
+		// the two toolkits share no library; see docs/scenario-drift.md.
+		fmt.Fprintf(b, "(KC_CLI_PASSWORD=\"$%[4]s\" %[1]s set-password -r %[2]s --username %[3]s || kcw 'set operator password')",
+			kc, realm, u.Username, operatorPasswordVar(i))
 		for _, r := range realmRolesForAdminRole(u.Role) {
 			fmt.Fprintf(b, " && (%[1]s add-roles -r %[2]s --uusername %[3]s --rolename %[4]s || kcw 'grant role to operator')", kc, realm, u.Username, r)
 		}
@@ -611,16 +629,22 @@ func (c SpokeConfig) corsOrigins() string {
 // NetName is this entity's external docker network (created by the infra step).
 func (c SpokeConfig) NetName() string { return c.NetPrefix + "_net" }
 
-// frontendContainer is the container name of a CB operator portal on the entity network
-// (must match cb-frontend.compose.yaml: <CONTAINER_PREFIX>-<ENTITY>-<role>-frontend).
-func (c SpokeConfig) frontendContainer(role string) string {
-	return fmt.Sprintf("%s-%s-%s-frontend", c.ContainerPrefix, c.Entity, role)
+// frontendAlias is the network alias the reverse proxy resolves a CB portal by
+// (must match the aliases in cb-frontend.compose.yaml).
+//
+// The container name cannot serve here. A DNS label stops at 63 octets (RFC 1035), and a
+// CB's container name repeats the role — "sc-b-cbweb3-central-bank-costa-rica-central-
+// bank-governance-frontend" is 68 — so Docker's embedded DNS refuses it and the portal
+// answers 502 through the proxy while the shorter api-gateway name keeps working. The
+// alias is built from the entity network prefix, which is unique per entity and short.
+func (c SpokeConfig) frontendAlias(role string) string {
+	return fmt.Sprintf("%s-%s", c.NetPrefix, role)
 }
 
-// apiGatewayContainer is the api-gateway container name on the entity network
-// (must match entity-backend.compose.yaml: <CONTAINER_PREFIX>-<ENTITY>-api-gateway).
-func (c SpokeConfig) apiGatewayContainer() string {
-	return fmt.Sprintf("%s-%s-api-gateway", c.ContainerPrefix, c.Entity)
+// apiGatewayAlias is the network alias the reverse proxy resolves the gateway by
+// (must match the alias in entity-backend.compose.yaml).
+func (c SpokeConfig) apiGatewayAlias() string {
+	return c.NetPrefix + "-api-gateway"
 }
 
 // ProxyRoutes are the path routes the reverse proxy exposes for this CB: its three
@@ -628,10 +652,10 @@ func (c SpokeConfig) apiGatewayContainer() string {
 // port-based); see proxy step docs.
 func (c SpokeConfig) ProxyRoutes() []ProxyRoute {
 	return []ProxyRoute{
-		{Segment: "governance", Upstream: c.frontendContainer("governance") + ":80"},
-		{Segment: "treasury", Upstream: c.frontendContainer("treasury") + ":80"},
-		{Segment: "supervisor", Upstream: c.frontendContainer("supervisor") + ":80"},
-		{Segment: "api", Upstream: c.apiGatewayContainer() + ":8080", IsAPI: true},
+		{Segment: "governance", Upstream: c.frontendAlias("governance") + ":80"},
+		{Segment: "treasury", Upstream: c.frontendAlias("treasury") + ":80"},
+		{Segment: "supervisor", Upstream: c.frontendAlias("supervisor") + ":80"},
+		{Segment: "api", Upstream: c.apiGatewayAlias() + ":8080", IsAPI: true},
 	}
 }
 
@@ -807,8 +831,20 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// mTLS activates only when GRPC_MTLS_ENABLE is exported (gated in the
 		// templates); default-off keeps the existing plaintext transport.
 		"SVC_TLS_VOLUME": c.svcTLSVolume(),
-		"CA_CERT_FILE":   "/workspace/backend/config/pki/central-bank.crt",
-		"CA_KEY_FILE":    "/workspace/backend/config/pki/central-bank.key",
+		// The pair with ONE producer. central-bank.crt/.key has two, and they disagree about
+		// what those names even mean: gen-tls (genCBCA) writes a self-signed CA there, while
+		// the compliance bootstrap's ensureCert wants to write this entity's participant leaf
+		// there. Whoever runs second loses, so those two filenames can never be a stable
+		// issuer — and in the state that shipped, gen-tls's CA certificate sat next to a
+		// participant key the bootstrap had written over it, which made every credential
+		// issuance fail with "provided PrivateKey doesn't match parent's PublicKey".
+		//
+		// central-bank-ca.* is created by the compliance bootstrap alone, as a matched pair,
+		// and is the CA it already signs that leaf with. Note the toolkit's own CA in
+		// central-bank.crt is then no longer an issuer: relayauth rejects it as a peer
+		// identity (it is a CA), and gen-relay-identity prefers central-bank-ca.* already.
+		"CA_CERT_FILE": "/workspace/backend/config/pki/central-bank-ca.crt",
+		"CA_KEY_FILE":  "/workspace/backend/config/pki/central-bank-ca.key",
 		// Shared secret for the hub-mediated M2M endpoints + cross-currency bridge
 		// delegation (a bank delegates bridge-in lock-mint to its CB; bridge-out to CB-B).
 		"INTERNAL_RELAY_AUTH_SECRET": HubRelayAuthSecret,
@@ -877,6 +913,22 @@ func (c SpokeConfig) spokeBroadcastPath() string {
 }
 
 // FoundSpokeSteps builds the ordered found-spoke step set.
+// truncateForLog bounds a hub reply quoted into an error. The body is worth quoting — it is how an
+// operator tells a malformed answer from a rejected one — but an unbounded body in an error message
+// reaches logs and terminals, and a hub that answers HTML on a misrouted path would bury the rest of
+// the line. CR/LF go too, so a quoted body cannot forge a log entry.
+func truncateForLog(body []byte) string {
+	const max = 200
+	out := strings.NewReplacer("\r", " ", "\n", " ").Replace(strings.TrimSpace(string(body)))
+	if out == "" {
+		return "(empty body)"
+	}
+	if len(out) > max {
+		return out[:max] + "… (truncated)"
+	}
+	return out
+}
+
 func FoundSpokeSteps(c SpokeConfig) []Step {
 	c.WithDefaults()
 	var capturedEnode string // written by start-besu-spoke, read by emit-spoke-bundle
@@ -968,6 +1020,15 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			// NOT created here — a CB opens the corridor later from its portal.
 			Name: "register-currency",
 			Deps: []string{"register-cb"},
+			// Idempotent by reading what the step produces, not by trusting the durable state.
+			// Without a Check the engine skips this step whenever state says done, so a run that
+			// recorded done WITHOUT recording the address could never retry: every later apply
+			// skipped it and failed downstream at the same place, until someone hand-edited
+			// .provisioning-state.yaml. The address being present is the real definition of
+			// "already registered".
+			Check: func(context.Context) (bool, error) {
+				return addrs.ReadAddr(c.SpokeEnvFile, "W_TOKEN_ADDRESS") != "", nil
+			},
 			Run: func(ctx context.Context) error {
 				hub, err := bundle.LoadHub(c.HubBundlePath)
 				if err != nil {
@@ -1005,15 +1066,23 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				}
 				// Capture the sovereign W-token address so the CB gateway can wire
 				// W_TOKEN_ADDRESS (the source→W-token to mint on the hub bridge-in).
+				//
+				// This address IS the step's output: separate-token-admin and the gateway's
+				// bridge-in both need it. A 2xx that does not carry one therefore cannot be
+				// reported as success — doing that used to strand the run one step later behind a
+				// message accusing this step of never having run.
 				var out struct {
 					TokenAddress string `json:"token_address"`
 				}
-				if json.Unmarshal(body, &out) == nil && out.TokenAddress != "" {
-					if err := addrs.AppendAddr(c.SpokeEnvFile, "W_TOKEN_ADDRESS", out.TokenAddress); err != nil {
-						return err
-					}
+				if err := json.Unmarshal(body, &out); err != nil {
+					return fmt.Errorf("register-currency: hub answered %d with a body this step cannot read (%v): %s",
+						resp.StatusCode, err, truncateForLog(body))
 				}
-				return nil
+				if out.TokenAddress == "" {
+					return fmt.Errorf("register-currency: hub answered %d without token_address, which is what this step exists to obtain: %s",
+						resp.StatusCode, truncateForLog(body))
+				}
+				return addrs.AppendAddr(c.SpokeEnvFile, "W_TOKEN_ADDRESS", out.TokenAddress)
 			},
 		},
 		{
@@ -1029,7 +1098,11 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			Run: func(ctx context.Context) error {
 				token := addrs.ReadAddr(c.SpokeEnvFile, "W_TOKEN_ADDRESS")
 				if token == "" {
-					return fmt.Errorf("separate-token-admin: W_TOKEN_ADDRESS not found in %s — register-currency must run first", c.SpokeEnvFile)
+					// Deliberately does not say "register-currency must run first": that step now
+					// fails when it cannot obtain the address, so reaching here means the address
+					// is absent for some other reason — an env file replaced by hand, or a state
+					// file carried over from an older version that recorded done without it.
+					return fmt.Errorf("separate-token-admin: W_TOKEN_ADDRESS is absent from %s, so there is no token to separate; re-run register-currency (it is idempotent) or check whether that file was replaced", c.SpokeEnvFile)
 				}
 				gatewayKey, gatewayAddr := deriveCBHubKey(c.SpokeID)
 				_, relayerAddr := deriveCBRelayerKey(c.SpokeID)
@@ -1192,6 +1265,34 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			},
 		},
 		{
+			// Same skip, one object along: an operator role newly declared in spec.adminUsers
+			// never reaches an entity that is already provisioned. Spec 042 makes that concrete
+			// — POST /approve-kyc is re-gated to ROLE_ADMISSION, which is granted only to a user
+			// declared as ADMISSION, so on an upgraded stack the route would close on a role
+			// nobody holds and KYC approval would be unreachable with nothing reporting it.
+			Name: "reconcile-admin-users",
+			Deps: []string{"provision-keycloak-spoke"},
+			Check: func(ctx context.Context) (bool, error) {
+				return adminUsersAlreadyProvisioned(ctx, c.Runner, c.keycloakContainer(),
+					keycloakAdminCLI, spokeKeycloakRealm,
+					c.reconcilableAdminUsers())
+			},
+			Run: func(ctx context.Context) error {
+				// Self-sufficient for the same reason reconcile-noc-origins is: the Check reaches
+				// this Run when Keycloak could not be asked at all, which on a provisioned entity
+				// with its containers down is ordinary.
+				if _, err := c.Runner.Run(ctx, "docker", c.composeUpArgs("entity-keycloak")...); err != nil {
+					return err
+				}
+				if err := c.WaitKeycloak(ctx); err != nil {
+					return err
+				}
+				return reconcileAdminUsers(ctx, c.Runner, c.keycloakContainer(),
+					keycloakAdminCLI, spokeKeycloakRealm,
+					c.reconcilableAdminUsers())
+			},
+		},
+		{
 			// provision-keycloak-spoke is skipped once KEYCLOAK_CLIENT_SECRET exists, so an
 			// origin newly declared in spec.noc.portalOrigins would never reach an entity that
 			// is already provisioned — the standalone NOC portal stays dead behind a CORS
@@ -1202,7 +1303,6 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			Check: func(ctx context.Context) (bool, error) {
 				return nocOriginsAlreadyRegistered(ctx, c.Runner, c.keycloakContainer(),
 					keycloakAdminCLI, spokeKeycloakRealm,
-					mustInfraSecret(secretsDirOf(c.SpokeEnvFile), "KC_ADMIN_PASSWORD"),
 					nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...))
 			},
 			Run: func(ctx context.Context) error {
@@ -1216,7 +1316,6 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				}
 				return reconcileNOCOrigins(ctx, c.Runner, c.keycloakContainer(),
 					keycloakAdminCLI, spokeKeycloakRealm,
-					mustInfraSecret(secretsDirOf(c.SpokeEnvFile), "KC_ADMIN_PASSWORD"),
 					nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...))
 			},
 		},

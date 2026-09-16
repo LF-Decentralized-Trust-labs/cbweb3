@@ -30,15 +30,12 @@ type startFrontendStackStep struct {
 	context        string
 	composePath    string
 	services       []frontendService
-	apiURL         string // with /api/v1/ suffix (bank/governance/treasury)
-	apiBase        string // no suffix (supervisor, noc)
+	apiURL         string            // with /api/v1/ suffix (bank/governance/treasury)
+	apiBase        string            // no suffix (supervisor, noc)
 	basePaths      map[string]string // per-service Vite base path behind the proxy (service → /<scn>/<role>/); empty ⇒ served at /
 	portalOwner    string
 	fiatSymbol     string
 	institution    string
-	keycloakURL    string
-	keycloakRealm  string
-	keycloakClient string
 	launcherURL    string
 	nocBackendURL  string // VITE_NOC_BACKEND_URL for the co-located NOC portal (observe backend)
 	imageTag       string
@@ -60,9 +57,6 @@ func newStartFrontendStackStep(name string, p frontendStackParams) Step {
 		portalOwner:    p.PortalOwner,
 		fiatSymbol:     p.FiatSymbol,
 		institution:    p.Institution,
-		keycloakURL:    p.KeycloakURL,
-		keycloakRealm:  p.KeycloakRealm,
-		keycloakClient: p.KeycloakClient,
 		launcherURL:    p.LauncherURL,
 		nocBackendURL:  p.NOCBackendURL,
 		imageTag:       p.ImageTag,
@@ -73,20 +67,20 @@ func newStartFrontendStackStep(name string, p frontendStackParams) Step {
 
 // frontendStackParams groups the inputs for startFrontendStackStep.
 type frontendStackParams struct {
-	EntityPrefix   string
-	NetName        string
-	Context        string
-	ComposePath    string
-	Services       []frontendService
-	APIURL         string
-	APIBase        string
-	BasePaths      map[string]string // per-service Vite base path behind the proxy
-	PortalOwner    string
-	FiatSymbol     string
-	Institution    string
-	KeycloakURL    string
-	KeycloakRealm  string
-	KeycloakClient string
+	EntityPrefix string
+	NetName      string
+	Context      string
+	ComposePath  string
+	Services     []frontendService
+	APIURL       string
+	APIBase      string
+	BasePaths    map[string]string // per-service Vite base path behind the proxy
+	PortalOwner  string
+	FiatSymbol   string
+	Institution  string
+	// KeycloakURL/Realm/Client were dropped when the NOC portal stopped granting for
+	// itself: nothing in this stack reads them any more, and leaving configuration that
+	// feeds nothing is how a reader is misled into thinking the browser still logs in.
 	LauncherURL    string
 	NOCBackendURL  string
 	ImageTag       string
@@ -152,9 +146,8 @@ func (s *startFrontendStackStep) composeEnv() []string {
 		"VITE_PORTAL_OWNER="+s.portalOwner,
 		"VITE_FIAT_SYMBOL="+s.fiatSymbol,
 		"VITE_INSTITUTION_NAME="+s.institution,
-		"VITE_KEYCLOAK_URL="+s.keycloakURL,
-		"VITE_KEYCLOAK_REALM="+s.keycloakRealm,
-		"VITE_KEYCLOAK_CLIENT_ID="+s.keycloakClient,
+		// The NOC portal no longer grants for itself — its backend does, and sets an
+		// HttpOnly cookie. Passing the realm here would put that ability back in the page.
 		"VITE_LAUNCHER_URL="+s.launcherURL,
 		"VITE_NOC_BACKEND_URL="+s.nocBackendURL,
 		"FRONTEND_IMAGE_TAG="+tag,

@@ -8,7 +8,9 @@
 
 > **Status: Informational.** This note documents the rationale and compatibility checks for two parameter changes that were already applied to the D12 codebase. It does not change any code or configuration. The final values for a live network must be agreed with LNET as the network operator (see [Coordination with LNET](#coordination-with-lnet)).
 
-This note records the *delta* between D6 v2 and D12 for two network-level parameters. The end state is already reflected throughout the D12 sources; what was missing was an explicit record of the change, the rationale, and the compatibility verification. All D12 values below are verifiable in the repository at the paths cited. The D6 v2 values are recorded for historical reference.
+This note records the *delta* between D6 v2 and D12 for two network-level parameters. The end state is already reflected throughout the D12 sources; what was missing was an explicit record of the change, the rationale, and the compatibility verification. The D6 v2 values are recorded for historical reference.
+
+> **Path note (2026-09-05).** The `deploy/local/**/configTemplate.json` files cited below no longer exist — that bring-up path was removed in favour of the toolkit, so those citations are historical rather than verifiable in the tree. Chain IDs are now declared per entity in the deployment manifests (`spec.node.chainId`; see [`samples/`](../../samples/)), and the genesis is generated from them. The chain IDs themselves are unchanged for the hub (1337) and the two spokes this note covers; the sample topology has since added a third spoke at 1340, which post-dates this note.
 
 ---
 

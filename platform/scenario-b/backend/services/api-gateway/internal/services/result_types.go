@@ -16,6 +16,15 @@ type BridgePositionResult struct {
 	BridgeState     string `json:"bridge_state"`
 	RelayerRetries  int    `json:"relayer_retries"`
 	RelayerErrorLog string `json:"relayer_error_log,omitempty"`
+	// CreatedAt and UpdatedAt date the position for the portals.
+	//
+	// They were absent, and their absence was the second half of "the beneficiary cannot see
+	// the payment it received": the bank's activity feed drops any row without a timestamp, so
+	// the listing could answer with the payment in it and the screen still read "No activity
+	// yet". UpdatedAt is the one an operator wants — a delivery moves through states, and the
+	// moment that matters is when it settled, not when it was opened.
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // BridgePositionDetail carries the internal fields of a bridge position, including the
