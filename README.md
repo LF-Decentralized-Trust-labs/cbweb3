@@ -54,7 +54,7 @@ The platform uses a **Hub & Spoke topology**: each country operates a domestic B
 | Layer | Key components |
 |-------|---------------|
 | **Frontend** | Treasury Portal, NOC Portal, Supervisor Portal, Governance Portal, Bank Integration Portal |
-| **API** | REST Gateway (OpenAPI 3.0.3), WebSocket Gateway |
+| **API** | REST Gateway (OpenAPI 3.0.3) |
 | **Microservices** | Policy Engine, Identity Service, Privacy Service, Time Service, Observability Hub |
 | **Blockchain** | Hyperledger Besu (QBFT consensus, gasless), Hyperledger Paladin (ZK-SNARKs privacy via Zeto tokens), Cacti (cross-chain relay) |
 | **Smart contracts** | HTLC, LP/AMM Pool, FX Oracle, Atomicity Coordinator |
@@ -127,25 +127,29 @@ The [**Toolbox Backlog**](https://github.com/orgs/LF-Decentralized-Trust-labs/pr
 
 ## CBWeb3 as a DPG
 
-CBWeb3 is explicitly designed to meet the [DPGA criteria](https://digitalpublicgoods.net/):
+CBWeb3 is a candidate [Digital Public Good](https://www.digitalpublicgoods.net/standard).
+The public evidence for each of the nine indicators of the DPG Standard is published as
+part of this repository:
 
-- **Open-source** — Apache-2.0 license, all artifacts public and reusable
-- **Open standards** — Hyperledger Besu (EVM), OpenAPI 3.0.3, ISO 20022, ERC-20/ERC-1400
-- **Privacy-by-design** — Hyperledger Paladin with Zeto tokens (ZK-SNARKs) for on-chain privacy
-- **Vendor neutrality** — No mandatory proprietary dependencies
-- **SDG alignment** — Targets SDGs 8 (Decent Work), 9 (Industry & Innovation), 10 (Reduced Inequalities), 17 (Partnerships)
+| Indicator | Evidence |
+|---|---|
+| Relevance to the SDGs | [SDG alignment](docs/dpg/sdg-alignment.md) — targets 10.c, 8.10, 9.1, 17.6/17.16 |
+| Approved open licence | Apache-2.0 ([`LICENSE`](LICENSE), [`NOTICE`](NOTICE)), SPDX headers enforced in CI |
+| Clear ownership | [Ownership and governance](docs/dpg/ownership.md) |
+| Platform independence | [Platform independence](docs/dpg/platform-independence.md) — no mandatory proprietary dependency |
+| Documentation | [Documentation map](docs/dpg/index.md#documentation-indicator-5) |
+| Extracting data | [Data export](docs/dpg/data-export.md) — Ethereum JSON-RPC, OpenAPI/JSON, SQL |
+| Privacy and applicable laws | [Privacy notice](docs/dpg/privacy.md) |
+| Standards and best practices | [Open standards](docs/dpg/standards.md) |
+| Do no harm by design | [Do no harm](docs/dpg/do-no-harm.md) |
 
-We are building an **open DPG Working Group (DPG WG)** to:
-- Steward design decisions
-- Accept community RFCs/PRs
-- Publish materials so any competent team can deploy, operate, and extend the system.
+Start at the [DPG Standard compliance overview](docs/dpg/index.md). The earlier
+[gap assessment](docs/dpg-assesment/CBWeb3_as_a_DPG.md) that set this work in motion is
+kept for the record.
 
-Once the defined milestones are met, we will:
-1. Complete the **DPGA self-assessment**
-2. Apply for official **DPG registration**
-3. Keep all artifacts **public and reusable** so the ecosystem can benefit beyond this project
-
-See the full [DPG self-assessment](docs/dpg-assesment/CBWeb3_as_a_DPG.md) for details.
+The **DPG Working Group** stewards design decisions, accepts community RFCs and pull
+requests, and publishes materials so that any competent team can deploy, operate and
+extend the system.
 
 ---
 

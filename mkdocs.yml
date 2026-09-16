@@ -81,6 +81,14 @@ nav:
   - Introduction: index.md
   - Technical Blueprint: CBWeb3_Technical_Blueprint.md
   - CBWeb3 as a DPG:
-    - DPG Assessment: dpg-assesment/CBWeb3_as_a_DPG.md
-    - Privacy vs Confidentiality: dpg-assesment/Privacy vs Confidentiality.md
+    - DPG Standard compliance: dpg/index.md
+    - 1 · SDG alignment: dpg/sdg-alignment.md
+    - 3 · Ownership and governance: dpg/ownership.md
+    - 4 · Platform independence: dpg/platform-independence.md
+    - 6 · Extracting and importing data: dpg/data-export.md
+    - 7 · Privacy notice: dpg/privacy.md
+    - 8 · Open standards and best practices: dpg/standards.md
+    - 9 · Do no harm by design: dpg/do-no-harm.md
+    - Background — gap assessment: dpg-assesment/CBWeb3_as_a_DPG.md
+    - Background — Privacy vs Confidentiality: dpg-assesment/Privacy vs Confidentiality.md
   - Research Papers: research-papers/index.md
