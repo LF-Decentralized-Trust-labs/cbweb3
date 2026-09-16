@@ -484,15 +484,22 @@ ali, ou a guarda é decorativa.
 
 ```bash
 bash tools/verify-guard-mutations.test.sh   # o self-test: o harness tem de recusar
-bash tools/verify-guard-mutations.sh        # as dezesseis mutações
+bash tools/verify-guard-mutations.sh        # todas as mutações registradas
 ```
 
 Ambos saem `0`. Rode com **bash, nunca zsh** — zsh não bifurca o último estágio de um
 pipeline, que é a classe de bug que uma vez deixou o gate de licenças passar sem verificar
 nada.
 
+Esta auditoria registrou dezesseis mutações. O harness não é uma fotografia dela: guardas
+novas entram ali, e o número que ele imprime é o que vale. As sete seguintes vieram da
+convergência de realm do Keycloak no Scenario A (readiness, `redirectUris`, ordem canônica,
+comparação por conjunto, criar o realm que o import ignora, não chamar kcadm antes de o
+servidor subir, convergir também no join).
+
 O harness quebra o sujeito, roda o teste nomeado, restaura por `git checkout --` e reporta
-por código de saída. Ao final compara a árvore com o estado em que a encontrou, não com uma
+por código de saída. Restaurar assim significa que ele **só verifica código commitado**:
+rodá-lo com edições pendentes num ficheiro que ele muta descarta essas edições. Ao final compara a árvore com o estado em que a encontrou, não com uma
 árvore limpa: ele não pode deixar resíduo, mas as edições pendentes de quem o chamou não são
 assunto dele, e reportá-las como resíduo treinaria o leitor a ignorar essa linha.
 

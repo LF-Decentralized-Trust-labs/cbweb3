@@ -123,8 +123,8 @@ func TestRun_SuccessPath(t *testing.T) {
 	}
 	// 18 since reconcile-admin-users joined the found pipeline: the realm import only applies to
 	// a realm that does not yet exist, so declared operators need a step that converges every run.
-	if len(result.Steps) != 18 {
-		t.Errorf("Steps len = %d; want 18", len(result.Steps))
+	if len(result.Steps) != 19 {
+		t.Errorf("Steps len = %d; want 19", len(result.Steps))
 	}
 	if !bundleCalled {
 		t.Error("emitBundle was not called on success path")

@@ -263,6 +263,14 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 		cbImageTag = entity + proxyImageVariant(fHost)
 	}
 
+	// One realm plan for the three steps that consume it. It used to be recomputed at each
+	// call site; a third copy for reconcile-keycloak-realm would have made it likelier that one
+	// of them is edited alone, and the whole point of these two reconcile steps is that the
+	// import and the convergence agree about what the realm should contain.
+	cbRealms := centralBankRealmPlans(entity, m.Spec.AdminUsers, m.Spec.Environment,
+		splitOrigins(cbCORSOriginsFor(ports, frontendAdvertisedHost(m), proxyEnabled)))
+	kcAdminPass := mustInfraSecret(dataDir, "KC_ADMIN_PASSWORD")
+
 	steps = append(steps,
 		newRenderCBEnvStep(spokeID, entity, m.Spec.Spoke.Currency, besuRPCPort, m.Spec.Spoke.ChainID, dataDir, operatorKeyHex, frontendAdvertisedHost(m), m.Spec.FXPartyRoster, cactiContainerURL(manifestRelayEndpoint(m)), proxyEnabled),
 		newStartInfraStep(StepStartCBInfra, prefix, net, dataDir,
@@ -273,20 +281,21 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			ComposePath: filepath.Join(templatesDir, "entity-keycloak", "keycloak-compose.yaml"),
 			KCDBURL:     kcDBURL, KCUser: "default",
 			KCPassword:      mustInfraSecret(dataDir, "POSTGRES_PASSWORD"),
-			KCAdminPassword: mustInfraSecret(dataDir, "KC_ADMIN_PASSWORD"),
+			KCAdminPassword: kcAdminPass,
 			HostPort:        ports.Keycloak, Timeout: stackTO,
 			// The realm's redirectUris/webOrigins are the SAME origins the api-gateway is
 			// given as CORS_ALLOW_ORIGINS, so Keycloak and the gateway cannot disagree about
 			// which portals may talk to them (finding R1-10.7 — they used to be "*").
-			Realms: centralBankRealmPlans(entity, m.Spec.AdminUsers, m.Spec.Environment,
-				splitOrigins(cbCORSOriginsFor(ports, frontendAdvertisedHost(m), proxyEnabled))),
+			Realms: cbRealms,
 		}),
 		// Runs after provision-keycloak and converges the declared operators every time: the realm
 		// import above only applies to a realm that does not yet exist, so on an upgraded entity a
 		// newly declared role would otherwise never be created. See keycloak_admin_users_reconcile.go.
-		newReconcileAdminUsersStep(StepReconcileAdminUsers, prefix, mustInfraSecret(dataDir, "KC_ADMIN_PASSWORD"),
-			centralBankRealmPlans(entity, m.Spec.AdminUsers, m.Spec.Environment,
-				splitOrigins(cbCORSOriginsFor(ports, frontendAdvertisedHost(m), proxyEnabled)))),
+		newReconcileAdminUsersStep(StepReconcileAdminUsers, prefix, kcAdminPass, cbRealms),
+		// The same argument for everything the realm carries that is NOT a user: the clients'
+		// webOrigins and redirectUris, and the realm's sslRequired and token lifespan. A portal
+		// origin added to the manifest reached the import volume and stopped there.
+		newReconcileKeycloakRealmStep(StepReconcileKeycloakRealm, prefix, kcAdminPass, cbRealms),
 		newStartBackendStackStep(StepStartCBBackend, backendStackParams{
 			SpokeID: spokeID, EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
 			// tls/central-bank.{crt,key} (gen-tls) lives in the named volume
@@ -758,6 +767,12 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		bankImageTag = bank + proxyImageVariant(fHost)
 	}
 
+	// One realm plan for the three steps that consume it, as in the found pipeline: the import
+	// and the two convergences must agree about what the bank's realm should contain.
+	bankRealms := []KeycloakRealmPlan{commercialBankRealmPlan(bank, m.Spec.AdminUsers, m.Spec.Environment,
+		splitOrigins(bankCORSOriginsFor(ports, frontendAdvertisedHost(m), proxyEnabled)))}
+	kcAdminPass := mustInfraSecret(dataDir, "KC_ADMIN_PASSWORD")
+
 	steps = append(steps,
 		newRenderBankEnvStep(bankEnvParams{
 			SpokeID: spokeID, BankCode: bank, Currency: b.Spec.Currency,
@@ -783,12 +798,20 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			ComposePath: filepath.Join(templatesDir, "entity-keycloak", "keycloak-compose.yaml"),
 			KCDBURL:     kcDBURL, KCUser: "default",
 			KCPassword:      mustInfraSecret(dataDir, "POSTGRES_PASSWORD"),
-			KCAdminPassword: mustInfraSecret(dataDir, "KC_ADMIN_PASSWORD"),
+			KCAdminPassword: kcAdminPass,
 			HostPort:        ports.Keycloak, Timeout: stackTO,
 			// Same origin list the bank's api-gateway receives as CORS_ALLOW_ORIGINS.
-			Realms: []KeycloakRealmPlan{commercialBankRealmPlan(bank, m.Spec.AdminUsers, m.Spec.Environment,
-				splitOrigins(bankCORSOriginsFor(ports, frontendAdvertisedHost(m), proxyEnabled)))},
+			Realms: bankRealms,
 		}),
+		// Join had no reconcile step at all, so everything the found pipeline converges for a
+		// central bank was first-apply-only for a bank: a role newly declared in spec.adminUsers,
+		// and the client origins that follow spec.frontendHost / spec.proxy. Both are
+		// manifest-driven, so the motivating case — a portal moves host, the manifest gains an
+		// origin, the apply reports success and the browser's calls are refused by CORS —
+		// reproduced on every commercial bank. Same two steps, same order, against the bank's
+		// own realm.
+		newReconcileAdminUsersStep(StepReconcileAdminUsers, prefix, kcAdminPass, bankRealms),
+		newReconcileKeycloakRealmStep(StepReconcileKeycloakRealm, prefix, kcAdminPass, bankRealms),
 		newStartBackendStackStep(StepStartBackend, backendStackParams{
 			SpokeID: spokeID, EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
 			// Mount the bank's <dataDir>/pki: gen-csr writes <bank>.csr here, which the

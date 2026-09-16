@@ -96,9 +96,9 @@ func TestRunApply_DryRun_AllPending(t *testing.T) {
 	if !ok {
 		t.Fatalf("steps is not an array: %v", result["steps"])
 	}
-	// 18 since reconcile-admin-users joined the found pipeline (see CanonicalStepOrder).
-	if len(steps) != 18 {
-		t.Errorf("steps len = %d; want 18", len(steps))
+	// 19 since reconcile-keycloak-realm joined the found pipeline (see CanonicalStepOrder).
+	if len(steps) != 19 {
+		t.Errorf("steps len = %d; want 19", len(steps))
 	}
 	for i, s := range steps {
 		step := s.(map[string]interface{})

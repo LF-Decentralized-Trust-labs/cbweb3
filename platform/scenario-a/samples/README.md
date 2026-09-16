@@ -274,7 +274,7 @@ sample manifests already point `spec.relay.endpoint` at `http://localhost:4000`.
 
 `found` is **CB-only**: it creates the country network (central bank) from the
 manifest — without bringing up Besu manually and **without** fixed bank nodes. The
-engine runs the idempotent sequence of **17 steps**:
+engine runs the idempotent sequence of **19 steps**:
 
 1. `start-besu` — brings up the Besu bootnode and **generates the genesis** on the first run (idempotent; never regenerated)
 2. `deploy-contracts` — Paladin node registry, ZetoFactory, PenteFactory
@@ -288,15 +288,17 @@ engine runs the idempotent sequence of **17 steps**:
 10. `deploy-htlc` — deploys `HashTimeLockedContract`; its constructor takes the `IdentityRegistry` from step 8
 11. `render-cb-env` — renders the CB operational stack's env file
 12. `start-cb-infra` — dedicated Postgres + Redis for this entity
-13. `provision-keycloak` — central-bank and `cbweb3`/NOC realms
-14. `start-cb-backend` — the backend services, in central-bank mode
-15. `start-cb-frontend` — governance, treasury, supervisor and NOC portals
-16. `register-relay` — registers the spoke on the Cacti relay (hard: fails if the relay does not respond)
-17. `start-launcher` — the per-entity A/B entry point (soft: a missing image does not fail the apply)
+13. `provision-keycloak` — central-bank and `cbweb3`/NOC realms. Creates a declared realm the container's startup import skipped (`--import-realm` never reapplies), so a realm added to the plan reaches an entity that was already provisioned
+14. `reconcile-admin-users` — converges `spec.adminUsers`: realm roles, users, passwords and grants, on every apply
+15. `reconcile-keycloak-realm` — converges what the import cannot reapply for a realm that exists: each client's `webOrigins`/`redirectUris` and the realm's `sslRequired` and access-token lifespan. Client secrets are deliberately **not** converged (rotating one breaks every backend holding the old value)
+16. `start-cb-backend` — the backend services, in central-bank mode
+17. `start-cb-frontend` — governance, treasury, supervisor and NOC portals
+18. `register-relay` — registers the spoke on the Cacti relay (hard: fails if the relay does not respond)
+19. `start-launcher` — the per-entity A/B entry point (soft: a missing image does not fail the apply)
 
 > `register-relay` runs **after** the frontend, not right after the contract
 > deploys: the relay is handed this CB's coordinator endpoints (gRPC + gateway), so
-> those services must be up first. A manifest with `proxy: enable` appends an 18th
+> those services must be up first. A manifest with `proxy: enable` appends a 20th
 > step, `start-proxy` (soft).
 
 > The **Pente** context and the **FXAgreement** (bilateral) are **not** created in
@@ -328,7 +330,7 @@ With the `spoke-brl` bundle emitted, provision the two banks:
 "$CBWEB3" apply -f ../samples/brazil/bank-bradesco.yaml --output yaml
 ```
 
-The join engine runs **16 steps**, in four blocks:
+The join engine runs **18 steps**, in four blocks:
 
 - **Entering the Besu network (1–3):** `write-genesis` (copies the bundle's genesis,
   non-destructive, guarded by a sha256 comparison), `start-besu-join` (brings up
@@ -339,16 +341,20 @@ The join engine runs **16 steps**, in four blocks:
   node, derived from `bankId`), `render-config-join`, `start-paladin-join`
   (brings up the bank's Paladin), `register-paladin-node` (registers the node
   identity on-chain — native logic, no fixed bank name).
-- **Bank operational stack (8–12):** `render-bank-env`, `start-bank-infra`
+- **Bank operational stack (8–14):** `render-bank-env`, `start-bank-infra`
   (dedicated Postgres + Redis), `provision-bank-keycloak` (bank realm),
-  `start-backend` (the backend services in commercial-bank mode),
-  `start-bank-frontend` (the bank portal).
-- **Deferred tail (13–16):** `create-pente-context` (bilateral CB↔bank Pente
+  `reconcile-admin-users` and `reconcile-keycloak-realm` (converge the bank's
+  realm on every apply — the import applies only to a realm that does not yet
+  exist, so a role newly declared in `spec.adminUsers` and the client origins
+  derived from `spec.frontendHost` / `spec.proxy` would otherwise never reach a
+  bank that is already provisioned), `start-backend` (the backend services in
+  commercial-bank mode), `start-bank-frontend` (the bank portal).
+- **Deferred tail (15–18):** `create-pente-context` (bilateral CB↔bank Pente
   group) and `deploy-fxa-pente` (FXAgreement inside the group), both non-fatal —
   a failure is recorded as `pending` and the join still reports success; then
   `gen-csr` and `start-launcher` (soft).
 
-> `proxy: enable` appends a 17th step, `start-proxy` (soft).
+> `proxy: enable` appends a 19th step, `start-proxy` (soft).
 
 > **Onboarding is not a join step.** The join produces the CSR (`gen-csr`) and
 > stops there. The bank completes onboarding at **runtime** through the CB's
