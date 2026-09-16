@@ -13,19 +13,18 @@ Merge pull requests, enforce the workflow, and coordinate with the CBWG.
 | Name | GitHub | Affiliation | Area |
 |---|---|---|---|
 | Carolina Velásquez | [@carolacnet](https://github.com/carolacnet) | LNet | Technical lead — governance, documentation, DPG |
-<!-- TODO: confirm the remaining Maintainer Core members and their areas.
-     Candidates by area, pending confirmation:
-       - platform    → GoLedger / AguilaHub engineering leads
-       - Toolbox     → to be nominated
-       - docs        → to be nominated -->
+
+The Maintainer Core is deliberately small while the project's first release stabilises.
+Additional seats — one for `platform/`, one for the Toolbox and one for documentation —
+are open and are filled by nomination through the process in
+[Becoming a maintainer](#becoming-a-maintainer), not by appointment.
 
 ## Cochairs
 
-Facilitate meetings and curate the backlog. Nominated by CEMLA and FLAR.
-
-| Name | GitHub | Organization |
-|---|---|---|
-<!-- TODO: confirm the CEMLA and FLAR nominees. -->
+Facilitate meetings and curate the backlog. The two co-chair seats belong to
+[CEMLA](https://www.cemla.org/) and [FLAR](https://www.flar.net/), which nominate their
+own representatives; the seats are held by those institutions and their current nominees
+are recorded here as each nomination is confirmed.
 
 ## Platform maintainers
 
@@ -40,7 +39,11 @@ contract with IDB Lab.
 | Lucas Campelo Santiago | [@lucas-campelo](https://github.com/lucas-campelo) | GoLedger |
 | Alexandre Harrison | [@Xandyhoss](https://github.com/Xandyhoss) | GoLedger |
 | Luiz Jeronymo | [@LFJeronymo](https://github.com/LFJeronymo) | AguilaHub |
-<!-- TODO: GL to confirm this list and nominate who holds merge rights on platform/. -->
+
+These are the authors of the platform code, listed so that provenance and domain knowledge
+are attributable. Merge authority over `platform/` in this repository rests with the
+Maintainer Core and with [CODEOWNERS](CODEOWNERS); the engagement under which this code was
+contributed is complete.
 
 ## Becoming a maintainer
 

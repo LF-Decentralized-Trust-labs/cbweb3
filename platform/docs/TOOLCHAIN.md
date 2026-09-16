@@ -30,7 +30,16 @@ deviation must be recorded in [Recorded deviations](#recorded-deviations) with a
 
 Pinned container images are not developer prerequisites — they are pulled automatically:
 `hyperledger/besu:25.8.0`, Paladin Core (`docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1`),
-Keycloak, Postgres, Redis.
+Keycloak, Postgres, `redis:7.2-alpine`.
+
+> **The Redis pin is a licensing pin, not a version preference.** Redis releases through
+> 7.2 are BSD-3-Clause; from 7.4 the project relicensed to RSALv2 / SSPLv1, which is not
+> OSI-approved, and only Redis 8 added an AGPLv3 option. A floating `redis:7-alpine` tag —
+> the previous default — therefore drifted onto a non-open licence, which CBWeb3 cannot
+> carry as a dependency while claiming platform independence as a Digital Public Good.
+> `REDIS_IMAGE_TAG` remains overridable; an operator who wants to move forward should
+> prefer [Valkey](https://valkey.io/) (`valkey/valkey:8-alpine`, BSD-3-Clause), which speaks
+> the same protocol and works unchanged with the `go-redis` client.
 
 > **The Paladin pin is known to be behind and must be upgraded.** `v0.15.0-rc.1` carries a
 > Zeto `transferLocked` defect that permanently strands a private lock in ~1 of every 256

@@ -143,7 +143,7 @@ DATABASE_URL=postgres://{{.PostgresUser}}:{{.PostgresPassword}}@{{.PostgresConta
 POSTGRES_DSN=postgres://{{.PostgresUser}}:{{.PostgresPassword}}@{{.PostgresContainer}}:5432/{{.DBName}}?sslmode=disable
 
 REDIS_CONTAINER_NAME={{.RedisContainer}}
-REDIS_IMAGE_TAG=7-alpine
+REDIS_IMAGE_TAG=7.2-alpine
 REDIS_PORT={{.RedisPort}}
 REDIS_DB={{.RedisDB}}
 REDIS_PASSWORD={{.RedisPassword}}

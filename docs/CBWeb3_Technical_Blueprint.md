@@ -333,7 +333,7 @@ Within each spoke, the system is organized into layers. The same layered model a
 | Layer | Purpose | Principal components |
 |---|---|---|
 | **Presentation** | Role-specific user interfaces | Bank portal, Governance portal, Supervisor portal, Treasury portal, Network Operations Center (NOC) portal |
-| **API** | Single, authenticated entry point | REST API gateway (per entity), real-time event/WebSocket channel |
+| **API** | Single, authenticated entry point | REST API gateway (per entity). A real-time event/WebSocket channel belongs to the target design; the reference implementation is request/response only |
 | **Application / microservices** | Business logic | Authentication, compliance, payment orchestration, policy, FX, observability |
 | **Interoperability** | Cross-network coordination | HTLC relay, spoke bridge, settlement adapters, FX/AMM |
 | **Privacy** | Confidential transactions | Paladin core and privacy domains (Section 10) |

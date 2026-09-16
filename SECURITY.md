@@ -9,9 +9,11 @@ report them privately and give us a chance to fix them before they become public
 **Do not open a public issue, pull request or discussion for a security problem.**
 
 Report it through **[GitHub private vulnerability reporting](https://github.com/LF-Decentralized-Trust-labs/cbweb3/security/advisories/new)**,
-which is private to the maintainers.
+which is private to the maintainers. It is the primary channel and the one we monitor.
 
-<!-- TODO: add the LNet security contact address once confirmed. -->
+If GitHub is not available to you, write to the project's technical lead at
+**cvelasquez@lnet.global** and say that the report is security-sensitive; do not include
+the details until we have agreed a private channel.
 
 Please include:
 

@@ -18,7 +18,7 @@ services:
     restart: always
 
   redis:
-    image: "redis:${REDIS_IMAGE_TAG:-7-alpine}"
+    image: "redis:${REDIS_IMAGE_TAG:-7.2-alpine}"
     container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-redis"
     # This Redis is not a cache. It holds the relay-auth replay guard
     # (relayauth:seen:, where SET NX admits each signature exactly once) and the

@@ -220,7 +220,7 @@ rm -f "$fixture/svc/untagged.sh"
   printf 'FROM golang:1.26-alpine AS builder\n'
   printf 'FROM node:22-alpine\n'
   printf 'image: postgres:17-alpine\n'
-  printf 'image: "${REDIS_IMAGE_TAG:-7-alpine}"\n'
+  printf 'image: "${REDIS_IMAGE_TAG:-7.2-alpine}"\n'
 } > "$fixture/svc/based.Dockerfile"
 run 0 "images merely BASED on Alpine (golang:1.26-alpine, node:22-alpine, …) are left alone"
 rm -f "$fixture/svc/based.Dockerfile"
