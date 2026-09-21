@@ -23,7 +23,7 @@ jobs:
     name: SPDX header check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Runs first: proves the checker still fails on a header-less fixture.
       # Without it the gate can silently regress to reporting success without
