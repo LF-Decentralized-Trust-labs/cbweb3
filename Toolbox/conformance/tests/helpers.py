@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Shared constants and assertion helpers for the CBWeb3 conformance suite.
 

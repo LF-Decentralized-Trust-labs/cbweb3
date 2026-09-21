@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Conformance: Scenario A reserve lifecycle (token + deposits/escrows/redeems).
 
