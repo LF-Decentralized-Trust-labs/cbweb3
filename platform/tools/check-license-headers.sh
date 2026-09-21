@@ -2,13 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # check-license-headers.sh — fail if any first-party source file is missing an
-# SPDX-License-Identifier header. Covers Go and TypeScript across both scenarios.
+# SPDX-License-Identifier header. Covers Go, TypeScript and Python across the
+# whole repository.
 #
 # Scope (matches the DPG license-header policy in docs/DPG-COMPLIANCE.md):
 #   - Hand-written .go files. Generated code is excluded: *.pb.go, *_grpc.pb.go,
 #     and abigen output under any /bindings/ directory.
 #   - First-party .ts / .tsx under source trees. Vendored / build output is
 #     excluded: node_modules, dist, build, .next, .turbo.
+#   - First-party .py — the Toolbox conformance suite and the repository's Python
+#     tooling. Vendored code, virtualenvs and caches are excluded.
 #
 # Usage: tools/check-license-headers.sh [scan-root]
 #        scan-root defaults to the repository root. It exists so the self-test
@@ -87,6 +90,15 @@ scan ts find . -type f '(' -name '*.ts' -o -name '*.tsx' ')' \
   -not -path '*/.next/*' \
   -not -path '*/.turbo/*'
 
+# Python — exclude vendored sources, virtualenvs and caches.
+scan py find . -type f -name '*.py' \
+  -not -path '*/vendor/*' \
+  -not -path '*/node_modules/*' \
+  -not -path '*/.venv/*' \
+  -not -path '*/venv/*' \
+  -not -path '*/site-packages/*' \
+  -not -path '*/__pycache__/*'
+
 if [ "$missing" -gt 0 ]; then
   echo ""
   echo "FAIL: $missing file(s) missing an $SPDX header."
@@ -94,4 +106,4 @@ if [ "$missing" -gt 0 ]; then
   exit 1
 fi
 
-echo "OK: all first-party Go and TypeScript sources carry an $SPDX header."
+echo "OK: all first-party Go, TypeScript and Python sources carry an $SPDX header."

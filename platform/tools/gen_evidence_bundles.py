@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Generate machine-readable test-evidence bundles from the measured results.
 
 Produces, under evidence-bundles/, one bundle per test run:
