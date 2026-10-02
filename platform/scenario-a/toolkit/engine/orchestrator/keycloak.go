@@ -143,8 +143,12 @@ func nocRealmPlan(environment string, origins []string) KeycloakRealmPlan {
 // centralBankRealmPlans returns the realms the CB Keycloak must host: the
 // central-bank realm (governance + treasury clients) plus the NOC realm. The
 // manifest's admin users are routed to the realm that defines their role:
-// ROLE_GOVERNANCE/ROLE_TREASURY/ROLE_SUPERVISOR into the central-bank realm,
-// ROLE_NOC_ADMIN into the shared cbweb3/NOC realm.
+// ROLE_GOVERNANCE/ROLE_TREASURY/ROLE_SUPERVISOR/ROLE_ADMISSION into the central-bank
+// realm, ROLE_NOC_ADMIN into the shared cbweb3/NOC realm.
+//
+// ROLE_ADMISSION (spec 042) is a password-only onboarding operator: it gets a realm
+// login but no client of its own, because it drives no service-to-service flow and
+// holds no key — it authorizes the off-chain onboarding record only.
 func centralBankRealmPlans(entity string, admins []manifest.AdminUser, environment string, origins []string) []KeycloakRealmPlan {
 	noc := nocRealmPlan(environment, origins)
 	noc.Users = adminUsersForRealmRoles(admins, "ROLE_NOC_ADMIN", "ROLE_NOC_OPERATOR", "ROLE_NOC_VIEWER")
@@ -157,7 +161,7 @@ func centralBankRealmPlans(entity string, admins []manifest.AdminUser, environme
 				{ClientID: entity + "-client", Secret: entity + "-local-secret", Roles: []string{"ROLE_GOVERNANCE"}, Audience: keycloakBackendAudience},
 				{ClientID: entity + "-treasury-client", Secret: entity + "-treasury-local-secret", Roles: []string{"ROLE_TREASURY"}, Audience: keycloakBackendAudience},
 			},
-			Users: adminUsersForRealmRoles(admins, "ROLE_GOVERNANCE", "ROLE_TREASURY", "ROLE_SUPERVISOR"),
+			Users: adminUsersForRealmRoles(admins, "ROLE_GOVERNANCE", "ROLE_TREASURY", "ROLE_SUPERVISOR", "ROLE_ADMISSION"),
 		},
 		noc,
 	}

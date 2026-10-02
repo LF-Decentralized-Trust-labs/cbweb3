@@ -32,9 +32,16 @@ This document is the complete reference for all system environment variables, gr
 
 ---
 
-## Shared infrastructure (`compose.yml`)
+## Shared infrastructure
 
-File: `scenario-a/deploy/local/compose.yml`  
+> The single shared `deploy/local/compose.yml` no longer exists. The toolkit provisions
+> infrastructure **per entity**: see
+> [`provisioning/templates/entity-infra/infra-compose.yaml`](../../provisioning/templates/entity-infra/infra-compose.yaml)
+> (Postgres, Redis) and
+> [`provisioning/templates/entity-keycloak/`](../../provisioning/templates/entity-keycloak/).
+> The variables below still describe the values those templates take; what changed is
+> that each entity gets its own instance rather than sharing one.
+
 Reference env: `backend/config/.env.infra.<entity>.example` (Infra section)
 
 ### Keycloak
@@ -291,7 +298,7 @@ Template: `scenario-a/frontend/.env.example`
 | Variable | Description |
 |----------|-------------|
 | `VITE_API_URL` | API gateway URL used by the app |
-| `VITE_USE_MOCKS` | `true` for development without backend |
+| `VITE_USE_MOCKS` | **Inert in Scenario A** — no portal reads it. Its only reference is an unused export in the treasury app, no `ARG` declares it at build time, and the toolkit never passes it. Setting it changes nothing |
 | `VITE_PORTAL_OWNER` | Portal owner operator (e.g. `BANK_A_OPERATOR`) |
 | `VITE_FIAT_SYMBOL` | Fiat symbol displayed in the app |
 | `VITE_INSTITUTION_NAME` | Institution name displayed in the app |
@@ -300,8 +307,8 @@ Template: `scenario-a/frontend/.env.example`
 
 ## NOC Stack
 
-File: `scenario-a/deploy/local/.env.noc`  
-Template: `scenario-a/deploy/local/.env.noc.example`
+Template: [`provisioning/templates/noc-stack/docker-compose.yaml`](../../provisioning/templates/noc-stack/docker-compose.yaml)
+(the `deploy/local/.env.noc` pair it replaced was removed with that tree)
 
 | Variable | Default | Type | Description |
 |----------|---------|------|-------------|
@@ -323,9 +330,13 @@ Template: `scenario-a/deploy/local/.env.noc.example`
 
 ## Paladin (`config.yaml` per node)
 
-File: `scenario-a/deploy/local/paladin/spoke-{a,b}/config/<entity>/config.yaml`
+Rendered per node by the toolkit from the templates in
+[`provisioning/templates/central-bank/paladin-config/`](../../provisioning/templates/central-bank/paladin-config/)
+and [`provisioning/templates/commercial-bank/paladin-config/`](../../provisioning/templates/commercial-bank/paladin-config/),
+into the entity's data directory. The hand-written `deploy/local/paladin/**/config.yaml`
+files this section used to point at were removed with that tree.
 
-The fields below are the main configurable parameters. Full example values are in `deploy/local/paladin/spoke-a/config/bank-a/config.yaml`.
+The fields below are the main configurable parameters.
 
 ### Identity and logging
 

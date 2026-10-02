@@ -126,10 +126,14 @@ func applyObserve(ctx context.Context, o Options, pd *manifest.ParticipantDeploy
 		NetPrefix:       prefix,
 		VolumePrefix:    prefix,
 		FrontendHost:    pd.Spec.FrontendHost,
-		KeycloakURL:     manifestNOCKeycloakURL(pd),   // portal VITE_KEYCLOAK_URL (CB/hub realm)
-		LauncherURL:     manifestNOCLauncherURL(pd),   // portal VITE_LAUNCHER_URL (back-to-launcher)
-		AMMGatewayURL:   manifestNOCAMMGatewayURL(pd), // backend AMM_GATEWAY_URL (Pool Stability)
-		ProxyEnabled:    pd.Spec.Proxy == "enable",    // serve portal + backend under the per-host proxy
+		KeycloakURL:     manifestNOCKeycloakURL(pd), // realm the NOC BACKEND password-grants against
+		// The NOC_ADMIN operator from spec.adminUsers. The toolkit needs a REAL token to
+		// call the NOC admin API: it used to send the literal string "local-dev", which
+		// only worked while NOC_SKIP_AUTH made the validator accept anything.
+		AdminUsers:    toOrchestratorAdminUsers(pd.Spec.AdminUsers),
+		LauncherURL:   manifestNOCLauncherURL(pd),   // portal VITE_LAUNCHER_URL (back-to-launcher)
+		AMMGatewayURL: manifestNOCAMMGatewayURL(pd), // backend AMM_GATEWAY_URL (Pool Stability)
+		ProxyEnabled:  pd.Spec.Proxy == "enable",    // serve portal + backend under the per-host proxy
 		// BackendPort/PortalPort fall back to the local convention in WithDefaults;
 		// spec.noc may carry explicit ports in a later phase.
 	}

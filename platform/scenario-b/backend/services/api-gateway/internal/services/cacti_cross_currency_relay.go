@@ -28,6 +28,17 @@ type CactiCrossCurrencyRelayIface interface {
 	NotifyBridgeOut(ctx context.Context, req CactiCrossCurrencyBridgeOutRequest) (string, error)
 }
 
+// BeneficiaryPreflightChecker is an OPTIONAL capability of a relay: asking the beneficiary's
+// central bank whether a bank can receive, before any value moves.
+//
+// Separate from CactiCrossCurrencyRelayIface, and discovered with a type assertion, so a relay
+// implementation that predates the check keeps working unchanged — it simply does not get the
+// pre-flight, and the bridge-out retry still covers the failure. Widening the main interface
+// would have forced every implementation and every test double to grow a method they do not use.
+type BeneficiaryPreflightChecker interface {
+	CheckBeneficiary(ctx context.Context, spokeOut, bankID string) BeneficiaryPreflight
+}
+
 // CactiCrossCurrencyBridgeOutRequest is the payload sent to Cacti.
 type CactiCrossCurrencyBridgeOutRequest struct {
 	CorrelationID      string `json:"correlation_id"`
@@ -93,4 +104,57 @@ func (r *CactiCrossCurrencyRelay) NotifyBridgeOut(ctx context.Context, req Cacti
 	}
 	_ = json.Unmarshal(respBody, &out)
 	return out.CorrelationID, nil
+}
+
+// BeneficiaryPreflight is the answer to "can this bank receive?", plus whether the question was
+// answered at all.
+//
+// Answered is the field that matters. An unreachable peer and a definite refusal must lead to
+// different decisions: only the refusal is a reason to stop a payment. Collapsing them into a
+// bool would make a network blip look identical to an ineligible beneficiary, and the safest
+// reading of that ambiguity — refuse — would let any central bank's downtime close the corridor.
+type BeneficiaryPreflight struct {
+	Answered bool
+	Eligible bool
+	Code     string
+}
+
+// CheckBeneficiary asks the beneficiary's central bank, through the relay, whether a bank can
+// receive a delivery — before this gateway moves any value.
+//
+// It never returns an error. An unanswerable question is reported as Answered=false so the
+// caller can proceed deliberately rather than by catching an error it might mishandle.
+func (r *CactiCrossCurrencyRelay) CheckBeneficiary(ctx context.Context, spokeOut, bankID string) BeneficiaryPreflight {
+	body, err := json.Marshal(map[string]string{"spoke_out": spokeOut, "bank_id": bankID})
+	if err != nil {
+		return BeneficiaryPreflight{}
+	}
+	endpoint := r.cactiURL + "/api/v1/cross-currency/beneficiary-check"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return BeneficiaryPreflight{}
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Relay-Auth", r.relayAuthSecret)
+
+	resp, err := r.httpClient.Do(httpReq)
+	if err != nil {
+		return BeneficiaryPreflight{}
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		// Includes the relay's own 400/502 and the peer's 503: the question did not get an
+		// answer, which is not the same as an answer of "no".
+		return BeneficiaryPreflight{}
+	}
+	var out struct {
+		Eligible bool   `json:"eligible"`
+		Code     string `json:"code"`
+	}
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return BeneficiaryPreflight{}
+	}
+	return BeneficiaryPreflight{Answered: true, Eligible: out.Eligible, Code: out.Code}
 }

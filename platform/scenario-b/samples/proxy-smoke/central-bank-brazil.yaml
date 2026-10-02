@@ -43,16 +43,20 @@ spec:
   hubBundleRef: bundles/hub.bundle.yaml
   node:
     advertisedHost: host.docker.internal
-    rpc: { port: 33645 }
-    ws: { port: 33655 }
-    p2p: { port: 56303 }
+    rpc: { port: 9145 }
+    ws: { port: 9155 }
+    p2p: { port: 30303 }
     dataDir: cbweb3-data/central-bank-brazil
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed
   relay:
     endpoint: http://localhost:7000
-  cbEndpoint: http://host.docker.internal:18645
+  # This CB's own api-gateway, host-mapped (RPC 9145 + 8000). Declared for the
+  # credential-request hook the toolkit roadmap describes; NOTHING in the engine
+  # reads it yet, which is how it went unnoticed that the old value (18645) carried
+  # Scenario A's base AND Scenario A's +10000 gateway offset.
+  cbEndpoint: http://host.docker.internal:17145
   # Reverse proxy on this host. localtest.me resolves to 127.0.0.1 so the browser on
   # this machine reaches the proxy. TLS mode via PROXY_TLS_MODE (proxy-smoke.sh default
   # `internal` = self-signed; set `off` for plain HTTP on :80).
@@ -64,3 +68,4 @@ spec:
     - { role: GOVERNANCE, username: admin@brasil.governance.gov, password: brasil-governance-local }
     - { role: TREASURY,   username: admin@brasil.treasury.gov,   password: brasil-treasury-local }
     - { role: SUPERVISOR, username: admin@brasil.supervisor.gov, password: brasil-supervisor-local }
+    - { role: ADMISSION,  username: admin@brasil.admission.gov, password: brasil-admission-local }

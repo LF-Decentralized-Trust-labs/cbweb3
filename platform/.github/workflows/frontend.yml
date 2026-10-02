@@ -24,7 +24,7 @@ jobs:
   # The self-test below runs first for the same reason the SPDX gate self-tests: a
   # check that cannot fail is worse than no check, because it gets quoted as evidence.
   build:
-    name: ${{ matrix.scenario }} — type-check and build
+    name: ${{ matrix.scenario }} — type-check, build and test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -59,3 +59,64 @@ jobs:
       # review-ready PR.
       - name: Build every app
         run: npm run build --workspaces --if-present
+
+      # Until this step existed, CI type-checked and built every app but never ran a
+      # single frontend test, so every suite in the repository was unexecuted — a
+      # regression that keeps the types valid passed green. The self-test runs first
+      # for the same reason the type-check and SPDX gates self-test: a gate is worth
+      # nothing until its failure path is shown to fail.
+      - name: Self-test the test gate (fail path must fail)
+        run: bash tools/check-frontend-tests.test.sh ${{ matrix.scenario }}
+        working-directory: .
+
+      - name: Run every test suite
+        run: npm run test --workspaces --if-present
+
+  # The workspace build above does NOT cover the image build, and the difference is
+  # not academic: it let a broken bank portal reach develop and block a bank join.
+  #
+  # Each app's Dockerfile copies only its own package.json plus packages/config and
+  # packages/ui, then runs `npm ci`. CI's root `npm ci` installs every workspace's
+  # devDependencies, so an app can use a package it never declared — hoisted from a
+  # sibling — and build green here while failing inside the image, where that
+  # sibling's manifest does not exist. That is exactly how a missing `vitest`
+  # devDependency shipped.
+  #
+  # Apps are discovered rather than listed so a new portal is covered the day it is
+  # added, and the count is asserted for the same reason the type-check self-tests:
+  # a loop that silently matches nothing passes green and gets quoted as evidence.
+  images:
+    name: ${{ matrix.scenario }} — build portal images
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scenario: scenario-a
+            min_apps: 6
+          - scenario: scenario-b
+            min_apps: 5
+    defaults:
+      run:
+        working-directory: ${{ matrix.scenario }}/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build every portal image
+        run: |
+          set -euo pipefail
+          built=0
+          for dockerfile in apps/*/Dockerfile; do
+            app=$(basename "$(dirname "$dockerfile")")
+            echo "::group::${{ matrix.scenario }} / $app"
+            docker build -f "$dockerfile" -t "cbweb3-${{ matrix.scenario }}-$app:ci" .
+            echo "::endgroup::"
+            built=$((built + 1))
+          done
+          echo "built $built image(s)"
+          if [ "$built" -lt "${{ matrix.min_apps }}" ]; then
+            echo "::error::built $built image(s), expected at least ${{ matrix.min_apps }} — the discovery glob matched too little, so this job proved nothing"
+            exit 1
+          fi

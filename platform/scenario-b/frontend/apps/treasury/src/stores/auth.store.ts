@@ -5,6 +5,7 @@ import { authApi } from "../services/api";
 import { cancelTokenRefresh, scheduleTokenRefresh } from "../services/api/token-refresh";
 import type { AsyncStatus, MeResponse, TreasuryUser } from "../types";
 import { TREASURY_UNAUTHORIZED_MESSAGE, hasTreasuryAccess } from "../auth/authorization";
+import { loginErrorMessage } from "@cbweb3/ui";
 
 type AuthState = {
   user: TreasuryUser | null;
@@ -63,7 +64,9 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch (error) {
       set({
         status: "error",
-        error: error instanceof Error ? error.message : "Unable to login",
+        // The gateway names the cause in the body; axios's own message is only "Request failed
+        // with status code N". Shared so the five portals cannot drift apart on this copy.
+        error: loginErrorMessage(error),
         isAuthenticated: false,
         initialized: true,
       });

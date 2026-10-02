@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  amountRefusalMessage,
   Badge,
   Button,
   Card,
@@ -11,10 +12,12 @@ import {
   ConfirmActionDialog,
   Input,
   Label,
+  parseAmount,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
+  toast,
 } from "@cbweb3/ui";
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
@@ -30,7 +33,19 @@ import {
 import { useAuthStore, usePaymentStore } from "../stores";
 import { SWAP_ERROR } from "../types/amm-v2.types";
 import { CROSS_CURRENCY_SWAP_ERROR } from "../types/cross-currency-swap.types";
-import { displayToBase, formatAmountInput, parseAmountInput } from "../types";
+import { displayToBase } from "../types";
+
+// Turn a typed amount into the base units the API takes, under the ISO 20022
+// rule. Returns null when the field does not hold a valid amount, so a quote is
+// skipped rather than requested for a figure the operator did not type.
+//
+// This replaces parseAmountInput, which stripped every comma as a thousands
+// separator: a typed "1000,10" reached displayToBase as 100010, a hundredfold
+// overstatement with nothing anywhere to catch it.
+const toBaseUnits = (typed: string, decimals: number): string | null => {
+  const parsed = parseAmount(typed);
+  return parsed.ok ? displayToBase(parsed.canonical, decimals) : null;
+};
 
 export function AMMTradingPage() {
   return <AMMTradingV2 />;
@@ -100,7 +115,11 @@ function AMMTradingV2() {
       if (!amountOut) {
         return;
       }
-      void fetchQuote(pair, displayToBase(parseAmountInput(amountOut), tokenDecimals));
+      const amount = toBaseUnits(amountOut, tokenDecimals);
+      if (!amount) {
+        return;
+      }
+      void fetchQuote(pair, amount);
     },
     QUOTE_REFRESH_INTERVAL_MS,
     Boolean(quote && amountOut),
@@ -108,7 +127,12 @@ function AMMTradingV2() {
 
   const handleGetQuote = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await fetchQuote(pair, displayToBase(parseAmountInput(amountOut), tokenDecimals));
+    const parsed = parseAmount(amountOut);
+    if (!parsed.ok) {
+      toast.error(amountRefusalMessage("Amount out", parsed.refusal));
+      return;
+    }
+    await fetchQuote(pair, displayToBase(parsed.canonical, tokenDecimals));
   };
 
   // The swap used to execute straight off the submit event, guarded only by the
@@ -124,10 +148,15 @@ function AMMTradingV2() {
 
   const confirmSwap = async () => {
     setConfirmingSwap(false);
+    const amountOutBase = toBaseUnits(amountOut, tokenDecimals);
+    const maxAmountInBase = toBaseUnits(maxAmountIn, tokenDecimals);
+    if (!amountOutBase || !maxAmountInBase) {
+      return;
+    }
     await executeSwap({
       pair,
-      amount_out: displayToBase(parseAmountInput(amountOut), tokenDecimals),
-      max_amount_in: displayToBase(parseAmountInput(maxAmountIn), tokenDecimals),
+      amount_out: amountOutBase,
+      max_amount_in: maxAmountInBase,
       payer_id: sessionBankId,
       beneficiary_id: beneficiaryId,
     });
@@ -135,7 +164,11 @@ function AMMTradingV2() {
 
   const handleApproveAmm = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await approveAmm(displayToBase(parseAmountInput(approveAmount), tokenDecimals));
+    const amount = toBaseUnits(approveAmount, tokenDecimals);
+    if (!amount) {
+      return;
+    }
+    await approveAmm(amount);
   };
 
   const swapErrorMessage = useMemo(() => {
@@ -199,10 +232,7 @@ function AMMTradingV2() {
                   <Input
                     id="amount_out"
                     value={amountOut}
-                    onChange={(event) => {
-                      const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
-                      setAmountOut(formatAmountInput(cleaned));
-                    }}
+                    onChange={(event) => setAmountOut(event.target.value)}
                     inputMode="decimal"
                     placeholder="0.00"
                     required
@@ -247,10 +277,7 @@ function AMMTradingV2() {
                   <Input
                     id="swap_amount_out"
                     value={amountOut}
-                    onChange={(event) => {
-                      const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
-                      setAmountOut(formatAmountInput(cleaned));
-                    }}
+                    onChange={(event) => setAmountOut(event.target.value)}
                     inputMode="decimal"
                     placeholder="0.00"
                     required
@@ -261,10 +288,7 @@ function AMMTradingV2() {
                   <Input
                     id="max_amount_in"
                     value={maxAmountIn}
-                    onChange={(event) => {
-                      const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
-                      setMaxAmountIn(formatAmountInput(cleaned));
-                    }}
+                    onChange={(event) => setMaxAmountIn(event.target.value)}
                     inputMode="decimal"
                     placeholder="0.00"
                     required
@@ -343,10 +367,7 @@ function AMMTradingV2() {
                   <Input
                     id="approve_amount"
                     value={approveAmount}
-                    onChange={(event) => {
-                      const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
-                      setApproveAmount(formatAmountInput(cleaned));
-                    }}
+                    onChange={(event) => setApproveAmount(event.target.value)}
                     inputMode="decimal"
                     placeholder="0.00"
                     required
@@ -451,7 +472,11 @@ function CrossCurrencySwapPanel() {
       if (!amountOut) {
         return;
       }
-      void fetchQuote(sourceCurrency, targetCurrency, displayToBase(parseAmountInput(amountOut), tokenDecimals));
+      const amount = toBaseUnits(amountOut, tokenDecimals);
+      if (!amount) {
+        return;
+      }
+      void fetchQuote(sourceCurrency, targetCurrency, amount);
     },
     CROSS_CURRENCY_QUOTE_REFRESH_MS,
     step === "idle" && quote !== null && amountOut.length > 0,
@@ -473,7 +498,11 @@ function CrossCurrencySwapPanel() {
     }
 
     const timeoutId = window.setTimeout(() => {
-      void fetchQuote(sourceCurrency, targetCurrency, displayToBase(parseAmountInput(amountOut), tokenDecimals));
+      const amount = toBaseUnits(amountOut, tokenDecimals);
+      if (!amount) {
+        return;
+      }
+      void fetchQuote(sourceCurrency, targetCurrency, amount);
     }, 600);
 
     return () => {
@@ -503,7 +532,11 @@ function CrossCurrencySwapPanel() {
   const handleGetQuote = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     clearQuoteRefreshedNotice();
-    await fetchQuote(sourceCurrency, targetCurrency, displayToBase(parseAmountInput(amountOut), tokenDecimals));
+    const amount = toBaseUnits(amountOut, tokenDecimals);
+    if (!amount) {
+      return;
+    }
+    await fetchQuote(sourceCurrency, targetCurrency, amount);
   };
 
   const handleExecuteSwap = (event: FormEvent<HTMLFormElement>) => {
@@ -518,13 +551,17 @@ function CrossCurrencySwapPanel() {
     if (!quote) {
       return;
     }
+    const amountOutBase = toBaseUnits(amountOut, tokenDecimals);
+    if (!amountOutBase) {
+      return;
+    }
     setConfirmingSwap(false);
     clearQuoteRefreshedNotice();
     await executeSwap({
       source_currency: sourceCurrency,
       target_currency: targetCurrency,
       pool_pair: CROSS_CURRENCY_POOL_PAIR,
-      amount_out: displayToBase(parseAmountInput(amountOut), tokenDecimals),
+      amount_out: amountOutBase,
       max_amount_in: calcMaxAmountIn(quote.amount_in),
       beneficiary_bank_id: beneficiaryBankId,
       quote_id: quote.quote_id,
@@ -596,8 +633,7 @@ function CrossCurrencySwapPanel() {
                   value={amountOut}
                   onChange={(event) => {
                     clearQuoteRefreshedNotice();
-                    const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
-                    setAmountOut(formatAmountInput(cleaned));
+                    setAmountOut(event.target.value);
                   }}
                   inputMode="decimal"
                   placeholder="0.00"

@@ -34,10 +34,10 @@ func TestReplayGuard_AdmitsASignatureOnce(t *testing.T) {
 	g := relayauth.NewReplayGuard(5 * time.Minute)
 	now := time.Unix(1_760_000_000, 0)
 
-	if !g.Admit("bank-a", "sig-1", now) {
+	if g.Admit("bank-a", "sig-1", now) == relayauth.AdmissionRefused {
 		t.Fatal("the first use of a signature must be admitted")
 	}
-	if g.Admit("bank-a", "sig-1", now.Add(time.Second)) {
+	if g.Admit("bank-a", "sig-1", now.Add(time.Second)) != relayauth.AdmissionRefused {
 		t.Fatal("the same signature must not authenticate a second request — that is a replay")
 	}
 }
@@ -46,14 +46,14 @@ func TestReplayGuard_DistinguishesSignaturesAndSigners(t *testing.T) {
 	g := relayauth.NewReplayGuard(5 * time.Minute)
 	now := time.Unix(1_760_000_000, 0)
 
-	if !g.Admit("bank-a", "sig-1", now) {
+	if g.Admit("bank-a", "sig-1", now) == relayauth.AdmissionRefused {
 		t.Fatal("first admission failed")
 	}
-	if !g.Admit("bank-a", "sig-2", now) {
+	if g.Admit("bank-a", "sig-2", now) == relayauth.AdmissionRefused {
 		t.Fatal("a different signature is a different request — two genuine calls in the same second " +
 			"must both go through")
 	}
-	if !g.Admit("bank-b", "sig-1", now) {
+	if g.Admit("bank-b", "sig-1", now) == relayauth.AdmissionRefused {
 		t.Fatal("another signer's signature is not this signer's replay")
 	}
 }
@@ -64,10 +64,10 @@ func TestReplayGuard_ForgetsOnceTheSkewWindowHasPassed(t *testing.T) {
 	g := relayauth.NewReplayGuard(time.Minute)
 	now := time.Unix(1_760_000_000, 0)
 
-	if !g.Admit("bank-a", "sig-1", now) {
+	if g.Admit("bank-a", "sig-1", now) == relayauth.AdmissionRefused {
 		t.Fatal("first admission failed")
 	}
-	if !g.Admit("bank-a", "sig-1", now.Add(2*time.Minute)) {
+	if g.Admit("bank-a", "sig-1", now.Add(2*time.Minute)) == relayauth.AdmissionRefused {
 		t.Fatal("an entry older than the window must have been dropped")
 	}
 	if g.Len() > 1 {
@@ -120,10 +120,10 @@ func TestReplayGuard_RejectsAMalleatedCopyOfAnAdmittedSignature(t *testing.T) {
 
 	g := relayauth.NewReplayGuard(5 * time.Minute)
 	now := time.Unix(ts, 0)
-	if !g.Admit("bank-a", original, now) {
+	if g.Admit("bank-a", original, now) == relayauth.AdmissionRefused {
 		t.Fatal("the original must be admitted")
 	}
-	if g.Admit("bank-a", malleated, now) {
+	if g.Admit("bank-a", malleated, now) != relayauth.AdmissionRefused {
 		t.Fatal("a malleated copy of an admitted signature is the same request replayed and must be refused")
 	}
 }
@@ -163,10 +163,10 @@ func TestReplayGuard_SharedStoreRefusesAcrossInstances(t *testing.T) {
 	b := relayauth.NewReplayGuard(5 * time.Minute).WithShared(shared)
 	now := time.Unix(1_760_000_000, 0)
 
-	if !a.Admit("bank-a", "sig-1", now) {
+	if a.Admit("bank-a", "sig-1", now) == relayauth.AdmissionRefused {
 		t.Fatal("the first use must be admitted")
 	}
-	if b.Admit("bank-a", "sig-1", now) {
+	if b.Admit("bank-a", "sig-1", now) != relayauth.AdmissionRefused {
 		t.Fatal("the OTHER replica must refuse the same signature — that is the whole point of sharing")
 	}
 }
@@ -180,7 +180,7 @@ func TestReplayGuard_LocalReplayDoesNotConsultTheSharedStore(t *testing.T) {
 
 	g.Admit("bank-a", "sig-1", now)
 	before := shared.calls
-	if g.Admit("bank-a", "sig-1", now) {
+	if g.Admit("bank-a", "sig-1", now) != relayauth.AdmissionRefused {
 		t.Fatal("a locally known replay must be refused")
 	}
 	if shared.calls != before {
@@ -198,10 +198,10 @@ func TestReplayGuard_SharedStoreFailureFallsBackToLocal(t *testing.T) {
 	g := relayauth.NewReplayGuard(5 * time.Minute).WithShared(shared)
 	now := time.Unix(1_760_000_000, 0)
 
-	if !g.Admit("bank-a", "sig-1", now) {
+	if g.Admit("bank-a", "sig-1", now) == relayauth.AdmissionRefused {
 		t.Fatal("an unreachable shared store must not refuse verified traffic")
 	}
-	if g.Admit("bank-a", "sig-1", now) {
+	if g.Admit("bank-a", "sig-1", now) != relayauth.AdmissionRefused {
 		t.Fatal("the local guard must still refuse the replay while the shared store is down")
 	}
 }
@@ -235,7 +235,7 @@ func TestReplayGuard_NilIsDisabledRatherThanRefusing(t *testing.T) {
 	// A gateway wired without a guard must keep serving: an unconfigured replay cache is not a reason
 	// to reject verified traffic.
 	var g *relayauth.ReplayGuard
-	if !g.Admit("bank-a", "sig-1", time.Unix(1_760_000_000, 0)) {
+	if g.Admit("bank-a", "sig-1", time.Unix(1_760_000_000, 0)) == relayauth.AdmissionRefused {
 		t.Fatal("a nil guard must admit")
 	}
 }

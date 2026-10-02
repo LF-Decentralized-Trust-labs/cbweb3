@@ -269,12 +269,10 @@ func (h *StatementHandler) pvpDebitMovements(c *fiber.Ctx, callerBankID string) 
 		if !isHTLCSettled(l.State) {
 			continue
 		}
-		senderBank, err := bankIDFromIdentity(l.Sender)
-		if err != nil {
-			// Unparseable identity: skip rather than misattribute a movement.
-			continue
-		}
-		if senderBank != callerBankID {
+		// Membership is TESTED, not extracted: bankIDFromIdentity returns a wrong
+		// value with a nil error when the spoke id carries hyphens, which silently
+		// dropped every PvP debit from a spoke-costa-rica bank's own statement.
+		if !identityBelongsToBank(l.Sender, callerBankID) {
 			continue
 		}
 		movements = append(movements, Movement{

@@ -220,6 +220,8 @@ Also flag, in review, any change that weakens the gate itself: a counter moved b
 - Strict sovereignty (still the governing rule, now enforced at runtime): opening a corridor is two independent sovereign acts, each signed by its own CB — one proposes via the governance portal (proposePair), the counterparty confirms (confirmPair), then each commits its own liquidity. No run holds the counterparty key, so SeedNewSovereignPair.s.sol (needs both) is NOT reused (040-tk-b9-sovereign-pair)
 - Go 1.26 (toolkit e2e/perf tests) — no new Go deps; TK-B10 is a verification phase (tests + docs): a full-pipeline E2E (found-hub→found-spoke×2→join via apply.Apply; the corridor is opened separately at runtime) exercising swap/breaker/SpokeBridge, plus a toolkit-native Go perf baseline (p95 quote/swap) and E2E-STATUS.md; all skip-with-warning (041-tk-b10-e2e-baseline)
 - SpokeBridge reality: only lock(token,amount,txId) + release(txId) (GOVERNANCE) + getLock — no on-chain mint/burn/unlock/timeout; mint is relay-mediated, refund is release; AMM swap is swapTokensForExactTokens; breaker via pause/signResume (quorum 2)/isPaused (041-tk-b10-e2e-baseline)
+- Go 1.26+ (backend services + per-scenario `toolkit/`); TypeScript / React 18 + Fiber v2 (HTTP + `RequireRole` middleware), Keycloak OIDC (realm roles / JWT (042-admission-onboarding-profile)
+- Existing Postgres (`audit_log`, participant records). No schema change required; audit (042-admission-onboarding-profile)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components

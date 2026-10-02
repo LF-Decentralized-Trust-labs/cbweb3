@@ -216,19 +216,16 @@ export function displayToBase(displayAmount: string, decimals: number): string {
   return combined;
 }
 
-// formatAmountInput formats a numeric string with thousand-separator commas for display
-// inside an input field (e.g. "1000000.5" → "1,000,000.5").
-export function formatAmountInput(value: string): string {
-  if (!value) return "";
-  const [whole = "", frac] = value.split(".");
-  const formatted = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return frac !== undefined ? `${formatted}.${frac}` : formatted;
-}
-
-// parseAmountInput strips thousand-separator commas so the result can be passed to displayToBase.
-export function parseAmountInput(value: string): string {
-  return value.replace(/,/g, "");
-}
+// formatAmountInput and parseAmountInput were removed deliberately.
+//
+// They put comma thousands separators INTO the amount field and then stripped
+// every comma back out before conversion, which meant a pt-BR operator typing
+// "1000,10" had it read as 100010 — a hundredfold overstatement that reached
+// displayToBase with nothing in the path to catch it.
+//
+// Amounts now follow ISO 20022: dot decimal separator, no grouping, parsed by
+// parseAmount from @cbweb3/ui. Do not reintroduce a grouping formatter on an
+// input the operator edits.
 
 // formatCeBM converts a raw base-unit amount (wei) to a human-readable tCeBM string.
 // Pass the on-chain token symbol (from /token/balance) for the spoke's own tCeBM so the
@@ -250,18 +247,50 @@ export function formatFiatUnits(rawAmount: string, decimals: number, tokenSymbol
   return `${formatTokenAmount(rawAmount, decimals)} ${fiatCurrencyLabel(tokenSymbol)}`;
 }
 
-// formatTokenAmount converts a raw base-unit amount string to a display decimal string.
-export function formatTokenAmount(rawAmount: string, decimals: number): string {
-  if (!rawAmount || rawAmount === "0") return "0";
+// Money is displayed with exactly the minor units of the currency: two places for
+// BRL, ARS and COP (ISO 4217). The token itself holds 18 decimals, so this is a
+// presentation decision and nothing else — the value on the wire is untouched.
+export const CURRENCY_DISPLAY_DECIMALS = 2;
+
+// formatTokenAmount converts a raw base-unit amount to the string an operator reads.
+//
+// It TRUNCATES rather than rounds, so a balance is never shown as more than it is,
+// and a non-zero amount too small to appear at two places reads "< 0.01" instead of
+// "0" — showing a zero for money someone holds is the same class of defect as
+// showing the wrong figure.
+//
+// Do not use this to prefill an amount input. Truncating a value that becomes a
+// transaction changes the transaction; use baseToExactDisplay for that.
+export function formatTokenAmount(
+  rawAmount: string,
+  decimals: number,
+  displayDecimals: number = CURRENCY_DISPLAY_DECIMALS,
+): string {
+  if (!rawAmount || rawAmount === "0") return (0).toFixed(displayDecimals);
   try {
     const divisor = 10n ** BigInt(decimals);
     const value = BigInt(rawAmount);
     const whole = value / divisor;
-    const frac = (value % divisor).toString().padStart(decimals, "0").slice(0, 6).replace(/0+$/, "");
-    return frac
+    const frac = (value % divisor).toString().padStart(decimals, "0").slice(0, displayDecimals);
+    if (whole === 0n && BigInt(frac || "0") === 0n && value > 0n) {
+      return `< 0.${"0".repeat(Math.max(displayDecimals - 1, 0))}1`;
+    }
+    return displayDecimals > 0
       ? `${whole.toLocaleString("en-US")}.${frac}`
       : whole.toLocaleString("en-US");
   } catch {
     return rawAmount;
   }
+}
+
+// baseToExactDisplay renders a base-unit amount at full precision, for a value that
+// will be typed back into an amount field (a suggested maximum, a matched amount).
+// Trailing zeros are trimmed so the result is the shortest exact form.
+export function baseToExactDisplay(rawAmount: string, decimals: number): string {
+  if (!rawAmount || !/^\d+$/.test(rawAmount)) return "";
+  const divisor = 10n ** BigInt(decimals);
+  const value = BigInt(rawAmount);
+  const whole = value / divisor;
+  const frac = (value % divisor).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return frac ? `${whole}.${frac}` : whole.toString();
 }

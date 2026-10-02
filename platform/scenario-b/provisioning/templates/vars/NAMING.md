@@ -26,15 +26,31 @@ Entidades com índices distintos ⇒ offsets distintos ⇒ **sem colisão de por
 
 ## Nomes
 
-| Recurso | Padrão | Exemplo (`ENTITY=bank-a`) |
+| Recurso | Padrão | Exemplo (`metadata.name: central-bank-brazil`, `ENTITY=central-bank`) |
 |---|---|---|
-| container | `${CONTAINER_PREFIX}-${ENTITY}-<papel>` | `cbweb3-b-bank-a-besu` |
-| network | `${ENTITY_NET_PREFIX}_<rede>` | `bank_a_besu_network` |
-| volume | `${ENTITY_VOLUME_PREFIX}_<papel>` | `bank_a_besu_data` |
+| container | `${CONTAINER_PREFIX}-${ENTITY}-<papel>` | `sc-b-cbweb3-central-bank-brazil-central-bank-besu` |
+| network | `${ENTITY_NET_PREFIX}_<rede>` | `central-bank-brazil_besu_network` |
+| volume | `${ENTITY_VOLUME_PREFIX}_<papel>` | `central-bank-brazil_besu_data` |
+| alias de proxy | `${ENTITY_NET_PREFIX}-<papel>` | `central-bank-brazil-governance` |
 
-`ENTITY_VOLUME_PREFIX` e `ENTITY_NET_PREFIX` derivam de `ENTITY` (hífens → underscores) prefixados
-pelo spoke quando aplicável (`<spoke>_<entidade>`). Entidades distintas ⇒ prefixos distintos ⇒ sem
-colisão de nome de container/rede/volume.
+`ENTITY_NET_PREFIX` e `ENTITY_VOLUME_PREFIX` são **ambos** o `metadata.name` do manifesto passado
+por `sanitizePrefix` (`engine/apply/apply.go`): minúsculas, e **espaço, underscore e barra viram
+hífen**. Não há conversão para underscore em lado nenhum — o underscore que aparece nos exemplos
+acima é o separador literal que o próprio template escreve depois do prefixo (`..._net`,
+`..._besu_data`).
+
+`ENTITY` é o **papel** da entidade (`central-bank`, `hub`, ou o id do banco), não o nome do
+deployment. É por isso que o nome de container repete: prefixo (que já contém o nome) mais papel.
+
+`CONTAINER_PREFIX` é `sc-b-cbweb3-` + o mesmo prefixo saneado.
+
+Entidades com `metadata.name` distintos ⇒ prefixos distintos ⇒ sem colisão de container, rede ou
+volume.
+
+> **Limite de comprimento.** O alias de proxy é um rótulo DNS, que para em 63 octetos (RFC 1035).
+> Como ele deriva do `metadata.name`, o nome tem um teto — validado em
+> `engine/manifest` (`MaxMetadataNameLen`) e mantido em dia com o sufixo mais longo dos templates
+> por `TestMaxMetadataNameLenMatchesTheLongestAlias`.
 
 ## Papéis de volume (estado)
 

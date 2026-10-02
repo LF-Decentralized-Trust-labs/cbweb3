@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { complianceApi } from "../services/api";
 import type { ComplianceCredential } from "../types";
+import { apiErrorMessage } from "@cbweb3/ui";
 
 type ComplianceState = {
   credentials: ComplianceCredential[];
@@ -22,7 +23,7 @@ export const useComplianceStore = create<ComplianceState>((set) => ({
       const credentials = await complianceApi.getCredentials();
       set({ credentials, status: "idle" });
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to load credentials" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to load credentials") });
     }
   },
   attach: async (transactionId, credentialIds) => {
@@ -31,7 +32,7 @@ export const useComplianceStore = create<ComplianceState>((set) => ({
       await complianceApi.attachCredentials(transactionId, credentialIds);
       set({ status: "idle" });
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to attach credentials" });
+      set({ status: "error", error: apiErrorMessage(error, "Unable to attach credentials") });
     }
   },
 }));

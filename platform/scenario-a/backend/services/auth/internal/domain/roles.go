@@ -13,6 +13,10 @@ const (
 	RoleSupervisor        = "ROLE_SUPERVISOR"         // Password-only login
 	RoleNOC               = "ROLE_NOC"                // Password-only login
 	RoleGovernanceOfficer = "ROLE_GOVERNANCE_OFFICER" // Password-only login
+	// RoleAdmission owns commercial-bank onboarding management (spec 042).
+	// Password-only: intentionally absent from pkiRoles, onChainRoles and kmsRoles
+	// below, so it never gets a certificate, an on-chain registration or a KMS key.
+	RoleAdmission = "ROLE_ADMISSION" // Password-only login
 )
 
 // adminRoles is the set of roles created/managed by the Central Bank.

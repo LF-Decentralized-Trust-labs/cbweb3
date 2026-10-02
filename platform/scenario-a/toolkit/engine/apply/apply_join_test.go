@@ -29,8 +29,11 @@ func TestApply_DryRun_JoinMode(t *testing.T) {
 	if len(result.Steps) != len(orchestrator.CanonicalJoinStepOrder) {
 		t.Errorf("got %d steps, want %d (join order)", len(result.Steps), len(orchestrator.CanonicalJoinStepOrder))
 	}
-	if len(result.Steps) > 0 && result.Steps[0].Name != orchestrator.StepWriteGenesis {
-		t.Errorf("first step = %q, want %q", result.Steps[0].Name, orchestrator.StepWriteGenesis)
+	// check-relay runs first on purpose: a bank that cannot reach the relay settles nothing,
+	// and failing there costs seconds rather than a full Besu + Paladin + backend bring-up
+	// followed by silence.
+	if len(result.Steps) > 0 && result.Steps[0].Name != orchestrator.StepCheckRelay {
+		t.Errorf("first step = %q, want %q", result.Steps[0].Name, orchestrator.StepCheckRelay)
 	}
 	// No side effects: dataDir must contain no state file.
 	if _, err := os.Stat(filepath.Join(dataDir, ".provisioning-state.yaml")); !os.IsNotExist(err) {

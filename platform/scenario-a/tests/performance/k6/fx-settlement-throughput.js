@@ -88,8 +88,10 @@ const CUSTODIAN_TOKEN = __ENV.CUSTODIAN_TOKEN || "";
 
 const ORIGIN_RECEIVER = __ENV.ORIGIN_RECEIVER || "funded_operator@spoke-a-bank-c";
 const BENEFICIARY = __ENV.BENEFICIARY || "funded_operator@spoke-b-bank-b";
-const ORIGIN_AMOUNT = __ENV.ORIGIN_AMOUNT || "100000";
-const COUNTER_AMOUNT = __ENV.COUNTER_AMOUNT || "520000";
+// Base units (hundredths, ADR-009), not currency figures. 100.00 and 520.00 keep the
+// 5.2 rate.
+const ORIGIN_AMOUNT = __ENV.ORIGIN_AMOUNT || "10000";   // 100.00
+const COUNTER_AMOUNT = __ENV.COUNTER_AMOUNT || "52000"; // 520.00
 const FX_RATE = __ENV.RATE || "5.2";
 
 const HAPPY_VUS = Number(__ENV.HAPPY_VUS || 1);

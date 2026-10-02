@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -164,6 +165,24 @@ func Validate(m *Manifest) error {
 			))
 		}
 
+		// spec.relay.endpoint — required when mode is "found". The founding central bank's
+		// endpoint is copied into the join bundle, and every bank that joins the spoke points
+		// its payment-orchestrator at it (CACTI_API_URL). That subscription is what delivers a
+		// counterpart lock and a revealed secret to the entity that actually holds the leg — the
+		// relay cannot call it, because an HTLC leg is settled by transferLocked on its owner's
+		// own Paladin node. Omitting this produced a bundle with no relay section and a bank
+		// that fell back to http://host.docker.internal:4000: non-empty, so no startup check
+		// fired, and on a separate host simply nothing to talk to. The bank then never learns of
+		// a lock or a settlement, and says nothing about it.
+		if m.Spec.Mode == "found" && (m.Spec.Relay == nil || m.Spec.Relay.Endpoint == "") {
+			errs = append(errs, errors.New(
+				"spec.relay.endpoint: required field is missing for mode:found; "+
+					"set it to the relay this spoke registers with and that its banks poll "+
+					"(e.g. http://localhost:4000 co-located, or http://<relay-host>:4000). "+
+					"A joining bank inherits it from the emitted bundle",
+			))
+		}
+
 		// spec.image
 		if m.Spec.Image == "" {
 			errs = append(errs, errors.New("spec.image: required field is missing"))
@@ -283,15 +302,35 @@ func validateNOC(m *Manifest) []error {
 			errs = append(errs, fmt.Errorf("spec.noc.components[%d]: invalid value %q; accepted values are: %s", i, c, strings.Join(nocComponentTypes, ", ")))
 		}
 	}
+	// Each portal origin has to be a plain scheme://host[:port]. Checked here because the
+	// only other thing that rejects a bad value is the backend itself: Fiber PANICS on
+	// AllowCredentials with a wildcard origin, so "*" written here presents as a container
+	// that crash-loops after the whole stack has been provisioned. A manifest error is the
+	// same refusal, before anything is deployed.
+	for i, o := range m.Spec.NOC.PortalOrigins {
+		if !browserOrigin.MatchString(o) {
+			errs = append(errs, fmt.Errorf("spec.noc.portalOrigins[%d]: invalid value %q; must be a plain "+
+				"scheme://host[:port] with no path, trailing slash or wildcard", i, o))
+		}
+	}
 	return errs
 }
+
+// browserOrigin is the only shape a browser origin may take: scheme, host, optional port,
+// nothing else. A wildcard cannot carry credentials and a path is not part of an origin, so
+// both are refused rather than passed to the backend to discover.
+var browserOrigin = regexp.MustCompile(`^https?://[A-Za-z0-9._-]+(:[0-9]{1,5})?$`)
 
 // requiredAdminRolesByEntity lists the Keycloak realm roles an entity must
 // provision an admin user for, keyed on spec.role. It mirrors the realms/clients
 // the engine provisions: a central bank hosts governance + treasury + the shared
 // NOC realm; a commercial bank hosts its bank realm.
+// ROLE_ADMISSION (spec 042) is required for a central bank only: it owns the mutating
+// commercial-bank onboarding actions, and only a central bank onboards commercial banks.
+// A commercial bank is not an onboarding authority, so it stays exempt — requiring it
+// there would break provisioning of those entities.
 var requiredAdminRolesByEntity = map[string][]string{
-	"central-bank":    {"ROLE_GOVERNANCE", "ROLE_TREASURY", "ROLE_SUPERVISOR", "ROLE_NOC_ADMIN"},
+	"central-bank":    {"ROLE_GOVERNANCE", "ROLE_TREASURY", "ROLE_SUPERVISOR", "ROLE_NOC_ADMIN", "ROLE_ADMISSION"},
 	"commercial-bank": {"ROLE_BANK"},
 }
 

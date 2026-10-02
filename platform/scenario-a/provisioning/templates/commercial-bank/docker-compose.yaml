@@ -33,12 +33,24 @@
 #   BESU_HOST_ALLOWLIST   Comma-separated host allowlist for RPC (default: '*')
 #   BESU_CORS_ORIGINS     CORS origins for RPC HTTP (default: 'all')
 
+# Container log rotation, applied to every service in this file.
+#
+# Without it Docker's json-file driver has no size cap and no rotation: the
+# Scenario A Paladin containers reached 96 GB (~2.4 GB/day) and a full disk takes
+# the whole network down. 50m x 5 caps each service at 250 MB.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
 
   # ─── Besu node (commercial-bank / joiner) ──────────────────────────────────
   # No genesis-init: the genesis.json is written from the join bundle by TK-9
   # (step_write_genesis.go) directly into the genesis named volume below.
   besu:
+    logging: *cbweb3_logging
     image: ${BESU_IMAGE?BESU_IMAGE is required (e.g. hyperledger/besu:25.8.0)}
     container_name: ${BESU_CONTAINER_NAME:-cbweb3-${SPOKE_ID}-besu.${BANK_ID}}
     restart: always

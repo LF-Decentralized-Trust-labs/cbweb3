@@ -17,6 +17,9 @@ plano de implementação, esforço/cronograma e tabela de Status / Sign-off.
 | [ADR-006](ADR-006-isolamento-de-rede-do-hub.md) | Isolamento de rede do hub do Scenario B | R1-11.4 | Aceito e implementado |
 | [ADR-007](ADR-007-rebase-de-chain-ids.md) | Rebase dos chain IDs (80000+ → 1337+) | R1-11.4 | Aceito; coordenação LNET pendente |
 | [ADR-008](ADR-008-sessao-por-cookie-nos-portais.md) | Sessão por cookie HttpOnly nos portais | R1-11.4 | Aceito e implementado |
+| [ADR-009](ADR-009-unidade-de-valor-no-scenario-a.md) | Unidade de valor no Scenario A (camada de decimais) | — | **Aceito (2026-09-09)** — Opção A; implementação em curso |
+| [ADR-010](ADR-010-replay-degradado-em-controlo-de-conformidade.md) | Repetição degradada num controlo de conformidade (`transfer-limits/restore`) | — | **Aceito (2026-09-10)** — Opção B; implementado |
+| [ADR-011](ADR-011-login-administrativo-no-hub.md) | Login administrativo no hub do Scenario B | — | **Aceito (2026-09-10)** — implementado |
 
 > **ADR-005 é bloqueante para a Wave 3.** T-P1-15 (A-ARCH-1) gate T-P1-16 e T-P1-19.
 > O documento `docs/scenario-a-n-spoke-scalability-plan.md` é um plano de design

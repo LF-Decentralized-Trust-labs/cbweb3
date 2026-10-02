@@ -8,10 +8,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -170,11 +170,12 @@ func (s *paymentOrchestratorService) isLocalReceiver(receiver string) bool {
 	if s.spokePrefix == "" {
 		return true // no spoke configured — skip validation (dev mode)
 	}
-	receiverSpoke := identity.SpokePrefix(receiver)
-	if receiverSpoke == "" {
-		return false // unknown format — reject in production (fail closed)
-	}
-	return receiverSpoke == s.spokePrefix
+	// Membership is TESTED, not extracted — the same rule as BelongsToBank, and for
+	// the same reason. Comparing SpokePrefix(receiver) against s.spokePrefix only
+	// ever worked because BOTH sides were the same wrong guess; reading the local
+	// side from SPOKE_ID made it right and the two stopped agreeing, so a bank could
+	// not lock to its own neighbour on a hyphenated spoke. See BelongsToSpoke.
+	return identity.BelongsToSpoke(receiver, s.spokePrefix)
 }
 
 // loadHTLCsFromDB pre-populates the in-memory HTLC cache from the database.
@@ -287,13 +288,6 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 	s.logger.Info("locking Zeto tokens", "receiver", req.Receiver, "agreement_id", req.AgreementId)
 	lockResult, err := s.zeto.Lock(ctx, req.Amount, req.Receiver)
 	if err != nil {
-		// FailedPrecondition, not Internal: the request was well-formed and the service is
-		// healthy — this attempt merely drew a state id this Paladin build cannot spend.
-		// The remedy is to retry, and the code has to say so, because a client cannot act
-		// on advice that exists only in the message text.
-		if errors.Is(err, ports.ErrUnsettleableLock) {
-			return nil, status.Errorf(codes.FailedPrecondition, "zeto lock: %v", err)
-		}
 		return nil, status.Errorf(codes.Internal, "zeto lock: %v", err)
 	}
 
@@ -430,13 +424,6 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 	s.logger.Info("locking Zeto tokens (with external hashLock)", "receiver", req.Receiver, "agreement_id", req.AgreementId)
 	lockResult, err := s.zeto.Lock(ctx, req.Amount, req.Receiver)
 	if err != nil {
-		// FailedPrecondition, not Internal: the request was well-formed and the service is
-		// healthy — this attempt merely drew a state id this Paladin build cannot spend.
-		// The remedy is to retry, and the code has to say so, because a client cannot act
-		// on advice that exists only in the message text.
-		if errors.Is(err, ports.ErrUnsettleableLock) {
-			return nil, status.Errorf(codes.FailedPrecondition, "zeto lock: %v", err)
-		}
 		return nil, status.Errorf(codes.Internal, "zeto lock: %v", err)
 	}
 
@@ -699,7 +686,14 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 	// Best-effort: report the settled leg to the Central Bank so the receiving
 	// bank sees the incoming credit (its own orchestrator holds no record of the
 	// leg). Failures are logged and never undo the settlement.
-	s.reportSettledLeg(record)
+	//
+	// Off the response path on purpose. This used to be a synchronous call, which
+	// was harmless only because the reporter was never constructed — the env var it
+	// looked for was set nowhere. Now that it is wired and retries, a central bank
+	// that is down would have added its whole retry window to every settle
+	// response. Settlement is already final at this point; the report is a
+	// notification about it, so the caller must not wait for it.
+	go s.reportSettledLeg(record)
 
 	return &pb.SettleHTLCResponse{
 		HtlcTxHash: htlcTxHash,
@@ -724,8 +718,15 @@ func (s *paymentOrchestratorService) reportSettledLeg(record *domain.HTLCRecord)
 		SettledAt:  record.UpdatedAt,
 	}
 	if err := s.settlementReporter.ReportSettledLeg(context.Background(), leg); err != nil {
-		s.logger.Warn("failed to report settled PvP leg to central bank",
-			"contract_id", record.ContractID, "trade_id", record.AgreementID, "error", err)
+		// ERROR, not Warn: after the bounded retries are exhausted this movement
+		// exists on-chain and in no ledger, and the receiving bank's statement will
+		// never show it. Every field needed to replay the report by hand is here,
+		// because there is no queue that will do it later.
+		s.logger.Error("settled PvP leg NOT recorded at the central bank — the receiving bank will not see this credit",
+			"contract_id", record.ContractID, "trade_id", record.AgreementID,
+			"sender", record.Sender, "receiver", record.Receiver,
+			"amount", record.Amount, "settled_at", record.UpdatedAt.UTC().Format(time.RFC3339),
+			"error", err)
 	}
 }
 
@@ -872,15 +873,11 @@ func (s *paymentOrchestratorService) SearchHTLC(ctx context.Context, req *pb.Sea
 		// When the caller provides their BankID, only return records their institution is party to.
 		// Use exact segment matching to prevent prefix-collision false positives.
 		if callerIdentity != "" {
-			senderBank, sErr := identity.BankID(r.Sender)
-			receiverBank, rErr := identity.BankID(r.Receiver)
-			if sErr != nil {
-				s.logger.Warn("SearchHTLC: unparseable sender identity — excluding record", "sender", r.Sender, "error", sErr)
-			}
-			if rErr != nil {
-				s.logger.Warn("SearchHTLC: unparseable receiver identity — excluding record", "receiver", r.Receiver, "error", rErr)
-			}
-			if senderBank != callerIdentity && receiverBank != callerIdentity {
+			// Membership is TESTED, not extracted: a spoke id may contain hyphens
+			// ("spoke-costa-rica"), so no split recovers the bank id. See
+			// identity.BelongsToBank.
+			if !identity.BelongsToBank(r.Sender, callerIdentity) &&
+				!identity.BelongsToBank(r.Receiver, callerIdentity) {
 				continue
 			}
 		}
@@ -919,21 +916,16 @@ func (s *paymentOrchestratorService) checkHTLCCounterparty(ctx context.Context, 
 	if callerBankID == "" {
 		return nil
 	}
-	senderBank, sErr := identity.BankID(sender)
-	receiverBank, rErr := identity.BankID(receiver)
-	if sErr != nil {
-		s.logger.Warn("checkHTLCCounterparty: unparseable sender identity", "sender", sender, "error", sErr)
-	}
-	if rErr != nil {
-		s.logger.Warn("checkHTLCCounterparty: unparseable receiver identity", "receiver", receiver, "error", rErr)
-	}
-	if senderBank == callerBankID || receiverBank == callerBankID {
+	if identity.BelongsToBank(sender, callerBankID) || identity.BelongsToBank(receiver, callerBankID) {
 		return nil
 	}
 	// Structured audit log for a compliance-relevant authorization decision
 	// (Constitution Principle VI): a denial must never be swallowed silently.
+	// The raw identities are logged rather than a parsed bank id: the parse is what
+	// was wrong, and an audit line that repeats the parser's mistake describes a
+	// decision that was never made on those values.
 	s.logger.Warn("authorization denied: caller is not a counterparty of HTLC",
-		"caller", callerBankID, "sender_bank", senderBank, "receiver_bank", receiverBank)
+		"caller", callerBankID, "sender", sender, "receiver", receiver)
 	return status.Errorf(codes.PermissionDenied, "caller is not a counterparty of this HTLC")
 }
 
@@ -954,21 +946,15 @@ func (s *paymentOrchestratorService) checkFXParty(ctx context.Context, record *d
 	// bare bank ids ("bank-a"); accept a match against either form. A parse failure
 	// is logged but is not by itself fatal — the raw-value comparison still applies,
 	// and a caller that matches neither form is denied (fail closed).
-	originatorBank, oErr := identity.BankID(record.Originator)
-	counterpartyBank, cErr := identity.BankID(record.CounterpartyB)
-	if oErr != nil {
-		s.logger.Warn("checkFXParty: unparseable originator identity", "originator", record.Originator, "error", oErr)
-	}
-	if cErr != nil {
-		s.logger.Warn("checkFXParty: unparseable counterparty identity", "counterparty_b", record.CounterpartyB, "error", cErr)
-	}
-	if callerBankID == originatorBank || callerBankID == counterpartyBank ||
-		callerBankID == record.Originator || callerBankID == record.CounterpartyB {
+	// BelongsToBank also accepts the bare-bank-id form, so the previous raw
+	// equality fallbacks are covered by the same call.
+	if identity.BelongsToBank(record.Originator, callerBankID) ||
+		identity.BelongsToBank(record.CounterpartyB, callerBankID) {
 		return nil
 	}
 	s.logger.Warn("authorization denied: caller is not a party to FX agreement",
 		"action", action, "trade_id", record.TradeID, "caller", callerBankID,
-		"originator_bank", originatorBank, "counterparty_bank", counterpartyBank)
+		"originator", record.Originator, "counterparty_b", record.CounterpartyB)
 	return status.Errorf(codes.PermissionDenied, "caller is not a party to this FX agreement")
 }
 
@@ -1027,13 +1013,43 @@ func (s *paymentOrchestratorService) TransferToken(ctx context.Context, req *pb.
 	return &pb.TransferTokenResponse{TxHash: txHash}, nil
 }
 
+// amountScaleDecimals is the scale of every amount this scenario handles: an integer
+// amount means hundredths, i.e. the minor unit of the currencies in the pilot (ADR-009).
+//
+// It is a convention, not a contract read, and it is bounded by measurement rather than
+// taste. tCeBM is a Zeto note, and the Zeto LOCK circuit refuses any note value at or
+// above 2^64 — measured on a live stack: 2^64-1 locks, 2^64 hangs. The mint circuit is
+// far wider (2^100-1), which is what made an earlier reading of this conclude that a
+// 10^-18 scale was viable. It is not: at 18 decimals the largest lockable amount would
+// be 18.45 currency units. At hundredths the ceiling is ~1.8e17 units, which is room
+// enough that no pilot will meet it.
+//
+// fCeBM's ERC-20 contract declares 18 decimals, and the application deliberately does
+// NOT use them: it treats the integer as hundredths for both tokens, so tokenisation
+// stays 1:1 and an FX leg keeps matching the HTLC leg that settles it. The unused
+// precision on the ERC-20 side is harmless; a mismatch in the other direction would not
+// be, which is what checkFiatScale below guards.
+const (
+	amountScaleDecimals = 2
+	tCeBMSymbol         = "tCeBM"
+)
+
 func (s *paymentOrchestratorService) GetBalance(ctx context.Context, _ *pb.GetBalanceRequest) (*pb.GetBalanceResponse, error) {
 	balance, err := s.zeto.Balance(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "zeto balance: %v", err)
 	}
 
-	return &pb.GetBalanceResponse{Balance: balance}, nil
+	// tCeBM is a Zeto note, not an ERC-20: a note holds a bare integer and there is no
+	// decimals() to read. The scale is the convention fixed in ADR-009 — one note unit
+	// is 10^-18 tCeBM, matching fCeBM so tokenisation stays 1:1 and an HTLC leg keeps
+	// matching its FX leg. Measured ceiling for a note is 2^100-1, which leaves about
+	// 1.27 trillion tCeBM in a single note at this scale.
+	return &pb.GetBalanceResponse{
+		Balance:  balance,
+		Decimals: amountScaleDecimals,
+		Symbol:   tCeBMSymbol,
+	}, nil
 }
 
 func (s *paymentOrchestratorService) GetFiatBalance(ctx context.Context, _ *pb.GetFiatBalanceRequest) (*pb.GetFiatBalanceResponse, error) {
@@ -1046,10 +1062,47 @@ func (s *paymentOrchestratorService) GetFiatBalance(ctx context.Context, _ *pb.G
 		return nil, status.Errorf(codes.Internal, "fiat balance: %v", err)
 	}
 
-	return &pb.GetFiatBalanceResponse{Balance: balance}, nil
+	// The contract's own decimals are read only to catch a token that cannot represent
+	// the scale the application uses. They are NOT what is reported: the application
+	// scale is hundredths for both tokens, bounded by the Zeto lock circuit.
+	if contractDecimals, err := s.fiat.Decimals(ctx); err != nil {
+		s.logger.Warn("fCeBM decimals read failed; cannot verify the token represents hundredths", "error", err)
+	} else if contractDecimals < amountScaleDecimals {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"fCeBM declares %d decimals, fewer than the %d the application uses",
+			contractDecimals, amountScaleDecimals)
+	}
+
+	// The symbol names the currency in the UI but is not needed to read the balance
+	// correctly, so a failure here must not fail the call — clients fall back to their
+	// configured fiat symbol. The decimals above are different: without them the client
+	// cannot render the number at all, so that error does propagate.
+	symbol, err := s.fiat.Symbol(ctx)
+	if err != nil {
+		s.logger.Warn("fCeBM symbol read failed; returning balance without symbol", "error", err)
+		symbol = ""
+	}
+
+	return &pb.GetFiatBalanceResponse{
+		Balance:  balance,
+		Decimals: amountScaleDecimals,
+		Symbol:   symbol,
+	}, nil
 }
 
 // --- FX Agreement Operations ---
+
+// decimalString is the only shape a rate may take. big.Rat.SetString on its own
+// also accepts 0x10, 1_000, 1e3 and 1/3 — forms nobody means as money, and not
+// something a settlement path should accept just because a client bypassed the
+// portal.
+var decimalString = regexp.MustCompile(`^\d+(\.\d+)?$`)
+
+// integerString is the canonical wire form of an amount. big.Int.SetString(s, 10)
+// is narrower than big.Rat but still takes a sign ("+5" is 5), so the boundary
+// applies this first: everything it accepts, the converter accepts, and there is
+// exactly one way to write a given amount.
+var integerString = regexp.MustCompile(`^\d+$`)
 
 func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req *pb.ProposeFXAgreementRequest) (*pb.ProposeFXAgreementResponse, error) {
 	if req.CounterpartyB == "" || req.OriginAmount == "" || req.CounterAmount == "" ||
@@ -1078,13 +1131,38 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 	if req.SourceSpokeId == req.DestSpokeId {
 		return nil, status.Error(codes.InvalidArgument, "source_spoke_id and dest_spoke_id must be different")
 	}
-	originRat, ok := new(big.Rat).SetString(req.OriginAmount)
-	if !ok || originRat.Sign() <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "origin_amount must be a positive decimal")
+	// Amounts are base-unit integers, because that is what the on-chain
+	// FXAgreement.propose takes (uint256) and what buildFXProposalParams below
+	// converts with big.Int.SetString(s, 10).
+	//
+	// This used to validate with big.Rat, which is a strictly wider parser, and
+	// the gap was not theoretical: "1000.10" passed here and was then refused
+	// ~110 lines later by the converter, surfacing to the operator as
+	// "invalid FX proposal params: invalid origin_amount: 1000.10" — a message
+	// that names neither the field's real contract nor the layer that rejected
+	// it. Parsing exactly what the converter parses is what keeps the refusal
+	// at the boundary, where it can be explained.
+	//
+	// big.Rat also accepted "0x10" (16), "1_000", "1e3" and "1/3". Those died
+	// at the converter too, so nothing reached a settlement path, but the API
+	// should not be depending on a second parser 110 lines away to refuse a hex
+	// literal in a money field.
+	originInt, ok := new(big.Int).SetString(req.OriginAmount, 10)
+	if !integerString.MatchString(req.OriginAmount) || !ok || originInt.Sign() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "origin_amount must be a positive integer in base units, with no decimal separator")
 	}
-	counterRat, ok := new(big.Rat).SetString(req.CounterAmount)
-	if !ok || counterRat.Sign() <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "counter_amount must be a positive decimal")
+	counterInt, ok := new(big.Int).SetString(req.CounterAmount, 10)
+	if !integerString.MatchString(req.CounterAmount) || !ok || counterInt.Sign() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "counter_amount must be a positive integer in base units, with no decimal separator")
+	}
+	originRat := new(big.Rat).SetInt(originInt)
+	counterRat := new(big.Rat).SetInt(counterInt)
+
+	// The rate genuinely is a decimal ("660.000000"), so big.Rat is the right
+	// parser — but only after the shape is checked, for the same reason as
+	// above: on its own it would take "0x10" as a rate of 16.
+	if !decimalString.MatchString(req.Rate) {
+		return nil, status.Error(codes.InvalidArgument, "rate must be a positive decimal")
 	}
 	rateRat, ok := new(big.Rat).SetString(req.Rate)
 	if !ok || rateRat.Sign() <= 0 {
@@ -1118,12 +1196,7 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 			// The originator may arrive as a full Paladin identity
 			// ("op@spoke-a-bank-a") or as a bare bank id ("bank-a"); accept either
 			// form as long as it resolves to the authenticated caller's bank.
-			originatorBank, perr := identity.BankID(req.Originator)
-			mismatch := originatorBank != callerBankID
-			if perr != nil {
-				mismatch = req.Originator != callerBankID
-			}
-			if mismatch {
+			if !identity.BelongsToBank(req.Originator, callerBankID) {
 				s.logger.Warn("authorization denied: propose originator does not match authenticated caller",
 					"trade_id", tradeID, "caller", callerBankID, "originator", req.Originator)
 				return nil, status.Error(codes.PermissionDenied, "originator must match the authenticated caller")
@@ -1250,8 +1323,11 @@ func (s *paymentOrchestratorService) AcceptFXAgreement(ctx context.Context, req 
 	if !req.OnBehalf {
 		callerBankID := callerIdentityFromContext(ctx)
 		if callerBankID != "" {
-			originatorBank, parseErr := identity.BankID(record.Originator)
-			if parseErr == nil && originatorBank == callerBankID {
+			// Previously this used identity.BankID and skipped the check on a parse
+			// error. It never errored on a multi-segment spoke id — it returned a
+			// WRONG id with a nil error, so the comparison silently failed and the
+			// originator could accept its own agreement. Observed on spoke-costa-rica.
+			if identity.BelongsToBank(record.Originator, callerBankID) {
 				return nil, status.Error(codes.PermissionDenied, "originator cannot accept their own FX agreement — only the counterparty may accept")
 			}
 		}
@@ -1325,8 +1401,7 @@ func (s *paymentOrchestratorService) RejectFXAgreement(ctx context.Context, req 
 	if !req.OnBehalf {
 		callerBankID := callerIdentityFromContext(ctx)
 		if callerBankID != "" {
-			originatorBank, parseErr := identity.BankID(record.Originator)
-			if parseErr == nil && originatorBank == callerBankID {
+			if identity.BelongsToBank(record.Originator, callerBankID) {
 				return nil, status.Error(codes.PermissionDenied, "originator cannot reject their own FX agreement — use cancel to withdraw a proposal")
 			}
 		}
@@ -1825,6 +1900,14 @@ func (s *paymentOrchestratorService) validateHTLCTermsAgainstAgreement(
 // to their EVM addresses using ptx_resolveVerifier. Fields that are already 0x-prefixed
 // addresses are left unchanged. This allows callers (and the frontend) to use Paladin
 // identities (e.g. "funded_operator@spoke-a-bank-c") for all party fields.
+//
+// NOT WIRED INTO ProposeFXAgreement — only tests call it, and wiring it as written would break
+// every cross-spoke propose. Paladin's registry is per-node, so resolving a remote counterparty
+// returns PD012100 and `resolve` turns that into a hard error, rejecting the proposal. Party
+// addresses are instead derived by partyAddress() and resolved per-group at submission time by
+// PenteClient.resolvePartyAddr. Kept because federated resolution (the gateway already federates
+// the identity roster over the relay) is the shape a correct fix would take; do not enable it
+// without that.
 func resolveFXPartyAddresses(ctx context.Context, req *pb.ProposeFXAgreementRequest, zeto ports.ZetoOperator) (*pb.ProposeFXAgreementRequest, error) {
 	if zeto == nil {
 		return req, nil // no Paladin configured — pass through (dev/test mode)
@@ -1937,14 +2020,31 @@ func buildFXProposalParams(tradeID string, req *pb.ProposeFXAgreementRequest) (p
 // in this group's EVM, so a deterministic non-zero address is derived from it (sha256[12:]) so
 // propose validations pass (counterpartyB != 0) and the identity stays recoverable. The Paladin
 // identity remains the source of truth in the service/relay layer.
+//
+// The "is it already an address?" test MUST be common.IsHexAddress, NOT a zero-address check on
+// the parsed value. common.HexToAddress is lenient: given a non-address string it left-pads an
+// odd length, decodes as far as the first non-hex byte and returns whatever it got. Every
+// odd-length identity therefore decodes the leading "0f" of "0funded_operator@..." and comes back
+// as the same NON-zero garbage address 0x00...000F, which the old check accepted as real. On the
+// LNET roster that collapsed 4 of 9 identities onto one address — including two central banks,
+// spoke-costa-rica-cb (35 chars) and spoke-peru-cb (29) — making the settlement agents of an FX
+// agreement indistinguishable from each other and from spoke-chile-cb3/cb4 in the originator's
+// immutable record. Identities of even length were unaffected, which is why this stayed hidden.
+//
+// This is the same leniency that made HTLC locks revert with HTLC__ParticipantNotVerified; see the
+// note on the same predicate in adapters/besu/client.go Lock.
+//
+// The derived address is still a placeholder that belongs to nobody: it only has to be non-zero
+// and distinct per identity. It is the counterparty's OWN group that holds the resolvable address
+// authorization is checked against (see resolvePartyAddr in adapters/paladin/pente_client.go).
 // TODO(035): confirm on-chain party-address semantics for cross-spoke parties against a live deploy.
 func partyAddress(v string) common.Address {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return common.Address{}
 	}
-	if a := common.HexToAddress(v); a != (common.Address{}) {
-		return a
+	if common.IsHexAddress(v) {
+		return common.HexToAddress(v)
 	}
 	h := sha256.Sum256([]byte(v))
 	return common.BytesToAddress(h[12:])

@@ -25,16 +25,31 @@ type fakeResidueRetryRepo struct {
 	posIDs   map[string]string
 	attempts map[string]int
 	nextAt   map[string]*time.Time
+	// deferredSince is when the current deferral window opened, and deferrals counts how many
+	// times a row was put off. The window is what bounds an indefinite governance pause.
+	deferredSince map[string]time.Time
+	deferrals     map[string]int
 }
 
 func newFakeResidueRetryRepo(ops ...domain.CrossCurrencySwapOperation) *fakeResidueRetryRepo {
-	return &fakeResidueRetryRepo{
-		pending:  ops,
-		statuses: map[string]domain.ResidueReturnStatus{},
-		posIDs:   map[string]string{},
-		attempts: map[string]int{},
-		nextAt:   map[string]*time.Time{},
+	f := &fakeResidueRetryRepo{
+		pending:       ops,
+		statuses:      map[string]domain.ResidueReturnStatus{},
+		posIDs:        map[string]string{},
+		attempts:      map[string]int{},
+		nextAt:        map[string]*time.Time{},
+		deferredSince: map[string]time.Time{},
+		deferrals:     map[string]int{},
 	}
+	// These maps stand in for columns, so a seeded row's existing deferral window has to be
+	// visible here too — otherwise the fake's "first stamp wins" has nothing to compare against
+	// and it would overwrite a stamp the repository's COALESCE keeps.
+	for _, op := range ops {
+		if op.ResidueDeferredSince != nil {
+			f.deferredSince[op.SwapID] = *op.ResidueDeferredSince
+		}
+	}
+	return f
 }
 
 // ClaimNextRetryableResidue hands out one seeded row per call and then reports nothing due,
@@ -62,6 +77,20 @@ func (f *fakeResidueRetryRepo) UpdateResidue(_ context.Context, swapID, _, posit
 func (f *fakeResidueRetryRepo) RecordResidueAttempt(_ context.Context, swapID string, attempts int, nextAttemptAt *time.Time) error {
 	f.attempts[swapID] = attempts
 	f.nextAt[swapID] = nextAttemptAt
+	// A real attempt ends any deferral window, exactly as the repository does.
+	delete(f.deferredSince, swapID)
+	return nil
+}
+
+func (f *fakeResidueRetryRepo) DeferResidue(_ context.Context, swapID string, nextAttemptAt, deferredSince time.Time) error {
+	f.deferrals[swapID]++
+	next := nextAttemptAt
+	f.nextAt[swapID] = &next
+	// First stamp wins, mirroring the COALESCE in the repository: the bound measures the whole
+	// pause, not the time since the most recent sweep looked at it.
+	if _, already := f.deferredSince[swapID]; !already {
+		f.deferredSince[swapID] = deferredSince
+	}
 	return nil
 }
 
@@ -310,8 +339,11 @@ func TestRetryFailedResidueReturns_DefersWhileThePoolIsHalted(t *testing.T) {
 	if attempted != 0 || recovered != 0 {
 		t.Fatalf("a deferral is not an attempt, got %d/%d", attempted, recovered)
 	}
-	if repo.attempts["swap-halted"] != 2 {
-		t.Fatalf("attempts = %d, want the counter untouched at 2", repo.attempts["swap-halted"])
+	if _, written := repo.attempts["swap-halted"]; written {
+		t.Fatalf("a deferral must not write the attempt counter at all — it did, at %d", repo.attempts["swap-halted"])
+	}
+	if repo.deferrals["swap-halted"] != 1 {
+		t.Fatalf("deferrals = %d, want 1", repo.deferrals["swap-halted"])
 	}
 	if next := repo.nextAt["swap-halted"]; next == nil || !next.After(now) {
 		t.Fatalf("expected the row to be rescheduled for later, got %v", next)
@@ -410,5 +442,120 @@ func TestRetryFailedResidueReturns_ClaimsWithACurrentTimestamp(t *testing.T) {
 				"the lease it writes is already expired, so a long sweep hands its remaining "+
 				"rows to another sweeper", i, at.UTC(), sweepStart.UTC())
 		}
+	}
+}
+
+// --- bounding an indefinite pause ---
+//
+// Deferring while a pair is halted is right, and not consuming an attempt for it is right, but
+// together they had no end: the delay was computed from a counter that deferring never advances,
+// so it never grew, and nothing ever escalated. A pair left paused — a governance decision that
+// can outlast an incident by days — held the payer's unspent reserve on the issuing CB's Hub
+// address forever, with a log line as the only trace. The refund is the one thing in this path
+// that a pause must not silently swallow: the payer is over-debited until it lands.
+
+func haltedSwapDeferredSince(swapID string, attempts int, since *time.Time) domain.CrossCurrencySwapOperation {
+	op := failedResidueSwap(swapID, attempts)
+	op.ResidueDeferredSince = since
+	return op
+}
+
+func TestRetryFailedResidueReturns_StampsWhenTheDeferralBegan(t *testing.T) {
+	repo := newFakeResidueRetryRepo(haltedSwapDeferredSince("swap-first-defer", 1, nil))
+	relay := &retryResidueRelay{position: "should-not-happen"}
+	orch := retryOrchestratorWithBreaker(relay, haltedBreaker{halted: true})
+	now := time.Now()
+
+	orch.RetryFailedResidueReturns(context.Background(), repo, now, 10)
+
+	if relay.calls != 0 {
+		t.Fatal("must not dispatch a refund while the pool is halted")
+	}
+	// Without a start timestamp there is nothing to measure the pause against, so the first
+	// deferral has to record one.
+	got, ok := repo.deferredSince["swap-first-defer"]
+	if !ok {
+		t.Fatal("the first deferral did not record when the pause started — the bound has nothing to measure")
+	}
+	if !got.Equal(now) {
+		t.Fatalf("deferredSince = %v, want the sweep's now (%v)", got, now)
+	}
+	if s, ok := repo.statuses["swap-first-defer"]; ok && s == domain.ResidueReturnEscalated {
+		t.Fatal("a pause that just started must not escalate")
+	}
+}
+
+func TestRetryFailedResidueReturns_KeepsDeferringInsideTheBound(t *testing.T) {
+	now := time.Now()
+	// Well inside the bound: an incident-length pause is the case deferral exists for.
+	since := now.Add(-1 * time.Hour)
+	repo := newFakeResidueRetryRepo(haltedSwapDeferredSince("swap-recent-halt", 3, &since))
+	relay := &retryResidueRelay{position: "should-not-happen"}
+	orch := retryOrchestratorWithBreaker(relay, haltedBreaker{halted: true})
+
+	attempted, _ := orch.RetryFailedResidueReturns(context.Background(), repo, now, 10)
+
+	if attempted != 0 || relay.calls != 0 {
+		t.Fatalf("attempted=%d relay.calls=%d — a halted pool inside the bound must still defer", attempted, relay.calls)
+	}
+	if s, ok := repo.statuses["swap-recent-halt"]; ok && s == domain.ResidueReturnEscalated {
+		t.Fatal("escalated inside the bound — an hour-long pause is normal operation")
+	}
+	if next := repo.nextAt["swap-recent-halt"]; next == nil || !next.After(now) {
+		t.Fatalf("expected the row rescheduled for later, got %v", next)
+	}
+	// The stamp must survive: measuring from the latest sweep instead of from the start of the
+	// pause is what would make the bound unreachable.
+	if got := repo.deferredSince["swap-recent-halt"]; !got.Equal(since) {
+		t.Fatalf("deferredSince moved to %v, want the original %v", got, since)
+	}
+}
+
+func TestRetryFailedResidueReturns_EscalatesAHaltThatOutlastsTheBound(t *testing.T) {
+	now := time.Now()
+	since := now.Add(-residueMaxDeferral() - time.Minute)
+	repo := newFakeResidueRetryRepo(haltedSwapDeferredSince("swap-stuck-halt", 2, &since))
+	relay := &retryResidueRelay{position: "should-not-happen"}
+	orch := retryOrchestratorWithBreaker(relay, haltedBreaker{halted: true})
+
+	attempted, recovered := orch.RetryFailedResidueReturns(context.Background(), repo, now, 10)
+
+	if relay.calls != 0 {
+		t.Fatal("escalating must not dispatch — the pair is still halted")
+	}
+	if attempted != 0 || recovered != 0 {
+		t.Fatalf("attempted=%d recovered=%d — escalating a deferral is not an attempt", attempted, recovered)
+	}
+	if repo.statuses["swap-stuck-halt"] != domain.ResidueReturnEscalated {
+		t.Fatalf("status = %q, want RETURN_ESCALATED: a pause this long needs a human, not another deferral",
+			repo.statuses["swap-stuck-halt"])
+	}
+	// Terminal for automation: leaving a schedule behind would keep the row in the retryable set.
+	if next := repo.nextAt["swap-stuck-halt"]; next != nil {
+		t.Fatalf("an escalated row must not stay scheduled, got %v", next)
+	}
+	// No attempt was ever made against this row, so the counter must not claim one.
+	if got := repo.attempts["swap-stuck-halt"]; got != 2 {
+		t.Fatalf("attempts = %d, want 2 — escalating a pause must not invent an attempt", got)
+	}
+}
+
+// The cap is documented as unreachable, and a comment that says so has to be checked or it rots.
+// This is the check: if someone raises residueMaxAttempts far enough for the cap to start binding,
+// this fails and the comment beside residueBackoffCapSeconds needs revisiting — which is the moment
+// it should be revisited, not later.
+func TestResidueBackoffCap_IsUnreachableAtTheCurrentAttemptCeiling(t *testing.T) {
+	longest := residueBackoff(residueMaxAttempts)
+	if longest >= residueBackoffCapSeconds*time.Second {
+		t.Fatalf("the longest schedulable delay is %v, which now reaches the %ds cap — the cap has stopped being dead code and its comment says otherwise",
+			longest, residueBackoffCapSeconds)
+	}
+}
+
+func TestResidueMaxDeferral_SitsAboveTheBackoffCap(t *testing.T) {
+	// If the bound were near the backoff cap, the first or second deferral would already exceed
+	// it and a routine pause would escalate every pending refund.
+	if residueMaxDeferral() <= residueBackoff(99) {
+		t.Fatalf("bound %v must sit well above the backoff cap %v", residueMaxDeferral(), residueBackoff(99))
 	}
 }

@@ -39,7 +39,15 @@ This document is the complete reference for all Scenario B environment variables
 
 ## Shared infrastructure
 
-Files: `scenario-b/deploy/local/compose.yml` and per-entity `.env.infra.*` files.
+> The shared `deploy/local/compose.yml` no longer exists. The toolkit provisions
+> infrastructure **per entity**, from
+> [`provisioning/templates/entity-infra.compose.yaml`](../../provisioning/templates/entity-infra.compose.yaml)
+> (Postgres, Redis) and
+> [`entity-keycloak.compose.yaml`](../../provisioning/templates/entity-keycloak.compose.yaml).
+> Each entity gets its own containers, named `<prefix>-<entity>-<service>`.
+
+The variables below describe the values those templates take, plus the per-entity
+`.env.infra.*` files.
 
 ### Keycloak
 
@@ -293,9 +301,13 @@ File: `scenario-b/backend/services/auth/.env`
 
 ## Paladin (`config.yaml` per node)
 
-File: `scenario-b/deploy/local/paladin/spoke-{a,b}/config/<entity>/config.yaml`
-
-Paladin provides Zeto (ZKP) and Pente (bilateral context) privacy on the spokes. Hub contracts do not use Paladin in the current implementation.
+> **Not deployed in Scenario B.** No bring-up path starts a Paladin node: the only
+> compose template declaring one is `provisioning/templates/entity-besu.compose.yaml`,
+> which the toolkit never renders (it uses `entity-besu-founder.compose.yaml` and
+> `entity-besu-join.compose.yaml`). The `deploy/local/paladin/**/config.yaml` files this
+> section pointed at were removed with that tree. The section is kept as a reference for
+> the fields a Paladin node would take if the domain is introduced; it describes nothing
+> currently running.
 
 ### Identity and logging
 

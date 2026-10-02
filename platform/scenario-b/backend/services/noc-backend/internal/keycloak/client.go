@@ -40,9 +40,18 @@ func (c TokenClaims) Actor() string {
 	return c.Subject
 }
 
-// Client validates Keycloak JWTs.
+// Client validates Keycloak JWTs and obtains sessions from the realm.
+//
+// The grant methods were added when the NOC portals moved off localStorage: a cookie the
+// browser cannot read can only be set by a server, so the login had to move here. Before
+// that this interface had exactly one method, because the browser did its own grant.
 type Client interface {
 	ValidateToken(ctx context.Context, accessToken string) (TokenClaims, error)
+	// PasswordGrant exchanges an operator's credentials for a session.
+	PasswordGrant(ctx context.Context, username, password string) (Tokens, error)
+	// RefreshGrant exchanges a refresh token for a new session, so the portal can keep a
+	// short access-token lifetime without logging the operator out.
+	RefreshGrant(ctx context.Context, refreshToken string) (Tokens, error)
 }
 
 // Config holds Keycloak connection parameters.
@@ -56,6 +65,11 @@ type Config struct {
 	Audience       string
 	JWKSCacheTTL   time.Duration
 	RequestTimeout time.Duration
+	// ClientID and ClientSecret authenticate the grant calls. noc-portal is a PUBLIC
+	// client in the realms the toolkit provisions, so the secret is normally empty and is
+	// then omitted from the form rather than sent blank.
+	ClientID     string
+	ClientSecret string
 }
 
 type jwksKey struct {
@@ -300,6 +314,35 @@ func NewNoOp() Client {
 
 // devUser is the identity recorded when the presented token carries no readable one.
 const devUser = "dev-user"
+
+// PasswordGrant issues a local development session without contacting any realm.
+//
+// Needed because NOC_SKIP_AUTH deployments have no Keycloak to grant anything, and the
+// login now goes through this interface. Refusing here would mean that turning auth OFF
+// broke the portal instead of loosening it.
+//
+// The token is a marker, not a credential: ValidateToken on this same client approves any
+// string. It carries the username so the audit trail still attributes actions to whoever
+// typed them, which is the one thing a skip-auth stack can honestly record.
+func (n *noOpClient) PasswordGrant(_ context.Context, username, _ string) (Tokens, error) {
+	subject := strings.TrimSpace(username)
+	if subject == "" {
+		subject = devUser
+	}
+	return Tokens{
+		AccessToken:      "noc-skip-auth." + subject,
+		RefreshToken:     "noc-skip-auth-refresh." + subject,
+		ExpiresIn:        3600,
+		RefreshExpiresIn: 3600,
+	}, nil
+}
+
+// RefreshGrant renews a local development session. Same reasoning as PasswordGrant: the
+// portal refreshes on a timer, and a skip-auth stack must not log the operator out.
+func (n *noOpClient) RefreshGrant(ctx context.Context, refreshToken string) (Tokens, error) {
+	subject := strings.TrimPrefix(strings.TrimSpace(refreshToken), "noc-skip-auth-refresh.")
+	return n.PasswordGrant(ctx, subject, "")
+}
 
 // ValidateToken approves any token, but still reads its identity claims so operator
 // actions are attributed to the person who performed them instead of a single stub

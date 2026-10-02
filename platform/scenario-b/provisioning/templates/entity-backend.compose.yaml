@@ -10,8 +10,27 @@
 # Interpolation vars come from the runner's process env (ComposeEnv) except the
 # runtime-discovered contract addresses + Keycloak client secret, which arrive via
 # --env-file (.env.spoke/.env.bank). No secrets are baked into this file.
+# Container log rotation, applied to every service in this file.
+#
+# Without it Docker's json-file driver has no size cap and no rotation: the
+# Scenario A Paladin containers reached 96 GB (~2.4 GB/day) and a full disk takes
+# the whole network down. 50m x 5 caps each service at 250 MB.
+#
+# Both options are load-bearing. max-size alone rotates into an unbounded number of
+# files; max-file alone caps the count of files that each grow forever.
+#
+# The anchor is not brevity: without it a new service is added with no logging block
+# and the ceiling silently fails to apply to that container. With it the omission is
+# visible in review, and toolkit/engine/composetemplate fails the build.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   compliance:
+    logging: *cbweb3_logging
     image: "${COMPLIANCE_IMAGE:-cbweb3b/compliance:local}"
     container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-compliance"
     # Runs as the host user, not the image default (uid 10001), because this service reads
@@ -43,9 +62,13 @@ services:
       # institution. The AMM resume quorum needs two DISTINCT institutions, so a paused AMM
       # would then never be resumable. The toolkit renders this per entity.
       INSTITUTION_CODE: "${INSTITUTION_CODE:-}"
-      # CA (scenario-a standard): the CB seeds central-bank.crt/.key into cb_tls;
-      # compliance signs participant CSRs with it. Empty on a bank → dev mode
-      # (certificate issuance disabled), which the swap/approve-kyc path does not need.
+      # CA (scenario-a standard): on a CB the toolkit points these at central-bank-ca.*
+      # in cb_tls — the pair compliance's own PKI bootstrap creates, which is why it is
+      # the pair it signs participant CSRs with. Deliberately NOT central-bank.crt/.key:
+      # gen-tls and that bootstrap both write those two names, with conflicting intent,
+      # and the divergence broke every credential issuance once already.
+      # Empty on a bank → dev mode (certificate issuance disabled), which the
+      # swap/approve-kyc path does not need.
       CA_CERT_FILE: "${CA_CERT_FILE:-}"
       CA_KEY_FILE: "${CA_KEY_FILE:-}"
       # R2-H-8 service-mesh mTLS — opt-in via GRPC_MTLS_ENABLE (empty by default →
@@ -71,6 +94,7 @@ services:
     restart: always
 
   auth:
+    logging: *cbweb3_logging
     image: "${AUTH_IMAGE:-cbweb3b/auth:local}"
     container_name: "${CONTAINER_PREFIX}-${ENTITY}-auth"
     environment:
@@ -125,6 +149,7 @@ services:
     restart: always
 
   api-gateway:
+    logging: *cbweb3_logging
     image: "${BACKEND_IMAGE:-cbweb3b/api-gateway:local}"
     container_name: "${CONTAINER_PREFIX}-${ENTITY}-api-gateway"
     # Runs as the host user, not the image default (uid 10001), because this service reads
@@ -165,7 +190,10 @@ services:
       # Unset it to fall back to per-process memory — the gateway then says so at boot.
       REDIS_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-redis:6379"
       REDIS_PASSWORD: "${REDIS_PASSWORD:?}"
-      COOKIE_SECURE: "false"
+      # Local stacks are plain HTTP, where the Secure flag would make the browser
+      # discard the session cookie. Overridable now rather than pinned to false, so a
+      # TLS-fronted deployment does not have to edit the template to be safe.
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
       AUTH_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-auth:9091"
       COMPLIANCE_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-compliance:9093"
       # Payment orchestrator (deposit/escrow/redeem). Presence of PAYMENT_GRPC_ADDR
@@ -275,7 +303,14 @@ services:
     ports:
       - "${GATEWAY_PORT:?}:8080"
     networks:
-      - entity_net
+      entity_net:
+        # Short, entity-unique alias for the reverse proxy. The container_name is 60
+        # octets for a central bank named "costa-rica" — inside the 63-octet DNS label
+        # limit (RFC 1035), but only just, and the three portals beside it already
+        # overflowed it and answered 502. Routing through the alias makes the bound hold
+        # for any entity name rather than for the ones tried so far.
+        aliases:
+          - "${ENTITY_NET_PREFIX:?}-api-gateway"
     restart: always
 
 networks:

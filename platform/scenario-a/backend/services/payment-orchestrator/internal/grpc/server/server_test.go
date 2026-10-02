@@ -130,6 +130,10 @@ type mockFiat struct {
 	balanceCalled int
 	balance       string
 	err           error
+	decimals      uint8
+	decimalsErr   error
+	symbol        string
+	symbolErr     error
 }
 
 func (m *mockFiat) Mint(_ context.Context, _, _ string) (string, error) {
@@ -138,6 +142,26 @@ func (m *mockFiat) Mint(_ context.Context, _, _ string) (string, error) {
 
 func (m *mockFiat) Burn(_ context.Context, _, _ string) (string, error) {
 	return "mock-fiat-burn-tx", nil
+}
+
+func (m *mockFiat) Decimals(_ context.Context) (uint8, error) {
+	if m.decimalsErr != nil {
+		return 0, m.decimalsErr
+	}
+	if m.decimals == 0 {
+		return 18, nil
+	}
+	return m.decimals, nil
+}
+
+func (m *mockFiat) Symbol(_ context.Context) (string, error) {
+	if m.symbolErr != nil {
+		return "", m.symbolErr
+	}
+	if m.symbol == "" {
+		return "fCeBM_TEST", nil
+	}
+	return m.symbol, nil
 }
 
 func (m *mockFiat) BalanceOf(_ context.Context, _ string) (string, error) {
@@ -1498,5 +1522,91 @@ func TestSettleHTLC_BlockedUntilCounterpartyLocked(t *testing.T) {
 	})
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("expected FailedPrecondition before counterparty locks, got: %v", err)
+	}
+}
+
+// A balance is unreadable without its scale. Before ADR-009 the response carried only
+// the integer, so the portal printed 1000 wei of an 18-decimal token as "1,000 fCeBM" —
+// the right number under the wrong unit.
+func TestGetFiatBalance_CarriesScaleAndSymbol(t *testing.T) {
+	env := setupTestEnvWithFiat(t, &mockFiat{balance: "100200000000000000000", decimals: 18, symbol: "fCeBM_BRL"})
+
+	resp, err := env.client.GetFiatBalance(context.Background(), &pb.GetFiatBalanceRequest{})
+	if err != nil {
+		t.Fatalf("GetFiatBalance: %v", err)
+	}
+	if resp.Decimals != 2 {
+		t.Errorf("decimals: want the application scale of 2, got %d", resp.Decimals)
+	}
+	if resp.Symbol != "fCeBM_BRL" {
+		t.Errorf("symbol: want fCeBM_BRL, got %q", resp.Symbol)
+	}
+	// The balance itself stays a base-unit integer. The scale travels beside it; it is
+	// not applied here, because the wire format is unchanged by ADR-009.
+	if resp.Balance != "100200000000000000000" {
+		t.Errorf("balance must stay in base units, got %s", resp.Balance)
+	}
+}
+
+// The two reads are deliberately not equivalent. Without decimals the client cannot
+// render the number at all, so that failure propagates; the symbol only names the
+// currency, and clients fall back to their configured one, so it must not fail the call.
+func TestGetFiatBalance_SymbolIsOptionalButScaleIsNot(t *testing.T) {
+	t.Run("a symbol failure still returns the balance", func(t *testing.T) {
+		env := setupTestEnvWithFiat(t, &mockFiat{balance: "500", symbolErr: errors.New("symbol read failed")})
+		resp, err := env.client.GetFiatBalance(context.Background(), &pb.GetFiatBalanceRequest{})
+		if err != nil {
+			t.Fatalf("a symbol failure must not fail the call: %v", err)
+		}
+		if resp.Balance != "500" || resp.Decimals != 2 {
+			t.Errorf("want balance 500 and decimals 2, got %s / %d", resp.Balance, resp.Decimals)
+		}
+		if resp.Symbol != "" {
+			t.Errorf("want an empty symbol so the client falls back, got %q", resp.Symbol)
+		}
+	})
+
+	// The contract read is now only a sanity check, so its failure must not fail the
+	// call — the scale reported is the application's own constant.
+	t.Run("a contract decimals failure still returns the balance", func(t *testing.T) {
+		env := setupTestEnvWithFiat(t, &mockFiat{balance: "500", decimalsErr: errors.New("decimals read failed")})
+		resp, err := env.client.GetFiatBalance(context.Background(), &pb.GetFiatBalanceRequest{})
+		if err != nil {
+			t.Fatalf("a contract decimals failure must not fail the call: %v", err)
+		}
+		if resp.Decimals != 2 {
+			t.Errorf("want the application scale of 2, got %d", resp.Decimals)
+		}
+	})
+
+	// But a token that cannot even represent hundredths is a misconfiguration the
+	// application must refuse rather than silently truncate against.
+	t.Run("a token too coarse for the application scale is refused", func(t *testing.T) {
+		env := setupTestEnvWithFiat(t, &mockFiat{balance: "500", decimals: 1})
+		if _, err := env.client.GetFiatBalance(context.Background(), &pb.GetFiatBalanceRequest{}); err == nil {
+			t.Fatal("want an error: a 1-decimal token cannot represent hundredths")
+		}
+	})
+}
+
+// The application scale is hundredths for BOTH tokens, and the two must agree or
+// tokenisation stops being 1:1 and an FX leg stops matching the HTLC leg that settles it.
+//
+// The number is bounded by measurement, not taste: the Zeto LOCK circuit refuses a note
+// value at or above 2^64 (measured live — 2^64-1 locks, 2^64 hangs), so at 18 decimals
+// the largest lockable amount would be 18.45 currency units. If this test is ever
+// "fixed" by raising the scale, that is the ceiling it will meet.
+func TestGetBalance_CarriesTheApplicationScale(t *testing.T) {
+	env := setupTestEnv(t)
+
+	resp, err := env.client.GetBalance(context.Background(), &pb.GetBalanceRequest{})
+	if err != nil {
+		t.Fatalf("GetBalance: %v", err)
+	}
+	if resp.Decimals != 2 {
+		t.Errorf("tCeBM scale must be hundredths, got %d", resp.Decimals)
+	}
+	if resp.Symbol != "tCeBM" {
+		t.Errorf("symbol: want tCeBM, got %q", resp.Symbol)
 	}
 }

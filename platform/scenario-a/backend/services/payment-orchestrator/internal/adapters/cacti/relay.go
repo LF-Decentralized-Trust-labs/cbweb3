@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
@@ -178,12 +179,25 @@ type cactiLockEvent struct {
 	Timestamp   int64  `json:"timestamp"` // Unix ms — informational only, no longer the cursor
 }
 
+// journalTrimmedHeader carries the highest journal seq the relay has dropped to retention for
+// the kind being served. A persisted cursor at or below it means events are gone: the relay's
+// journal is capped, and a consumer that lags past the cap used to receive whatever survived and
+// advance over the rest without being told. For the settle journal that is a settlement nobody
+// else can make — an HTLC leg is settled by transferLocked on its owner's own Paladin node, so
+// the owner is the only party that can settle it, and this journal is how it finds out it must.
+// The relay logged the trim; the entity that actually lost learned nothing.
+const journalTrimmedHeader = "X-Relay-Journal-Trimmed-Through"
+
 func (c *CactiRelay) pollEvents(ctx context.Context, kind string, handler func(ports.InteroperabilityProof) error) {
 	// Track the last processed journal sequence to avoid re-delivering events. The seq is a
 	// durable, restart-stable cursor assigned by the relay (finding R2-H-11): unlike the previous
 	// wall-clock-ms cursor it survives a relay restart and is never regenerated on re-decode, so
 	// this poller's persisted cursor composes exactly with the relay — no re-delivery, no loss.
-	lastSeen := c.loadWatermark(ctx, kind)
+	lastSeen, resumed := c.loadWatermarkFound(ctx, kind)
+	// A consumer that has never persisted a cursor starts at the journal head and has no claim
+	// to events that predate it — a bank joining a network that has been running is the normal
+	// case. Only a cursor we actually resumed from can have fallen behind the relay's retention.
+	gapChecked := !resumed
 	ticker := time.NewTicker(c.pollInterval)
 	defer ticker.Stop()
 
@@ -192,11 +206,32 @@ func (c *CactiRelay) pollEvents(ctx context.Context, kind string, handler func(p
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			events, err := c.fetchEvents(ctx, kind, lastSeen)
+			events, trimmedThrough, err := c.fetchEvents(ctx, kind, lastSeen)
 			if err != nil {
 				c.logger.Warn("cacti: poll events error", "kind", kind, "error", err)
 				continue
 			}
+			// The journal is capped, and what fell off it is gone — no retry recovers it, and
+			// stalling here would turn a data loss into an outage, which is the failure this whole
+			// line of work exists to undo. So: say exactly what was lost, once, loudly enough that
+			// it is acted on, then carry on with the events that did survive.
+			if !gapChecked && trimmedThrough > 0 && lastSeen <= trimmedThrough {
+				c.logger.Error(
+					"cacti: events lost to journal retention — this entity was too far behind the relay "+
+						"and the events it missed no longer exist. For 'settle' each one is a counterpart "+
+						"leg that will not settle itself and needs an operator; reconcile against the chain",
+					"kind", kind,
+					"cursor", lastSeen,
+					"lost_from_seq", lastSeen+1,
+					"lost_through_seq", trimmedThrough,
+					"relay", c.baseURL,
+				)
+				lastSeen = trimmedThrough
+				c.saveWatermark(ctx, kind, lastSeen)
+			}
+			// One report per process: the condition persists until the cursor moves past the mark,
+			// and an error repeated every poll interval is an error nobody reads.
+			gapChecked = true
 			// Advance the cursor only through events the handler actually processed. On the first
 			// handler failure we stop advancing so the failed event (and everything after it) is
 			// re-fetched on the next tick instead of being skipped forever — the cursor must mean
@@ -228,23 +263,28 @@ func (c *CactiRelay) pollEvents(ctx context.Context, kind string, handler func(p
 // (which, being ~1.7e12, would skip the entire journal and silently stall the poller).
 func watermarkStoreKey(kind string) string { return kind + ":seq" }
 
-// loadWatermark returns the resume sequence for kind: the persisted seq when one exists,
-// otherwise 0 (start of the journal). There is no time.Now() fallback as with the old ms cursor —
-// the relay journal is durable and bounded, so seq 0 replays only what it still holds, once.
-func (c *CactiRelay) loadWatermark(ctx context.Context, kind string) int64 {
+// loadWatermarkFound returns the resume sequence for kind — the persisted seq when one exists,
+// otherwise 0 (start of the journal) — and whether one was actually resumed. There is no
+// time.Now() fallback as with the old ms cursor: the relay journal is durable and bounded, so
+// seq 0 replays only what it still holds, once.
+//
+// The second return distinguishes "never had a cursor" from "has one, and it is 0", which is
+// what separates a bank joining a running network (no claim to events that predate it) from a
+// consumer that fell behind the relay's retention (events genuinely missed).
+func (c *CactiRelay) loadWatermarkFound(ctx context.Context, kind string) (int64, bool) {
 	if c.watermarks == nil {
-		return 0
+		return 0, false
 	}
 	value, found, err := c.watermarks.GetWatermark(ctx, watermarkStoreKey(kind))
 	if err != nil {
 		c.logger.Warn("cacti: watermark load failed; starting from journal head (seq 0)", "kind", kind, "error", err)
-		return 0
+		return 0, false
 	}
 	if !found {
-		return 0
+		return 0, false
 	}
 	c.logger.Info("cacti: resuming from persisted seq", "kind", kind, "sinceSeq", value)
-	return value
+	return value, true
 }
 
 // saveWatermark persists the latest processed sequence for kind. Failures are logged but not
@@ -268,29 +308,34 @@ type relayEvent struct {
 
 // fetchEvents retrieves events from the Cacti service with a journal seq greater than sinceSeq.
 // Returns each converted proof paired with its seq, and any error.
-func (c *CactiRelay) fetchEvents(ctx context.Context, kind string, sinceSeq int64) ([]relayEvent, error) {
+func (c *CactiRelay) fetchEvents(ctx context.Context, kind string, sinceSeq int64) ([]relayEvent, int64, error) {
 	// The relay filters seq strictly greater than `since`, so pass the cursor as-is (no +1).
 	url := fmt.Sprintf("%s/api/v1/relay/events/%s?since=%d", c.baseURL, kind, sinceSeq)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Header.Set("X-Relay-Auth", c.authSecret)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, raw)
+		return nil, 0, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, raw)
 	}
+
+	// Highest seq the relay has dropped to retention for this kind. Absent (0) from a relay that
+	// predates the header — the two are deployed separately, so "not told" must read as "nothing
+	// known to be dropped", never as a loss.
+	trimmedThrough, _ := strconv.ParseInt(resp.Header.Get(journalTrimmedHeader), 10, 64)
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	var events []relayEvent
@@ -299,7 +344,7 @@ func (c *CactiRelay) fetchEvents(ctx context.Context, kind string, sinceSeq int6
 	case "settle":
 		var raws []cactiSettleEvent
 		if err := json.Unmarshal(raw, &raws); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		for _, e := range raws {
 			events = append(events, relayEvent{
@@ -316,7 +361,7 @@ func (c *CactiRelay) fetchEvents(ctx context.Context, kind string, sinceSeq int6
 	case "lock":
 		var raws []cactiLockEvent
 		if err := json.Unmarshal(raw, &raws); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		for _, e := range raws {
 			events = append(events, relayEvent{
@@ -335,7 +380,7 @@ func (c *CactiRelay) fetchEvents(ctx context.Context, kind string, sinceSeq int6
 		}
 	}
 
-	return events, nil
+	return events, trimmedThrough, nil
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────

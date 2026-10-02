@@ -35,6 +35,17 @@
 #   BESU_HOST_ALLOWLIST   Comma-separated host allowlist for RPC (default: '*' — restrict in prod)
 #   BESU_CORS_ORIGINS     CORS origins for RPC HTTP (default: 'all' — restrict in prod)
 
+# Container log rotation, applied to every service in this file.
+#
+# Without it Docker's json-file driver has no size cap and no rotation: the
+# Scenario A Paladin containers reached 96 GB (~2.4 GB/day) and a full disk takes
+# the whole network down. 50m x 5 caps each service at 250 MB.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
 
   # ─── Volume permissions init ────────────────────────────────────────────────
@@ -45,6 +56,7 @@ services:
   # paladin-data-init (commercial-bank/paladin-compose.yaml,
   # central-bank/paladin-compose.yaml).
   besu-volumes-init:
+    logging: *cbweb3_logging
     image: alpine:3.23
     user: "0:0"
     volumes:
@@ -63,6 +75,7 @@ services:
   # (step_start_besu_found.go) BEFORE `docker compose up` runs — no bind mount, no
   # separate seed service needed here.
   genesis-init:
+    logging: *cbweb3_logging
     image: ${BESU_IMAGE?BESU_IMAGE is required (e.g. hyperledger/besu:25.8.0)}
     container_name: ${BESU_CONTAINER_NAME:-cbweb3-${SPOKE_ID}-besu}-genesis-init
     restart: "no"
@@ -124,6 +137,7 @@ services:
 
   # ─── Besu node (central-bank / bootnode) ───────────────────────────────────
   besu:
+    logging: *cbweb3_logging
     image: ${BESU_IMAGE}
     container_name: ${BESU_CONTAINER_NAME:-cbweb3-${SPOKE_ID}-besu.central-bank}
     restart: always

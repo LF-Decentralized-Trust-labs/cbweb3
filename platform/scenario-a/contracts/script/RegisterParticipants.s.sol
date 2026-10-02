@@ -55,7 +55,7 @@ contract RegisterParticipants is Script {
         string name;
         IdentityRegistryLibrary.ParticipantRole role;
         /// @dev Institution code, NOT a per-wallet value. Every wallet of the same institution must
-        ///      carry the same code, because the AMM resume quorum counts distinct institutions and
+        ///      carry the same code, because institution attribution counts distinct institutions and
         ///      derives them from keccak256(bankCode) — the same derivation the Go services use
         ///      (backend/shared/blockchain/registry.InstitutionIDForParticipant). A second wallet of
         ///      this central bank registered under a different code would count as a second

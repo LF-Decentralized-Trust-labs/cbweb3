@@ -35,6 +35,24 @@ export const REQUESTER_NOT_A_PARTICIPANT = "REQUESTER_NOT_A_PARTICIPANT";
  */
 export const RELAY_SIGNATURE_REPLAYED = "RELAY_SIGNATURE_REPLAYED";
 
+/**
+ * The relay credential itself is missing, wrong, or absent from the server.
+ *
+ * A third condition, and the reason it is not folded into the set above. Our gateway authenticates
+ * itself to the central bank's with a relay signature or, during the migration, the shared
+ * INTERNAL_RELAY_AUTH_SECRET. When that credential is absent or divergent the request never
+ * authenticates at all: the central bank is not refusing an identity it dislikes, it never learned
+ * one. Nothing about this institution's registration is at fault, so the onboarding wizard — the
+ * remedy a trust rejection points at — would be a dead end, and the operator cannot fix it from the
+ * portal in any case. It is a deployment fault, and it says so.
+ *
+ * RELAY_AUTH_NOT_CONFIGURED arrives as a 503 rather than a 401. It is classified here anyway: the
+ * cause and the remedy are identical, and an unclassified 503 surfaces as a raw transport error.
+ */
+export const RELAY_AUTH_REQUIRED = "RELAY_AUTH_REQUIRED";
+export const RELAY_AUTH_INVALID = "RELAY_AUTH_INVALID";
+export const RELAY_AUTH_NOT_CONFIGURED = "RELAY_AUTH_NOT_CONFIGURED";
+
 const trustRejectionCodes: ReadonlySet<string> = new Set([
   RELAY_SIGNATURE_INVALID,
   RELAY_SIGNATURE_REQUIRED,
@@ -51,15 +69,39 @@ const trustRejectionCodes: ReadonlySet<string> = new Set([
  * gateway and moving it from 401 to 403 should not silently turn this notice off.
  */
 export function isTrustRejection(error: unknown): boolean {
+  const code = codeOf(error);
+  return code !== null && trustRejectionCodes.has(code);
+}
+
+const relayConfigurationFaultCodes: ReadonlySet<string> = new Set([
+  RELAY_AUTH_REQUIRED,
+  RELAY_AUTH_INVALID,
+  RELAY_AUTH_NOT_CONFIGURED,
+]);
+
+/**
+ * isRelayConfigurationFault reports whether the relay credential, not our identity, is the problem.
+ *
+ * Kept disjoint from isTrustRejection on purpose: the two sets must never overlap, because the
+ * notices they raise send the operator to different places. The match is on the code rather than the
+ * status for the same reason as there, and because one of these three is not a 401 at all.
+ */
+export function isRelayConfigurationFault(error: unknown): boolean {
+  const code = codeOf(error);
+  return code !== null && relayConfigurationFaultCodes.has(code);
+}
+
+/** codeOf returns the error code the gateway named, or null when the response carries none. */
+function codeOf(error: unknown): string | null {
   if (!axios.isAxiosError(error)) {
-    return false;
+    return null;
   }
   const body = error.response?.data;
   if (typeof body !== "object" || body === null) {
-    return false;
+    return null;
   }
   const code = (body as { code?: unknown }).code;
-  return typeof code === "string" && trustRejectionCodes.has(code);
+  return typeof code === "string" ? code : null;
 }
 
 export type TrustBlockKind =
@@ -67,6 +109,7 @@ export type TrustBlockKind =
   | "onboarding-in-progress"
   | "credential-inactive"
   | "not-recognized"
+  | "relay-misconfigured"
   | "unknown";
 
 export type TrustBlock = {
@@ -139,5 +182,25 @@ export function classifyTrustBlock(status: OnboardingRequestStatus | null): Trus
     description:
       "The request was rejected and the onboarding status could not be read, so the cause is undetermined. If onboarding was never completed, start it; otherwise contact the central bank operator.",
     showOnboardingLink: true,
+  };
+}
+
+/**
+ * relayConfigurationBlock is the third presentation: the channel is misconfigured, not this
+ * institution.
+ *
+ * It takes no onboarding status because none is relevant. classifyTrustBlock asks that question to
+ * name the cause of a trust rejection, and asking it here would produce a confident wrong answer —
+ * an ACTIVE bank told it is "not recognized", a bank mid-onboarding told to go and finish it, when
+ * in both cases what failed is a credential shared between two gateways. The cause is already known
+ * from the code, so the notice states it and names who can act: not the operator reading it.
+ */
+export function relayConfigurationBlock(): TrustBlock {
+  return {
+    kind: "relay-misconfigured",
+    title: "This portal cannot authenticate to the central bank",
+    description:
+      "The credential this institution's gateway uses to identify itself to the central bank was rejected or is not configured. This is a deployment setting rather than anything about this institution's registration, and it cannot be resolved from the portal. Contact the platform operator.",
+    showOnboardingLink: false,
   };
 }

@@ -73,21 +73,21 @@ apply "Hub — found-hub hub-cbweb3" "${SCRIPT_DIR}/hub/hub-cbweb3.yaml"
 
 # --- Brazil spoke --------------------------------------------------------------
 apply "Brazil — found-spoke central-bank-brazil (spoke-brl)" \
-  "${SCRIPT_DIR}/brazil/central-bank-brazil.yaml" --spoke-rpc http://localhost:33645
-apply "Brazil — join bank-itau"     "${SCRIPT_DIR}/brazil/bank-itau.yaml"     --spoke-rpc http://localhost:33646
-apply "Brazil — join bank-bradesco" "${SCRIPT_DIR}/brazil/bank-bradesco.yaml" --spoke-rpc http://localhost:33647
+  "${SCRIPT_DIR}/brazil/central-bank-brazil.yaml" --spoke-rpc http://localhost:9145
+apply "Brazil — join bank-itau"     "${SCRIPT_DIR}/brazil/bank-itau.yaml"     --spoke-rpc http://localhost:9146
+apply "Brazil — join bank-bradesco" "${SCRIPT_DIR}/brazil/bank-bradesco.yaml" --spoke-rpc http://localhost:9147
 
 # --- Argentina spoke -----------------------------------------------------------
 apply "Argentina — found-spoke central-bank-argentina (spoke-ars)" \
-  "${SCRIPT_DIR}/argentina/central-bank-argentina.yaml" --spoke-rpc http://localhost:33745
-apply "Argentina — join bank-galicia" "${SCRIPT_DIR}/argentina/bank-galicia.yaml" --spoke-rpc http://localhost:33746
-apply "Argentina — join bank-macro"   "${SCRIPT_DIR}/argentina/bank-macro.yaml"   --spoke-rpc http://localhost:33747
+  "${SCRIPT_DIR}/argentina/central-bank-argentina.yaml" --spoke-rpc http://localhost:9245
+apply "Argentina — join bank-galicia" "${SCRIPT_DIR}/argentina/bank-galicia.yaml" --spoke-rpc http://localhost:9246
+apply "Argentina — join bank-macro"   "${SCRIPT_DIR}/argentina/bank-macro.yaml"   --spoke-rpc http://localhost:9247
 
 # --- Colombia spoke ------------------------------------------------------------
 apply "Colombia — found-spoke central-bank-colombia (spoke-cop)" \
-  "${SCRIPT_DIR}/colombia/central-bank-colombia.yaml" --spoke-rpc http://localhost:33945
-apply "Colombia — join bank-bancolombia" "${SCRIPT_DIR}/colombia/bank-bancolombia.yaml" --spoke-rpc http://localhost:33946
-apply "Colombia — join bank-davivienda"  "${SCRIPT_DIR}/colombia/bank-davivienda.yaml"  --spoke-rpc http://localhost:33947
+  "${SCRIPT_DIR}/colombia/central-bank-colombia.yaml" --spoke-rpc http://localhost:9445
+apply "Colombia — join bank-bancolombia" "${SCRIPT_DIR}/colombia/bank-bancolombia.yaml" --spoke-rpc http://localhost:9446
+apply "Colombia — join bank-davivienda"  "${SCRIPT_DIR}/colombia/bank-davivienda.yaml"  --spoke-rpc http://localhost:9447
 
 log "done. RPC ports: hub 8845 | BR 8645-8647 | AR 8745-8747 | CO 8945-8947"
 log "bundles under samples/bundles/ ; per-entity state under samples/cbweb3-data/"
@@ -96,39 +96,39 @@ log "all stacks up. Endpoints (api-gateway + operator portals, on the host):"
 cat <<'EOF'
 
   Hub (hub-cbweb3)
-    hub            api http://localhost:41845   governance http://localhost:42845
+    hub            api http://localhost:17345   governance http://localhost:18345
 
   Brazil (spoke-brl)
-    central-bank   api http://localhost:41645   governance http://localhost:42645
-                                                 treasury   http://localhost:46645
-                                                 supervisor http://localhost:47645
-                                                 noc        http://localhost:45645
+    central-bank   api http://localhost:17145   governance http://localhost:18145
+                                                 treasury   http://localhost:22145
+                                                 supervisor http://localhost:23145
+                                                 noc        http://localhost:21145
                                                  launcher   http://localhost:5191
-    bank-itau      api http://localhost:41646   portal     http://localhost:42646
+    bank-itau      api http://localhost:17146   portal     http://localhost:18146
                                                  launcher   http://localhost:5192
-    bank-bradesco  api http://localhost:41647   portal     http://localhost:42647
+    bank-bradesco  api http://localhost:17147   portal     http://localhost:18147
                                                  launcher   http://localhost:5193
 
   Argentina (spoke-ars)
-    central-bank   api http://localhost:41745   governance http://localhost:42745
-                                                 treasury   http://localhost:46745
-                                                 supervisor http://localhost:47745
-                                                 noc        http://localhost:45745
+    central-bank   api http://localhost:17245   governance http://localhost:18245
+                                                 treasury   http://localhost:22245
+                                                 supervisor http://localhost:23245
+                                                 noc        http://localhost:21245
                                                  launcher   http://localhost:5194
-    bank-galicia   api http://localhost:41746   portal     http://localhost:42746
+    bank-galicia   api http://localhost:17246   portal     http://localhost:18246
                                                  launcher   http://localhost:5195
-    bank-macro     api http://localhost:41747   portal     http://localhost:42747
+    bank-macro     api http://localhost:17247   portal     http://localhost:18247
                                                  launcher   http://localhost:5196
 
   Colombia (spoke-cop)
-    central-bank   api http://localhost:41945   governance http://localhost:42945
-                                                 treasury   http://localhost:46945
-                                                 supervisor http://localhost:47945
-                                                 noc        http://localhost:45945
+    central-bank   api http://localhost:17445   governance http://localhost:18445
+                                                 treasury   http://localhost:22445
+                                                 supervisor http://localhost:23445
+                                                 noc        http://localhost:21445
                                                  launcher   http://localhost:5197
-    bank-bancolombia api http://localhost:41946 portal     http://localhost:42946
+    bank-bancolombia api http://localhost:17446 portal     http://localhost:18446
                                                  launcher   http://localhost:5198
-    bank-davivienda  api http://localhost:41947 portal     http://localhost:42947
+    bank-davivienda  api http://localhost:17447 portal     http://localhost:18447
                                                  launcher   http://localhost:5199
 
   The launcher (per entity) is the A/B entry point; it lists that entity's Scenario A

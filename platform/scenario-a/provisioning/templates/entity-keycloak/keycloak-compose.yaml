@@ -19,8 +19,20 @@
 # mount. Deviation from the original design; see the addendum in
 # specs/026-tk4-compose-central-bank/plan.md.
 
+# Container log rotation, applied to every service in this file.
+#
+# Without it Docker's json-file driver has no size cap and no rotation: the
+# Scenario A Paladin containers reached 96 GB (~2.4 GB/day) and a full disk takes
+# the whole network down. 50m x 5 caps each service at 250 MB.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   keycloak:
+    logging: *cbweb3_logging
     image: ${KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.0}
     container_name: ${ENTITY_INFRA_PREFIX:?ENTITY_INFRA_PREFIX is required}-keycloak
     command: ["start-dev", "--import-realm"]

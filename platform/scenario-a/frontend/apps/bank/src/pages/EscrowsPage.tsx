@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  amountRefusalMessage,
+  apiErrorMessage,
   Badge,
   Button,
   Card,
@@ -10,6 +12,7 @@ import {
   CardTitle,
   Input,
   Label,
+  parseCurrencyAmount,
   Table,
   TableBody,
   TableCell,
@@ -22,12 +25,15 @@ import { useEffect, useMemo, useState } from "react";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import { usePaymentStore } from "../stores";
 import {
-  PaymentStatus,
+  currencyFromTokenSymbol,
+  displayToBase,
   formatCeBM,
+  formatCeBMDisplay,
   formatFiatUnits,
   getPaymentStatusLabel,
   getPaymentStatusVariant,
   normalizePaymentStatus,
+  PaymentStatus,
 } from "../types";
 
 const shortHash = (value: string) => (value ? `${value.slice(0, 10)}...${value.slice(-8)}` : "-");
@@ -38,10 +44,28 @@ export function EscrowsPage() {
   const escrows = usePaymentStore((state) => state.escrows);
   const balance = usePaymentStore((state) => state.balance);
   const fiatBalance = usePaymentStore((state) => state.fiatBalance);
+  const fiatDecimals = usePaymentStore((state) => state.fiatDecimals);
+  const fiatSymbol = usePaymentStore((state) => state.fiatSymbol);
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
 
   const [amount, setAmount] = useState("0");
+
+  // Parsed once. This field carries whole base units, the same unit as the
+  // HTLC leg and the FX proposal, so the rule lives in @cbweb3/ui (lib/amount.ts)
+  // rather than in an inline regex — and the field is plain text, because
+  // <input type="number"> reads keystrokes through the browser locale.
+  // Parsed under the ISO 20022 rule, then scaled by the token's own decimals before
+  // it leaves the form. Until ADR-009 this was a whole count of raw base units, so
+  // a tCeBM amount of 100.20 could not be expressed at all.
+  // Bounded by the spoke currency's ISO 4217 minor unit, not by a fixed two places:
+  // two of the currencies this pilot offers (CLP, PYG) have no subunit at all.
+  const spokeCurrency = currencyFromTokenSymbol(fiatSymbol);
+  const parsedAmount = useMemo(
+    () => parseCurrencyAmount(amount, spokeCurrency),
+    [amount, spokeCurrency],
+  );
   const [confirmRequest, setConfirmRequest] = useState(false);
 
   useEffect(() => {
@@ -54,24 +78,24 @@ export function EscrowsPage() {
   );
 
   const onSubmit = async () => {
-    if (!/^\d+$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive integer.");
+    if (!parsedAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedAmount.refusal));
       return;
     }
 
     try {
-      const escrowId = await requestEscrow(amount);
+      const escrowId = await requestEscrow(displayToBase(parsedAmount.canonical, tCeBMDecimals));
       toast.success(`Reserve tokenisation request submitted: ${escrowId}`);
       setAmount("0");
       setConfirmRequest(false);
     } catch (submitError) {
-      toast.error(submitError instanceof Error ? submitError.message : "Unable to submit reserve tokenisation request");
+      toast.error(apiErrorMessage(submitError, "Unable to submit reserve tokenisation request"));
     }
   };
 
   const onPrepareSubmit = () => {
-    if (!/^\d+$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive integer.");
+    if (!parsedAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedAmount.refusal));
       return;
     }
     setConfirmRequest(true);
@@ -80,11 +104,11 @@ export function EscrowsPage() {
   return (
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-3">
-        <BalanceWidget balance={balance} loading={status === "loading" && balance === null} />
+        <BalanceWidget balance={balance} decimals={tCeBMDecimals} loading={status === "loading" && balance === null} />
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Fiat Reserve Balance</CardDescription>
-            <CardTitle>{status === "loading" && fiatBalance === null ? "Loading..." : formatFiatUnits(fiatBalance ?? "0")}</CardTitle>
+            <CardTitle>{status === "loading" && fiatBalance === null ? "Loading..." : formatFiatUnits(fiatBalance ?? "0", fiatDecimals, fiatSymbol)}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -105,9 +129,9 @@ export function EscrowsPage() {
             <Label htmlFor="escrow-amount">Amount (tCeBM)</Label>
             <Input
               id="escrow-amount"
-              type="number"
-              min="0"
-              step="1"
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
             />
@@ -129,7 +153,7 @@ export function EscrowsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Confirm Reserve Tokenisation</CardTitle>
-            <CardDescription>{formatCeBM(amount)} will be submitted for central bank tCeBM issuance.</CardDescription>
+            <CardDescription>{formatCeBMDisplay(amount, tCeBMDecimals)} will be submitted for central bank tCeBM issuance.</CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
             <Button onClick={() => void onSubmit()} disabled={status === "loading"}>
@@ -164,7 +188,7 @@ export function EscrowsPage() {
               {escrows.map((escrow) => (
                 <TableRow key={escrow.id}>
                   <TableCell className="font-medium">{escrow.id}</TableCell>
-                  <TableCell>{formatCeBM(escrow.amount)}</TableCell>
+                  <TableCell>{formatCeBM(escrow.amount, tCeBMDecimals)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(escrow.status)}>{getPaymentStatusLabel(escrow.status)}</Badge>
                   </TableCell>

@@ -111,6 +111,63 @@ describe("RelayStore block watermark (R2-H-11)", () => {
     expect(store.hasDelivered("trade-9:settle")).toBe(true);
   });
 
+  // ── journal retention: what was dropped, so a consumer can tell it missed something ──
+  //
+  // The journal is capped, and a consumer that lags past the cap gets the entries that
+  // survived and advances its cursor over the ones that did not — silently. For the settle
+  // journal that is a lost settlement: the destination leg is the only party that can settle
+  // itself, and the journal is how it finds out. The relay logs the trim; the consumer, which
+  // is the one that loses, learns nothing.
+  //
+  // Contiguity cannot be used to spot the hole: `seq` is one counter shared by both journals,
+  // so a kind's surviving seqs are legitimately non-contiguous. What is exact is the highest
+  // seq ever dropped from that kind — a cursor at or below it has missed events.
+  it("records the highest seq dropped from each journal, per kind", async () => {
+    const store = new RelayStore(file, silentLog, 3); // tiny cap so the trim is reachable
+    await store.init();
+
+    expect(store.journalTrimmedThrough("settle")).toBe(0); // nothing dropped yet
+
+    const seqs: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      seqs.push(await store.appendEvent("settle", `s${i}`, { i }));
+    }
+    // 5 appended, cap 3 → the two oldest are gone.
+    expect(store.journalTrimmedThrough("settle")).toBe(seqs[1]);
+    expect(store.journalTrimmedThrough("lock")).toBe(0); // the other kind is untouched
+
+    // Everything still retained is strictly above the mark, which is what makes the
+    // comparison safe for a consumer.
+    for (const e of store.getEventsSince("settle", 0)) {
+      expect(e["seq"] as number).toBeGreaterThan(store.journalTrimmedThrough("settle"));
+    }
+  });
+
+  it("keeps the trim mark across a restart", async () => {
+    const store = new RelayStore(file, silentLog, 2);
+    await store.init();
+    for (let i = 0; i < 4; i++) await store.appendEvent("lock", `l${i}`, { i });
+    const mark = store.journalTrimmedThrough("lock");
+    expect(mark).toBeGreaterThan(0);
+
+    const reloaded = new RelayStore(file, silentLog, 2);
+    await reloaded.init();
+    expect(reloaded.journalTrimmedThrough("lock")).toBe(mark);
+  });
+
+  // A store written by a relay that predates the mark must load, and must not claim events
+  // were dropped when it simply does not know.
+  it("reads a store with no trim mark as nothing dropped", async () => {
+    await fs.writeFile(file, JSON.stringify({
+      delivered: {}, retries: [], watermarks: {}, meta: {},
+      journal: { lock: [], settle: [{ seq: 7, id: "x", event: { seq: 7 } }] }, seq: 8,
+    }));
+    const store = new RelayStore(file, silentLog);
+    await store.init();
+    expect(store.journalTrimmedThrough("settle")).toBe(0);
+    expect(store.getEventsSince("settle", 0).length).toBe(1);
+  });
+
   it("writes atomically — no leftover .tmp file after a write", async () => {
     const store = new RelayStore(file, silentLog);
     await store.init();

@@ -43,10 +43,16 @@ type BadgeVariant = "success" | "warning" | "destructive" | "outline" | "default
 
 // statusView maps the end-to-end swap lifecycle to a badge. COMPLETED = done,
 // FAILED = errored, everything else is an in-flight stage.
+//
+// DELIVERED_AFTER_RETRY reads as success on purpose: the question this row answers is whether
+// anyone still has to chase the payment, and the answer is no — the beneficiary was paid. The
+// label keeps the caveat visible, because the payer was shown a failure at the time.
 function statusView(status: CrossCurrencySwapStatus): { variant: BadgeVariant; label: string } {
   switch (status) {
     case "COMPLETED":
       return { variant: "success", label: "Completed" };
+    case "DELIVERED_AFTER_RETRY":
+      return { variant: "success", label: "Delivered after retry" };
     case "FAILED":
       return { variant: "destructive", label: "Failed" };
     case "QUOTING":

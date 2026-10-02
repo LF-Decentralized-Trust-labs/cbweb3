@@ -62,6 +62,10 @@ func (s *stubPositionReader) ListPositions(_ context.Context, stateFilter string
 	return positions, nil
 }
 
+func (s *stubPositionReader) ListPositionsForOwner(ctx context.Context, _, stateFilter string) ([]services.BridgePositionResult, error) {
+	return s.ListPositions(ctx, stateFilter)
+}
+
 func newBridgeTestFiber() *fiber.App {
 	app := fiber.New()
 	app.Use(func(c *fiber.Ctx) error {

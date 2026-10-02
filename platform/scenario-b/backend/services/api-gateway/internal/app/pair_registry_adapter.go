@@ -264,6 +264,13 @@ func (c *PairRegistryClient) DeployDedicatedAMM(ctx context.Context, tokenA, tok
 		return "", fmt.Errorf("pair registry: deploy AMM: %w", err)
 	}
 	if _, err := evm.WaitForReceipt(ctx, c.ec, deployTx, "deploy AMM"); err != nil {
+		// This path broadcasts through bind and waits here, so it does not get the shared
+		// submission path's counter invalidation. A deploy that is never mined leaves the counter
+		// one ahead of the chain, and every later submission from this account queues behind a
+		// nonce that will never be reached.
+		if evm.ShouldResyncNonce(err) {
+			c.signer.MarkNonceStale()
+		}
 		return "", fmt.Errorf("pair registry: %w", err)
 	}
 
@@ -330,6 +337,11 @@ func (c *PairRegistryClient) applyDefaultFee(ctx context.Context, amm common.Add
 		return
 	}
 	if _, err := evm.WaitForReceipt(ctx, c.ec, tx, "setFeeBps"); err != nil {
+		// Same reason as the deploy above: bind broadcast it, so nothing else invalidates the
+		// counter if the receipt never arrives.
+		if evm.ShouldResyncNonce(err) {
+			c.signer.MarkNonceStale()
+		}
 		log.Printf("warning: AMM %s setFeeBps(%d) was submitted but not confirmed (%v) — verify feeBps on-chain", amm.Hex(), feeBps, err)
 		return
 	}

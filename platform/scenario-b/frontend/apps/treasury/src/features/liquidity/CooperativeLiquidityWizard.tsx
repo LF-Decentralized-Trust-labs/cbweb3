@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@cbweb3/ui";
+import { amountRefusalMessage, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label, parseAmount, toast } from "@cbweb3/ui";
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useAuthStore } from "../../stores/auth.store";
 import { usePaymentStore } from "../../stores";
 import { SOVEREIGN_FLOW_PHASE } from "../../types/liquidity.types";
 import type { CommitResult, CommitSide, PendingCommit } from "../../types/liquidity.types";
-import { currencyFromTokenSymbol, displayToBase, formatAmountInput, formatTokenAmount, parseAmountInput } from "../../types";
+import { baseToExactDisplay, currencyFromTokenSymbol, displayToBase, formatTokenAmount } from "../../types";
 import { usePolling } from "../../hooks/usePolling";
 import { formatRemainingMs, poolSideInfo, sideRoleLabel } from "./format";
 import { useLiquidityStore } from "./liquidity.store";
@@ -119,7 +119,9 @@ export function CooperativeLiquidityWizard({
       // FX-suggested amount (editable) on the Lock-Mint step; carry the pool pair forward.
       setCommitPoolPair(matchContext.poolPair);
       // suggestedAmount arrives as raw wei from the API — convert to display format.
-      setMintAmount(formatAmountInput(formatTokenAmount(matchContext.suggestedAmount, tokenDecimals)));
+      // Exact, not the 2-place display form: this prefills the amount field, and a
+      // truncated suggestion would no longer match the counterparty's side.
+      setMintAmount(baseToExactDisplay(matchContext.suggestedAmount, tokenDecimals));
     }
   }, [matchContext, tokenDecimals]);
 
@@ -187,7 +189,15 @@ export function CooperativeLiquidityWizard({
 
   const handleLockMint = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await lockMint(displayToBase(parseAmountInput(mintAmount), tokenDecimals));
+    // parseAmountInput stripped every comma as a thousands separator, so a typed
+    // "1000,10" reached displayToBase as 100010 — a hundredfold overstatement,
+    // silently. The ISO 20022 rule refuses it here instead.
+    const parsedMint = parseAmount(mintAmount);
+    if (!parsedMint.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedMint.refusal));
+      return;
+    }
+    await lockMint(displayToBase(parsedMint.canonical, tokenDecimals));
 
     if (useLiquidityStore.getState().status === "idle") {
       // Default the commit amount to what was just minted (the user can still adjust it).
@@ -198,9 +208,14 @@ export function CooperativeLiquidityWizard({
 
   const handleCommit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const parsedCommit = parseAmount(commitAmount);
+    if (!parsedCommit.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedCommit.refusal));
+      return;
+    }
     await submitCommit({
       pool_pair: commitPoolPair,
-      amount: displayToBase(parseAmountInput(commitAmount), tokenDecimals),
+      amount: displayToBase(parsedCommit.canonical, tokenDecimals),
     });
 
     const latestCommit = useLiquidityStore.getState().activeCommit;
@@ -304,10 +319,7 @@ export function CooperativeLiquidityWizard({
               <Input
                 id="wizard_amount"
                 value={mintAmount}
-                onChange={(event) => {
-                  const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
-                  setMintAmount(formatAmountInput(cleaned));
-                }}
+                onChange={(event) => setMintAmount(event.target.value)}
                 inputMode="decimal"
                 placeholder="0.00"
                 required
@@ -352,10 +364,7 @@ export function CooperativeLiquidityWizard({
               <Input
                 id="wizard_commit_amount"
                 value={commitAmount}
-                onChange={(event) => {
-                  const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
-                  setCommitAmount(formatAmountInput(cleaned));
-                }}
+                onChange={(event) => setCommitAmount(event.target.value)}
                 inputMode="decimal"
                 placeholder="0.00"
                 required

@@ -118,7 +118,7 @@ func newCATestService(t *testing.T) (*complianceService, *recordingRegistry) {
 
 func TestNew_NilBlockchainUsesNoop(t *testing.T) {
 	t.Parallel()
-	srv, err := New(repository.NewMemoryRepository(), nil, nil, nil)
+	srv, err := New(repository.NewMemoryRepository(), nil, nil)
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
@@ -463,7 +463,7 @@ func TestApproveKYC_RegistersOnChain(t *testing.T) {
 // KYC approval is the path that puts a commercial bank's wallet on-chain, so it is also
 // where that wallet acquires its institution. Deriving from bank_code (not the display
 // name) is what keeps a bank's second wallet inside the same institution — the property
-// the AMM resume quorum counts on.
+// institution attribution counts on.
 func TestApproveKYC_DerivesInstitutionIDFromBankCode(t *testing.T) {
 	t.Parallel()
 	svc, reg := newCATestService(t)

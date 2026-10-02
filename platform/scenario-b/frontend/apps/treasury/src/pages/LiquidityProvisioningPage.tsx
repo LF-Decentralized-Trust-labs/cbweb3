@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  amountRefusalMessage,
   Button,
   Card,
   CardContent,
@@ -9,6 +10,7 @@ import {
   CardTitle,
   Input,
   Label,
+  parseAmount,
   Table,
   TableBody,
   TableCell,
@@ -21,7 +23,7 @@ import { BadgeCheck, Droplets, FilePlus2, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { hubLiquidityApi } from "../services/api";
 import type { EscrowStatus, HubCurrency, HubPair } from "../types";
-import { displayToBase, parseAmountInput } from "../types/payment.types";
+import { displayToBase } from "../types/payment.types";
 
 // Hub W-tCeBM tokens use 18 decimals. Operators enter whole-token amounts
 // (e.g. "1000"); the backend expects raw base units, so convert on the way out.
@@ -205,15 +207,19 @@ export function LiquidityProvisioningPage() {
       toast.error("Pool pair is required");
       return;
     }
-    if (!/^\d+(\.\d+)?$/.test(parseAmountInput(seedAmount.trim()))) {
-      toast.error("Amount must be a non-negative number");
+    // parseAmountInput used to strip every comma as a thousands separator, so a
+    // typed "1000,10" arrived here as 100010 — a hundredfold overstatement that
+    // the regex below happily accepted. The ISO 20022 rule refuses it instead.
+    const parsedSeed = parseAmount(seedAmount);
+    if (!parsedSeed.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedSeed.refusal));
       return;
     }
     setSeeding(true);
     try {
       const result = await hubLiquidityApi.depositSide({
         pool_pair: seedPoolPair.trim(),
-        amount: displayToBase(parseAmountInput(seedAmount.trim()), HUB_TOKEN_DECIMALS),
+        amount: displayToBase(parsedSeed.canonical, HUB_TOKEN_DECIMALS),
       });
       toast.success(`Deposited side ${result.side} for ${result.pool_pair}`);
       await loadEscrow(seedPoolPair);

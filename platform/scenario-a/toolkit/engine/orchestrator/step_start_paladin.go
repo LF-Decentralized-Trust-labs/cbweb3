@@ -87,12 +87,12 @@ func (s *startPaladinStep) Run(ctx context.Context) error {
 func (s *startPaladinStep) composeEnv() []string {
 	image := s.paladinImage
 	if image == "" {
-		image = defaultPaladinImage
+		image = DefaultPaladinImage
 	}
 	// Derive Paladin CB host ports from the RPC URL. WS = RPC+1, gRPC = RPC+2 —
 	// deterministic and unique per spoke (the RPC port is per-spoke). Internal
 	// container ports (8548/8549/9000) are fixed by the template.
-	rpcPort := paladinHostPort(s.paladinCBURL, 31648)
+	rpcPort := paladinHostPort(s.paladinCBURL, cbPaladinFallbackRPCPort)
 	// Single-host peers reach the CB Paladin by container name over the shared
 	// spoke network on the container port 9000, so the host-published gRPC port is
 	// vestigial and stays in the per-spoke rpcPort+2 band (collision-free when

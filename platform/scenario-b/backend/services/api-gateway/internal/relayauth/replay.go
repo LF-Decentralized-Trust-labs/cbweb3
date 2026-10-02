@@ -26,6 +26,42 @@ type SeenStore interface {
 	Admit(ctx context.Context, key string, ttl time.Duration) (bool, error)
 }
 
+// Admission is what the guard concluded about one signature.
+//
+// It replaced a bool because the bool collapsed two situations the caller must tell apart: a
+// signature the shared store confirmed is new, and one admitted only because the shared store did
+// not answer. The second is best-effort, and on a compliance control best-effort is not enough.
+//
+// The zero value is AdmissionRefused on purpose. A forgotten assignment then denies rather than
+// admits, which is the opposite of the defect this type exists to fix.
+type Admission int
+
+const (
+	// AdmissionRefused: this signature has been used before. Reject the request.
+	AdmissionRefused Admission = iota
+	// AdmissionAdmitted: first use, and the answer is as authoritative as this deployment gets —
+	// either the shared store agreed, or no shared store is configured, which is a deployment
+	// choice rather than a fault.
+	AdmissionAdmitted
+	// AdmissionDegraded: first use according to THIS PROCESS ONLY. A shared store is configured
+	// and did not answer, so a replay sent to another replica would not be caught right now.
+	// Routes that must not fail open reject on this; the rest proceed.
+	AdmissionDegraded
+)
+
+// String makes log lines and test failures readable.
+func (a Admission) String() string {
+	switch a {
+	case AdmissionRefused:
+		return "refused"
+	case AdmissionAdmitted:
+		return "admitted"
+	case AdmissionDegraded:
+		return "degraded"
+	}
+	return "unknown"
+}
+
 // ReplayGuard refuses a signature that has already authenticated a request.
 //
 // WHY IT IS NEEDED. The canonical string binds method, path, body and timestamp, which makes a
@@ -90,19 +126,22 @@ func NewReplayGuard(ttl time.Duration) *ReplayGuard {
 //
 // A nil guard admits: a gateway wired without one is in the pre-existing state, and turning an
 // unconfigured cache into a wall of 401s would be a worse failure than the replay it prevents.
-func (g *ReplayGuard) Admit(keyID, signatureB64 string, now time.Time) bool {
+func (g *ReplayGuard) Admit(keyID, signatureB64 string, now time.Time) Admission {
 	if g == nil {
-		return true
+		return AdmissionAdmitted
 	}
 	key := keyID + "\x00" + signatureIdentity(signatureB64)
 
 	if !g.admitLocal(key, now) {
 		// Already known here. Decided without a round-trip, so no store hiccup can turn a replay
 		// this process has already seen into an admission.
-		return false
+		return AdmissionRefused
 	}
 	if g.shared == nil {
-		return true
+		// Not degraded: a deployment with no shared store is the single-process one this guard
+		// was born in, and its answer is as good as that deployment gets. Calling it degraded
+		// would make the fail-closed routes permanently unusable wherever Redis was never wired.
+		return AdmissionAdmitted
 	}
 
 	// Bounded on purpose: this runs inside every internal request, so a store that hangs must cost
@@ -111,16 +150,22 @@ func (g *ReplayGuard) Admit(keyID, signatureB64 string, now time.Time) bool {
 	defer cancel()
 	admitted, err := g.shared.Admit(ctx, key, g.ttl)
 	if err != nil {
-		// Deliberately NOT a refusal. Every internal route rides this middleware, so failing closed
-		// on an unreachable cache would stop bridge-in, the delegated hub swap and the residue
-		// return — a far larger outage than the replay window it would close. The local guard still
-		// holds within this process, which is exactly the protection the deployment had before the
-		// store was introduced.
+		// Still not a blanket refusal. Every internal route rides this middleware, so failing
+		// closed everywhere would stop bridge-in, the delegated hub swap and the residue return —
+		// a far larger outage than the replay window it would close. The local guard still holds
+		// within this process, which is the protection the deployment had before the store existed.
+		//
+		// What changed is that this is now REPORTED as degraded rather than as a clean admission,
+		// so a route that cannot afford best-effort can refuse on its own. See the fail-closed set
+		// in the relay-signature middleware.
 		log.Printf("[relay-auth] shared replay store unavailable (%v) — falling back to this instance's "+
 			"own memory; a replay sent to another replica would not be caught while this lasts", err)
-		return true
+		return AdmissionDegraded
 	}
-	return admitted
+	if !admitted {
+		return AdmissionRefused
+	}
+	return AdmissionAdmitted
 }
 
 // admitLocal is the in-process half: it records the key and reports whether this is its first use

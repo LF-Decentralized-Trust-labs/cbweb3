@@ -83,13 +83,13 @@ func TestRunFound_Integration(t *testing.T) {
 	defer cancel()
 
 	// SC-001: First run provisions successfully.
-	if err := RunFound(ctx, m, deps); err != nil {
+	if _, err := RunFound(ctx, m, deps); err != nil {
 		t.Fatalf("RunFound (first run) failed: %v", err)
 	}
 
 	// SC-003: Second run is idempotent and fast.
 	start := time.Now()
-	if err := RunFound(ctx, m, deps); err != nil {
+	if _, err := RunFound(ctx, m, deps); err != nil {
 		t.Fatalf("RunFound (idempotent run) failed: %v", err)
 	}
 	elapsed := time.Since(start)

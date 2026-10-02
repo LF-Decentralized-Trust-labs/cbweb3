@@ -83,3 +83,35 @@ func TestRenderConfigsStep_Run_ErrorsOnMissingTemplate(t *testing.T) {
 		t.Error("Run should error when template directory does not exist")
 	}
 }
+
+// The log level must be an environment override with an info default — the whole
+// point of the change that removed the hardcoded debug. Both directions are pinned
+// because each fails independently: a default that silently reverts to debug
+// reopens the 96 GB incident, and an override that no longer reaches the template
+// takes debug away from whoever is mid-investigation.
+func TestPaladinLogLevel_DefaultsToInfoAndHonoursTheOverride(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		t.Setenv("PALADIN_LOG_LEVEL", "")
+		if got := paladinLogLevel(); got != "info" {
+			t.Errorf("paladinLogLevel() = %q with no override, want %q", got, "info")
+		}
+	})
+
+	t.Run("override", func(t *testing.T) {
+		t.Setenv("PALADIN_LOG_LEVEL", "debug")
+		if got := paladinLogLevel(); got != "debug" {
+			t.Errorf("paladinLogLevel() = %q with PALADIN_LOG_LEVEL=debug, want %q — debug must "+
+				"stay reachable without editing a template", got, "debug")
+		}
+	})
+
+	// Whitespace-only is not an override. Without the trim it would pass a blank
+	// level straight into Paladin's config, which is a startup failure rather than
+	// a default.
+	t.Run("blank is not an override", func(t *testing.T) {
+		t.Setenv("PALADIN_LOG_LEVEL", "   ")
+		if got := paladinLogLevel(); got != "info" {
+			t.Errorf("paladinLogLevel() = %q for a blank override, want %q", got, "info")
+		}
+	})
+}

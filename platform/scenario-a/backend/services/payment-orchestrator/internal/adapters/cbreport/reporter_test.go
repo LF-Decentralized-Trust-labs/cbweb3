@@ -61,7 +61,76 @@ func TestReporter_ReportSettledLeg_ErrorsOnNon2xx(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if err := New(srv.URL, "").ReportSettledLeg(context.Background(), ports.SettledLeg{ContractID: "c1"}); err == nil {
+	// noSleep: a 500 is now retried, so without it this case pays the real backoff
+	// and this test alone took six seconds.
+	r := New(srv.URL, "")
+	r.noSleep()
+	if err := r.ReportSettledLeg(context.Background(), ports.SettledLeg{ContractID: "c1"}); err == nil {
 		t.Fatal("expected error on 500, got nil")
+	}
+}
+
+// TestReporter_RetriesTransientFailures pins the bounded retry. The report is the only
+// record of an incoming leg, so losing it on the first hiccup silently removes a
+// settled movement from the ledger.
+func TestReporter_RetriesTransientFailures(t *testing.T) {
+	var attempts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		if attempts < 3 {
+			w.WriteHeader(http.StatusBadGateway) // 5xx — worth another attempt
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	r := New(srv.URL, "")
+	r.noSleep()
+	if err := r.ReportSettledLeg(context.Background(), ports.SettledLeg{ContractID: "c1"}); err != nil {
+		t.Fatalf("a leg that succeeds on the third attempt must be reported: %v", err)
+	}
+	if attempts != 3 {
+		t.Errorf("attempts = %d, want 3", attempts)
+	}
+}
+
+// TestReporter_DoesNotRetryA4xx guards against hammering the central bank with a
+// payload it has already rejected. Repeating the same bytes cannot change a 4xx.
+func TestReporter_DoesNotRetryA4xx(t *testing.T) {
+	var attempts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	r := New(srv.URL, "")
+	r.noSleep()
+	if err := r.ReportSettledLeg(context.Background(), ports.SettledLeg{ContractID: "c1"}); err == nil {
+		t.Fatal("a 4xx must be reported as an error")
+	}
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want 1 — a 4xx must not be retried", attempts)
+	}
+}
+
+// TestReporter_GivesUpAfterMaxAttempts bounds the loop: an unavailable central bank
+// must not be retried forever.
+func TestReporter_GivesUpAfterMaxAttempts(t *testing.T) {
+	var attempts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	r := New(srv.URL, "")
+	r.noSleep()
+	if err := r.ReportSettledLeg(context.Background(), ports.SettledLeg{ContractID: "c1"}); err == nil {
+		t.Fatal("an exhausted retry budget must surface as an error, not silence")
+	}
+	if attempts != maxAttempts {
+		t.Errorf("attempts = %d, want %d", attempts, maxAttempts)
 	}
 }

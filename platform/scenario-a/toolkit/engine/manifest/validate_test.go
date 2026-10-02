@@ -52,6 +52,9 @@ spec:
     - role: ROLE_NOC_ADMIN
       username: admin@brasil.noc.gov
       password: noc-local
+    - role: ROLE_ADMISSION
+      username: admin@brasil.admission.gov
+      password: admission-local
 `
 
 // validManifest returns a fully valid Manifest struct for use in tests.
@@ -77,11 +80,13 @@ func validManifest() *manifest.Manifest {
 			Image:       "build",
 			KeyProvider: "kms://local-emulator",
 			CertSource:  "self-signed",
+			Relay:       &manifest.Relay{Endpoint: "http://localhost:4000"},
 			AdminUsers: []manifest.AdminUser{
 				{Role: "ROLE_GOVERNANCE", Username: "admin@brasil.governance.gov", Password: "governance-local"},
 				{Role: "ROLE_TREASURY", Username: "admin@brasil.treasury.gov", Password: "treasury-local"},
 				{Role: "ROLE_SUPERVISOR", Username: "admin@brasil.supervisor.gov", Password: "supervisor-local"},
 				{Role: "ROLE_NOC_ADMIN", Username: "admin@brasil.noc.gov", Password: "noc-local"},
+				{Role: "ROLE_ADMISSION", Username: "admin@brasil.admission.gov", Password: "admission-local"},
 			},
 		},
 	}
@@ -154,7 +159,9 @@ func TestValidate_ValidManifest(t *testing.T) {
 
 func TestValidate_ValidManifest_OptionalFieldsOmitted(t *testing.T) {
 	m := validManifest()
-	m.Spec.Relay = nil        // optional
+	// spec.relay was in this list until it became required for mode:found — see
+	// TestValidate_RelayEndpoint_RequiredForFound for why a missing one is not a harmless
+	// default but a bank that silently never settles.
 	m.Spec.JoinBundleRef = "" // optional
 	m.Spec.Node.RPC = nil     // optional
 	m.Spec.Node.WS = nil      // optional
@@ -328,6 +335,46 @@ func TestValidate_DataDir_RequiredForJoin(t *testing.T) {
 	}
 }
 
+// The founding central bank's relay endpoint is what the join bundle carries to every bank
+// that joins the spoke, and a bank's payment-orchestrator polls the relay's settle journal —
+// the path that actually settles a destination leg. Omitting it here produced a bundle with no
+// relay section, and a joining bank then fell back to http://host.docker.internal:4000: not
+// empty, so no startup check fired, and on its own VM simply nothing. That bank never learns
+// of a counterpart lock or a revealed secret, silently.
+func TestValidate_RelayEndpoint_RequiredForFound(t *testing.T) {
+	m := validManifest()
+	m.Spec.Mode = "found"
+	m.Spec.Relay = nil
+	err := manifest.Validate(m)
+	if err == nil || !strings.Contains(err.Error(), "spec.relay.endpoint") {
+		t.Errorf("relay endpoint must be required for mode:found, got: %v", err)
+	}
+}
+
+// A present-but-blank endpoint is the same hole with a section around it.
+func TestValidate_RelayEndpoint_RejectsEmptyForFound(t *testing.T) {
+	m := validManifest()
+	m.Spec.Mode = "found"
+	m.Spec.Relay = &manifest.Relay{Endpoint: ""}
+	err := manifest.Validate(m)
+	if err == nil || !strings.Contains(err.Error(), "spec.relay.endpoint") {
+		t.Errorf("a blank relay endpoint must be rejected for mode:found, got: %v", err)
+	}
+}
+
+// A joining bank inherits the endpoint from the bundle, so its own manifest need not repeat
+// it. The requirement is on the spoke's founder, not on every participant.
+func TestValidate_RelayEndpoint_NotRequiredForJoin(t *testing.T) {
+	m := validManifest()
+	m.Spec.Role = "commercial-bank"
+	m.Spec.Mode = "join"
+	m.Spec.JoinBundleRef = "./bundles/spoke-brl.bundle.yaml"
+	m.Spec.Relay = nil
+	if err := manifest.Validate(m); err != nil && strings.Contains(err.Error(), "spec.relay") {
+		t.Errorf("a joining bank must not be required to declare a relay endpoint, got: %v", err)
+	}
+}
+
 // Feature 032 T049: joinBundleRef is required for mode:join.
 func TestValidate_JoinBundleRef_RequiredForJoin(t *testing.T) {
 	m := validManifest()
@@ -443,6 +490,7 @@ func TestValidate_AdminUsers(t *testing.T) {
 		m.Spec.AdminUsers = []manifest.AdminUser{
 			{Role: "ROLE_GOVERNANCE", Username: "admin@brasil.governance.gov", Password: "p"},
 			{Role: "ROLE_NOC_ADMIN", Username: "admin@brasil.noc.gov", Password: "p"},
+			{Role: "ROLE_ADMISSION", Username: "admin@brasil.admission.gov", Password: "admission-local"},
 		}
 		err := manifest.Validate(m)
 		if err == nil || !strings.Contains(err.Error(), "ROLE_TREASURY") {
@@ -480,10 +528,12 @@ func TestValidate_AdminUsers(t *testing.T) {
 			{Role: "ROLE_TREASURY", Username: "a@bccr.fi.cr", Password: "p"},
 			{Role: "ROLE_SUPERVISOR", Username: "a@bccr.fi.cr", Password: "p"},
 			{Role: "ROLE_NOC_ADMIN", Username: "a@bccr.fi.cr", Password: "p"},
+			{Role: "ROLE_ADMISSION", Username: "admin@brasil.admission.gov", Password: "admission-local"},
 			{Role: "ROLE_GOVERNANCE", Username: "b@bccr.fi.cr", Password: "p"},
 			{Role: "ROLE_TREASURY", Username: "b@bccr.fi.cr", Password: "p"},
 			{Role: "ROLE_SUPERVISOR", Username: "b@bccr.fi.cr", Password: "p"},
 			{Role: "ROLE_NOC_ADMIN", Username: "b@bccr.fi.cr", Password: "p"},
+			{Role: "ROLE_ADMISSION", Username: "admin@brasil.admission.gov", Password: "admission-local"},
 			{Role: "ROLE_SUPERVISOR", Username: "reg@sugeval.fi.cr", Password: "p"},
 		}
 		if err := manifest.Validate(m); err != nil {
@@ -593,5 +643,41 @@ func TestValidate_FiatTokenName_BlankRejected(t *testing.T) {
 	err := manifest.Validate(m)
 	if err == nil || !strings.Contains(err.Error(), "spec.spoke.fiatTokenName") {
 		t.Errorf("blank fiatTokenName must be rejected, got: %v", err)
+	}
+}
+
+// ── spec.noc.portalOrigins ───────────────────────────────────────────────────
+
+// A portal origin is what the NOC backend answers CORS with, and the session is a cookie:
+// a wildcard cannot carry credentials, and Fiber panics on the combination. Rejecting it
+// here turns a stack that provisions and then crash-loops into a manifest error.
+func TestValidate_NOCPortalOrigins(t *testing.T) {
+	accepted := []string{
+		"http://localhost:32645",
+		"http://127.0.0.1:32745",
+		"https://cb-brazil.cbweb3.l-net.io",
+	}
+	for _, o := range accepted {
+		m := validManifest()
+		m.Spec.NOC = &manifest.NOC{PortalOrigins: []string{o}}
+		if err := manifest.Validate(m); err != nil {
+			t.Errorf("origin %q was rejected: %v", o, err)
+		}
+	}
+
+	rejected := []string{
+		"*",                               // cannot carry credentials
+		"http://*.example",                // ditto, less obviously
+		"http://localhost:32645/",         // trailing slash is not part of an origin
+		"http://localhost:32645/a/noc/",   // nor is a path
+		"localhost:32645",                 // no scheme
+		"http://localhost:32645 http://x", // two values in one entry
+	}
+	for _, o := range rejected {
+		m := validManifest()
+		m.Spec.NOC = &manifest.NOC{PortalOrigins: []string{o}}
+		if err := manifest.Validate(m); err == nil {
+			t.Errorf("origin %q was accepted; the backend would refuse it at runtime, or panic", o)
+		}
 	}
 }

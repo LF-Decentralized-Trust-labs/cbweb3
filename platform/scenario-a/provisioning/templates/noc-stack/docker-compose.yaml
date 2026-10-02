@@ -2,8 +2,20 @@
 # The NOC PORTAL is deployed co-located by the CB's `found` (as a CB frontend); this
 # stack adds only the data plane the portal reads from + the agents push to. Own
 # network; DB state in a named volume; no secrets embedded.
+# Container log rotation, applied to every service in this file.
+#
+# Without it Docker's json-file driver has no size cap and no rotation: the
+# Scenario A Paladin containers reached 96 GB (~2.4 GB/day) and a full disk takes
+# the whole network down. 50m x 5 caps each service at 250 MB.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   noc-db:
+    logging: *cbweb3_logging
     image: "postgres:${NOC_DB_IMAGE_TAG:-15-alpine}"
     container_name: "${NOC_PREFIX:?}-noc-db"
     environment:
@@ -17,6 +29,7 @@ services:
     restart: always
 
   noc-backend:
+    logging: *cbweb3_logging
     image: "${NOC_BACKEND_IMAGE:-cbweb3/noc-backend:local}"
     container_name: "${NOC_PREFIX:?}-noc-backend"
     depends_on:
@@ -25,10 +38,44 @@ services:
       # Listen on 8080 (container side of the port mapping below).
       NOC_BACKEND_PORT: "8080"
       DATABASE_URL: "postgres://${NOC_DB_USER}:${NOC_DB_PASSWORD}@${NOC_PREFIX}-noc-db:5432/${NOC_DB_NAME:-noc}?sslmode=disable"
-      # Local lab: no NOC Keycloak realm is validated server-side (the portal login
-      # is real against the CB realm; JWT validation here is a prod hardening).
-      NOC_SKIP_AUTH: "true"
-      NOC_FRONTEND_ORIGIN: "${NOC_FRONTEND_ORIGIN:-*}"
+      # Keycloak validation stays OFF on the toolkit's local stacks, and the reason is
+      # narrower than "prod hardening": the realm is reachable under TWO names —
+      # "localhost:<port>" from the host, where the toolkit runs, and
+      # "host.docker.internal:<port>" from a container, where this backend runs. Keycloak
+      # stamps the token's issuer from whichever name the caller used, and validation
+      # compares it exactly, so the toolkit's own token is refused and provisioning fails.
+      # Pinning the realm's hostname is the fix and is tracked separately, because it is
+      # configuration every portal depends on.
+      #
+      # Set NOC_SKIP_AUTH=false to run with real validation: login, refresh, logout and the
+      # cookie handling all work — only the toolkit's provisioning calls fail. It needs a
+      # reachable realm, which the manifest names in spec.noc.keycloakURL (the samples set
+      # it); with the flag on, that URL is unused.
+      #
+      # What the flag costs while it is on, stated plainly: the no-op Keycloak client makes
+      # BOTH halves no-ops. Validation accepts any cookie value, and the GRANT accepts any
+      # credential — so it is not merely that any session passes, it is that any password
+      # gets in, and the profile the portal shows is a synthetic dev-user.
+      NOC_SKIP_AUTH: "${NOC_SKIP_AUTH:-true}"
+      KEYCLOAK_URL: "${NOC_KEYCLOAK_URL:-}"
+      KEYCLOAK_REALM: "${NOC_KEYCLOAK_REALM:-cbweb3}"
+      # Scenario A's NOC realm client is cbweb3-noc (Scenario B's is noc-portal). The
+      # toolkit exports this on every apply; the default matters only for a hand-run compose.
+      KEYCLOAK_CLIENT_ID: "${NOC_KEYCLOAK_CLIENT_ID:-cbweb3-noc}"
+      # Session cookies over plain HTTP locally. A browser SILENTLY DISCARDS a Secure cookie
+      # on an insecure origin, which presents as a login that succeeds and a session that
+      # never exists — so this must be false wherever the portal is served over http.
+      COOKIE_SECURE: "${NOC_COOKIE_SECURE:-false}"
+      # Keys the HMAC binding each CSRF token to its session. The toolkit mints a RANDOM
+      # value on the first apply and persists it in this stack's own volume, so it survives a
+      # restart — a value that changed on boot would refuse every token issued before it,
+      # which looks like a browser fault rather than a configuration one. Export
+      # NOC_CSRF_SECRET to supply your own; the toolkit then uses it and never overwrites it.
+      CSRF_SECRET: "${NOC_CSRF_SECRET:-}"
+      # Must name the portal exactly. NOT "*": a browser refuses to send credentials to a
+      # wildcard origin, and the session is a cookie now — a wildcard would let the portal
+      # log in and be anonymous on every request afterwards.
+      NOC_FRONTEND_ORIGIN: "${NOC_FRONTEND_ORIGIN:?NOC_FRONTEND_ORIGIN must name the portal origin; a wildcard cannot carry credentials}"
     ports:
       - "${NOC_BACKEND_PORT:?}:8080"
     networks:

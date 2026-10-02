@@ -141,6 +141,13 @@ func (r *scriptedRunner) Run(_ context.Context, name string, args ...string) ([]
 	return []byte(out), nil
 }
 
+// RunWithEnv satisfies exec.CommandRunner. This double does not exercise the environment path —
+// only the Keycloak operator-password steps use it — so the environment is dropped rather than
+// recorded. A double that starts asserting on secrets must record it instead.
+func (r *scriptedRunner) RunWithEnv(ctx context.Context, _ []string, name string, args ...string) ([]byte, error) {
+	return r.Run(ctx, name, args...)
+}
+
 func (r *scriptedRunner) sends() [][]string {
 	var out [][]string
 	for _, c := range r.calls {

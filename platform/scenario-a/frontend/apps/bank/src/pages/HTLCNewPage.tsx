@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  amountRefusalMessage,
+  apiErrorMessage,
   Button,
   Card,
   CardContent,
@@ -9,6 +11,7 @@ import {
   CardTitle,
   Input,
   Label,
+  parseCurrencyAmount,
   Select,
   SelectContent,
   SelectItem,
@@ -20,6 +23,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
+import {
+  currencyFromTokenSymbol,
+  displayToBase,
+} from "../types";
 import { useHtlcStore, usePaymentStore } from "../stores";
 
 type DurationOption = "none" | "1h" | "6h" | "24h" | "custom";
@@ -38,6 +45,10 @@ export function HTLCNewPage() {
   const status = useHtlcStore((state) => state.status);
   const fetchPayments = usePaymentStore((state) => state.fetchAll);
   const balance = usePaymentStore((state) => state.balance);
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
+  const fiatSymbol = usePaymentStore((state) => state.fiatSymbol);
+  // Bounded by the spoke currency's ISO 4217 minor unit (ADR-009).
+  const spokeCurrency = currencyFromTokenSymbol(fiatSymbol);
   const paymentStatus = usePaymentStore((state) => state.status);
 
   const fetchAgreements = useFxAgreementStore((s) => s.fetchAll);
@@ -55,6 +66,14 @@ export function HTLCNewPage() {
   const [agreementId, setAgreementId] = useState("");
   const [lockReceiver, setLockReceiver] = useState("");
   const [lockAmount, setLockAmount] = useState("");
+
+  // Parsed once. Whole base units, the same unit as the FX proposal leg this
+  // lock settles — see @cbweb3/ui (lib/amount.ts). Plain text, because
+  // <input type="number"> reads keystrokes through the browser locale.
+  const parsedLockAmount = useMemo(
+    () => parseCurrencyAmount(lockAmount, spokeCurrency),
+    [lockAmount, spokeCurrency],
+  );
   const [duration, setDuration] = useState<DurationOption>("none");
   const [customDateTime, setCustomDateTime] = useState("");
   const [showLockConfirm, setShowLockConfirm] = useState(false);
@@ -62,6 +81,14 @@ export function HTLCNewPage() {
   const [hashLock, setHashLock] = useState("");
   const [hashReceiver, setHashReceiver] = useState("");
   const [hashAmount, setHashAmount] = useState("");
+
+  // Parsed once. Whole base units, the same unit as the FX proposal leg this
+  // lock settles — see @cbweb3/ui (lib/amount.ts). Plain text, because
+  // <input type="number"> reads keystrokes through the browser locale.
+  const parsedHashAmount = useMemo(
+    () => parseCurrencyAmount(hashAmount, spokeCurrency),
+    [hashAmount, spokeCurrency],
+  );
   const [hashAgreementId, setHashAgreementId] = useState("");
   const [showLockWithHashConfirm, setShowLockWithHashConfirm] = useState(false);
 
@@ -142,8 +169,8 @@ export function HTLCNewPage() {
       toast.error("Receiver identity is required.");
       return false;
     }
-    if (!/^\d+$/.test(lockAmount) || Number(lockAmount) <= 0) {
-      toast.error("Amount must be a positive integer.");
+    if (!parsedLockAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedLockAmount.refusal));
       return false;
     }
     if (agreementId && !/^[a-zA-Z0-9_-]{1,64}$/.test(agreementId)) {
@@ -162,8 +189,8 @@ export function HTLCNewPage() {
       toast.error("Receiver identity is required.");
       return false;
     }
-    if (!/^\d+$/.test(hashAmount) || Number(hashAmount) <= 0) {
-      toast.error("Amount must be a positive integer.");
+    if (!parsedHashAmount.ok) {
+      toast.error(amountRefusalMessage("Amount", parsedHashAmount.refusal));
       return false;
     }
     if (!/^([A-Fa-f0-9]{64}|0x[A-Fa-f0-9]{64})$/.test(hashLock.trim())) {
@@ -184,32 +211,46 @@ export function HTLCNewPage() {
   };
 
   const onConfirmLock = async () => {
+    // Unreachable through the UI: the confirmation only renders after validate()
+    // accepted the amount. Kept because it is what narrows the union, and because the
+    // operator can still edit the field while the card is open.
+    if (!parsedLockAmount.ok) {
+      setShowLockConfirm(false);
+      return;
+    }
     try {
       const result = await lock({
         receiver: lockReceiver,
-        amount: lockAmount,
+        amount: displayToBase(parsedLockAmount.canonical, tCeBMDecimals),
         ...(agreementId.trim() ? { agreement_id: agreementId.trim() } : {}),
         ...(timeLock !== undefined ? { time_lock: timeLock } : {}),
       });
       toast.success("PvP transfer initiated successfully.");
       navigate(`/htlc/${result.contract_id}`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to initiate PvP transfer.");
+      toast.error(apiErrorMessage(error, "Unable to initiate PvP transfer."));
     }
   };
 
   const onConfirmLockWithHash = async () => {
+    // Unreachable through the UI: the confirmation only renders after validate()
+    // accepted the amount. Kept because it is what narrows the union, and because the
+    // operator can still edit the field while the card is open.
+    if (!parsedHashAmount.ok) {
+      setShowLockWithHashConfirm(false);
+      return;
+    }
     try {
       const result = await lockWithHash({
         hash_lock: hashLock.trim(),
         receiver: hashReceiver,
-        amount: hashAmount,
+        amount: displayToBase(parsedHashAmount.canonical, tCeBMDecimals),
         ...(hashAgreementId.trim() ? { agreement_id: hashAgreementId.trim() } : {}),
       });
       toast.success("PvP transfer continuation submitted successfully.");
       navigate(`/htlc/${result.contract_id}`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to continue PvP transfer.");
+      toast.error(apiErrorMessage(error, "Unable to continue PvP transfer."));
     }
   };
 
@@ -225,7 +266,7 @@ export function HTLCNewPage() {
         </Button>
       </div>
 
-      <BalanceWidget balance={balance} loading={paymentStatus === "loading" && balance === null} />
+      <BalanceWidget balance={balance} decimals={tCeBMDecimals} loading={paymentStatus === "loading" && balance === null} />
 
       {/* ── FX Agreement Picker ──────────────────────────────────────── */}
       <Card>
@@ -338,9 +379,9 @@ export function HTLCNewPage() {
               <Label htmlFor="lock-amount">Amount (tCeBM)</Label>
               <Input
                 id="lock-amount"
-                type="number"
-                min="1"
-                step="1"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
                 value={lockAmount}
                 onChange={(event) => setLockAmount(event.target.value)}
               />
@@ -426,9 +467,9 @@ export function HTLCNewPage() {
               <Label htmlFor="hash-amount">Amount (tCeBM)</Label>
               <Input
                 id="hash-amount"
-                type="number"
-                min="1"
-                step="1"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
                 value={hashAmount}
                 onChange={(event) => setHashAmount(event.target.value)}
               />

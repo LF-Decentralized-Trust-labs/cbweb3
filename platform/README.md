@@ -38,10 +38,10 @@ The platform is built to be scenario-scoped: each scenario lives in its own dire
 
 **Directory:** [`scenario-a/`](scenario-a/README.md)
 
-A correspondent banking model where two independent blockchain networks (**Spoke-A** and **Spoke-B**) settle cross-network transactions via dual-layer HTLC. An initiating bank locks funds on one spoke while a responding bank locks on the other; a relay service bridges the HTLC secret to achieve atomic settlement without a shared ledger or trusted intermediary.
+A correspondent banking model where independent blockchain networks (one sovereign spoke per jurisdiction) settle cross-network transactions via dual-layer HTLC. An initiating bank locks funds on one spoke while a responding bank locks on the other; a relay service bridges the HTLC secret to achieve atomic settlement without a shared ledger or trusted intermediary.
 
 **Key characteristics:**
-- Two Besu QBFT networks (chain 1338 and 1339), each with its own central bank and commercial banks
+- One Besu QBFT network per spoke, each with its own central bank and commercial banks. The default sample stands up two: `spoke-brl` (chain 1337) and `spoke-costa-rica` (chain 1340) — see [`scenario-a/samples/README.md`](scenario-a/samples/README.md)
 - Privacy-preserving transfers via Paladin/Zeto (zero-knowledge proofs)
 - Cross-spoke atomic swaps with automatic relay settlement
 - On-chain identity registry, Onboarding/AML compliance, and Keycloak OIDC

@@ -8,8 +8,9 @@
     "build": "tsc -b && vite build",
     "type-check": "tsc -b",
     "lint": "eslint .",
-    "test": "vitest",
-    "preview": "vite preview"
+    "test": "vitest run",
+    "preview": "vite preview",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@cbweb3/ui": "*",

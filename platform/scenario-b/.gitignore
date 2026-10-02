@@ -50,6 +50,7 @@ contracts/out/
 contracts/broadcast/*/1337/
 contracts/broadcast/*/1338/
 contracts/broadcast/*/1339/
+contracts/broadcast/*/1340/
 contracts/broadcast/*/31337/
 contracts/broadcast/**/dry-run/
 contracts/*.flattened.*

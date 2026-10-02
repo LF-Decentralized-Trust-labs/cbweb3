@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@cbweb3/ui";
 import { Controller, useForm } from "react-hook-form";
+import { defaultCountryForCurrency } from "../default-country";
 import type { InstitutionFormValues } from "../schemas/onboarding.schema";
 import { institutionSchema } from "../schemas/onboarding.schema";
 
@@ -31,7 +32,11 @@ export function Step2InstitutionForm({ loading, error, onSubmit }: Step2Institut
     resolver: zodResolver(institutionSchema),
     defaultValues: {
       institution_name: "",
-      country: "BR",
+      // Derived from this portal's own sovereign currency, never assumed. A hardcoded
+      // "BR" here presented Brazil to an Argentine bank, and the country is written
+      // onto a compliance record at its central bank. Unknown currency → empty, so the
+      // operator chooses instead of accepting a wrong value in silence.
+      country: defaultCountryForCurrency(import.meta.env.VITE_FIAT_SYMBOL),
       role: "ROLE_COMMERCIAL_BANK",
       email: "",
       username: "",

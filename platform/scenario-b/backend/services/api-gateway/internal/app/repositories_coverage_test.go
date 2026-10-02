@@ -4,10 +4,14 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/glebarez/sqlite" // pure-Go (no CGO) sqlite driver, test-only
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
@@ -15,8 +19,23 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 )
 
+// repoDB opens the database these repository tests run against: in-memory sqlite by default, or
+// the PostgreSQL instance named by TEST_POSTGRES_DSN when that is set.
+//
+// The default stays sqlite so CI and a plain `go test ./...` need no service. But sqlite is not
+// what production runs, and some of what these repositories rely on is dialect-specific — a
+// COALESCE over a nullable timestamp written through gorm.Expr, a column added to a populated
+// table by AutoMigrate, FOR UPDATE SKIP LOCKED. Those are worth exercising on the real engine
+// before a change to them ships:
+//
+//	docker run -d --name pg-probe -e POSTGRES_PASSWORD=probe -e POSTGRES_DB=probe -p 55432:5432 postgres:17
+//	TEST_POSTGRES_DSN='host=127.0.0.1 port=55432 user=postgres password=probe dbname=probe sslmode=disable' \
+//	  go test ./internal/app/ -count=1
 func repoDB(t *testing.T, models ...interface{}) *gorm.DB {
 	t.Helper()
+	if dsn := os.Getenv("TEST_POSTGRES_DSN"); dsn != "" {
+		return repoPostgresDB(t, dsn, models...)
+	}
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -27,6 +46,69 @@ func repoDB(t *testing.T, models ...interface{}) *gorm.DB {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
+}
+
+// repoPostgresDB gives each test its own schema and drops it afterwards, so a shared PostgreSQL
+// instance behaves like the per-test `:memory:` database these tests were written against. Without
+// it the fixed row ids they seed ("q-1", "halted-row") would collide across tests, and two of them
+// call t.Parallel().
+func repoPostgresDB(t *testing.T, dsn string, models ...interface{}) *gorm.DB {
+	t.Helper()
+	schema := fmt.Sprintf("t_%s", strings.NewReplacer("/", "_", " ", "_", "#", "_").Replace(strings.ToLower(t.Name())))
+	if len(schema) > 63 { // PostgreSQL identifier limit
+		schema = schema[:63]
+	}
+
+	admin, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Skipf("warning: cannot reach TEST_POSTGRES_DSN (%v) — skipping the PostgreSQL run of this test", err)
+	}
+	// Dropped first as well as last: a test killed mid-run leaves its schema behind, and the next
+	// run must not inherit its rows.
+	for _, stmt := range []string{
+		fmt.Sprintf("DROP SCHEMA IF EXISTS %q CASCADE", schema),
+		fmt.Sprintf("CREATE SCHEMA %q", schema),
+	} {
+		if err := admin.Exec(stmt).Error; err != nil {
+			t.Fatalf("prepare schema: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		admin.Exec(fmt.Sprintf("DROP SCHEMA IF EXISTS %q CASCADE", schema))
+		if sqlDB, cerr := admin.DB(); cerr == nil {
+			_ = sqlDB.Close()
+		}
+	})
+
+	// search_path goes on the DSN, not through a SET: GORM pools connections, and a SET issued on
+	// one of them would leave the others pointing at the public schema.
+	db, err := gorm.Open(postgres.Open(withSearchPath(dsn, schema)), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, cerr := db.DB(); cerr == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	if err := db.AutoMigrate(models...); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	return db
+}
+
+// withSearchPath appends search_path to either DSN form pgx accepts: key/value pairs, or a URL.
+func withSearchPath(dsn, schema string) string {
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		sep := "?"
+		if strings.Contains(dsn, "?") {
+			sep = "&"
+		}
+		return dsn + sep + "search_path=" + schema
+	}
+	return dsn + " search_path=" + schema
 }
 
 // ---------------------------------------------------------------------------

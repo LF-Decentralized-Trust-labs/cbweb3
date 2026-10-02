@@ -41,8 +41,19 @@ const (
 	StepRenderCBEnv       = "render-cb-env"
 	StepStartCBInfra      = "start-cb-infra"
 	StepProvisionKeycloak = "provision-keycloak"
-	StepStartCBBackend    = "start-cb-backend"
-	StepStartCBFrontend   = "start-cb-frontend"
+	// StepReconcileAdminUsers converges the manifest's operator accounts and their realm roles on
+	// EVERY run. provision-keycloak seeds a realm import, which Keycloak applies only when the realm
+	// does not yet exist, and its Check skips whenever Keycloak is up — so without this a role newly
+	// declared in spec.adminUsers never reaches an entity that is already provisioned.
+	StepReconcileAdminUsers = "reconcile-admin-users"
+	// StepReconcileKeycloakRealm converges what reconcile-admin-users does not: the realm's own
+	// settings (sslRequired, access-token lifespan) and each client's webOrigins and redirectUris.
+	// Same reason, one level out — `--import-realm` skips a realm that already exists, so a portal
+	// origin added to the manifest was written into the import volume, ignored by Keycloak, and
+	// reported as applied. Client secrets are deliberately not converged; see the step's file.
+	StepReconcileKeycloakRealm = "reconcile-keycloak-realm"
+	StepStartCBBackend         = "start-cb-backend"
+	StepStartCBFrontend        = "start-cb-frontend"
 	// Per-entity launcher (distributed A/B entry point). Runs in both modes.
 	StepStartLauncher = "start-launcher"
 	// Per-host reverse proxy (Caddy): one :80 entrypoint routing portals + api by path.
@@ -79,6 +90,8 @@ var CanonicalStepOrder = []string{
 	StepRenderCBEnv,
 	StepStartCBInfra,
 	StepProvisionKeycloak,
+	StepReconcileAdminUsers,
+	StepReconcileKeycloakRealm,
 	StepStartCBBackend,
 	StepStartCBFrontend,
 	StepRegisterRelay,
@@ -88,6 +101,7 @@ var CanonicalStepOrder = []string{
 // Canonical step name constants for mode:join. Kept in a namespace distinct from
 // mode:found so both modes can share a SPOKE_DATA_DIR state file without collision.
 const (
+	StepCheckRelay      = "check-relay"
 	StepWriteGenesis    = "write-genesis"
 	StepStartBesuJoin   = "start-besu-join"
 	StepWaitSync        = "wait-sync"
@@ -136,6 +150,7 @@ const (
 //     bilateral FXAgreement.
 //   - proof-of-possession / receive-cert: governance-gated identity (see above).
 var CanonicalJoinStepOrder = []string{
+	StepCheckRelay,
 	StepWriteGenesis,
 	StepStartBesuJoin,
 	StepWaitSync,
@@ -146,6 +161,12 @@ var CanonicalJoinStepOrder = []string{
 	StepRenderBankEnv,
 	StepStartBankInfra,
 	StepProvisionBankKeycloak,
+	// Both reconcile steps run in join too. The realm import is first-apply-only for a bank
+	// exactly as it is for a central bank, and a bank's realm carries the same drift-prone
+	// declarations: spec.adminUsers roles, and the client origins derived from
+	// spec.frontendHost / spec.proxy.
+	StepReconcileAdminUsers,
+	StepReconcileKeycloakRealm,
 	StepStartBackend,
 	StepStartBankFrontend,
 	StepCreatePenteJoin,

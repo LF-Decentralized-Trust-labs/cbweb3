@@ -5,6 +5,8 @@
 package router
 
 import (
+	"strings"
+
 	"os"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
@@ -32,12 +34,49 @@ type Dependencies struct {
 	// Only wired when PAYMENT_GRPC_ADDR is set.
 	PaymentHandler *handlers.PaymentHandler
 	V2Deps         v2router.Dependencies
+	// CSRFSecret keys the HMAC binding a CSRF token to its session. When empty the
+	// guard still runs and refuses every mutating request, which is the safe way to
+	// fail: a gateway that silently stopped enforcing CSRF because a value was
+	// missing is the failure this control exists to prevent.
+	CSRFSecret []byte
+}
+
+// csrfExempt reports whether a request is outside the CSRF guard's scope.
+//
+// Only two kinds of route qualify, and each has to survive being read aloud:
+//
+//   - The auth entry points run BEFORE a session exists. Login and refresh have no
+//     token to present. Logout is exempt for a different reason: it is idempotent and
+//     harmless to force, while gating it would strand a user whose CSRF cookie
+//     expired before their session did — unable to log out, with no recourse in the UI.
+//   - The /internal tree is authenticated by a relay signature, not by a cookie. CSRF
+//     defends against AMBIENT credentials the browser attaches on its own; a signed
+//     service call has none, so there is nothing here for a browser to be tricked into.
+//
+// There is deliberately no exemption for Bearer-authenticated requests. Skipping the
+// check whenever a caller authenticates by header lets that caller opt out simply by
+// omitting the cookie — an exemption anyone can select is not a control.
+func csrfExempt(c *fiber.Ctx) bool {
+	switch c.Path() {
+	case "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/logout":
+		return true
+	}
+	return strings.HasPrefix(c.Path(), "/internal/")
 }
 
 // Setup registers all gateway HTTP routes and middleware.
 func Setup(app *fiber.App, deps Dependencies) {
 	// X-Correlation-Id: generated/propagated on ALL requests (Complemento D / NFR-OPS-001).
 	app.Use(middleware.CorrelationID())
+
+	// CSRF is mounted app-wide, BEFORE any route is registered, so a route added
+	// later is protected without anyone remembering to protect it. Attaching it per
+	// group is how the v2 tree ended up with 27 mutating routes and no guard at all.
+	app.Use(middleware.CSRF(middleware.CSRFConfig{
+		Secret:    deps.CSRFSecret,
+		SessionID: func(c *fiber.Ctx) string { return c.Cookies("access_token") },
+		Exempt:    csrfExempt,
+	}))
 
 	app.Get("/openapi.yaml", handlers.OpenAPIYAML)
 	app.Get("/docs", handlers.SwaggerUI)
@@ -75,8 +114,12 @@ func Setup(app *fiber.App, deps Dependencies) {
 	complianceGroup := app.Group("/api/v1/compliance", middleware.RequireCookieAuth(deps.AuthProvider))
 	complianceGroup.Get("/kyc/status/:subject", deps.ComplianceHandler.GetKYCStatus)
 	complianceGroup.Post("/aml/screen", deps.ComplianceHandler.AMLScreen)
-	complianceGroup.Get("/participants", middleware.RequireRole("ROLE_GOVERNANCE"), deps.ComplianceHandler.ListParticipants)
-	complianceGroup.Post("/approve-kyc", middleware.RequireRole("ROLE_GOVERNANCE"), deps.GovernanceHandler.ApproveKYC)
+	// Onboarding authorization (spec 042). The read view is shared by the governance
+	// and Admission profiles; approving KYC is Admission-exclusive. Both carry
+	// per-route guards already, so these are plain guard changes — contrast with
+	// govGroup below, whose guard is prefix-scoped.
+	complianceGroup.Get("/participants", middleware.RequireRole("ROLE_GOVERNANCE", "ROLE_ADMISSION"), deps.ComplianceHandler.ListParticipants)
+	complianceGroup.Post("/approve-kyc", middleware.RequireRole("ROLE_ADMISSION"), deps.GovernanceHandler.ApproveKYC)
 	if deps.SupervisorHandler != nil {
 		complianceGroup.Get("/audit/logs", middleware.RequireSupervisorRole(), deps.SupervisorHandler.GetAuditLogs)
 		complianceGroup.Get("/zk-pointer/verify", middleware.RequireSupervisorRole(), deps.SupervisorHandler.VerifyZKPointer)
@@ -86,22 +129,43 @@ func Setup(app *fiber.App, deps Dependencies) {
 	}
 
 	// --- Governance Portal ---
+	// The group guard is the UNION of the roles used inside the group, because Fiber
+	// group middleware is PREFIX-scoped: a route-level RequireRole runs *in addition*
+	// to it, so a narrower group guard would 403 an Admission caller before its route
+	// guard ever ran (and re-registering the path at app level does not escape the
+	// prefix — only a different path does, see /api/v1/audit/logs below).
+	//
+	// CONSEQUENCE: the group no longer authorizes anything on its own. EVERY route
+	// below must carry its own explicit guard. A route added here without one is
+	// reachable by BOTH profiles — see spec 042 INV-5 and the exhaustive table in
+	// specs/042-admission-onboarding-profile/contracts/authorization-matrix.md.
 	govGroup := app.Group("/api/v1/governance",
 		middleware.RequireCookieAuth(deps.AuthProvider),
-		middleware.RequireRole("ROLE_GOVERNANCE"),
+		middleware.RequireRole("ROLE_GOVERNANCE", "ROLE_ADMISSION"),
 	)
-	govGroup.Post("/participants", deps.GovernanceHandler.RegisterParticipant)
-	govGroup.Get("/registry", deps.GovernanceHandler.GetRegistry)
-	govGroup.Post("/registry/csr", deps.GovernanceHandler.SubmitCSR)
-	govGroup.Get("/accounts", deps.GovernanceHandler.GetAccounts)
-	govGroup.Post("/accounts/freeze", deps.GovernanceHandler.FreezeAccount)
-	govGroup.Post("/accounts/unfreeze", deps.GovernanceHandler.UnfreezeAccount)
-	govGroup.Get("/circuit-breaker/status", deps.GovernanceHandler.GetCircuitBreakerStatus)
-	govGroup.Post("/circuit-breaker/toggle", deps.GovernanceHandler.ToggleCircuitBreaker)
-	govGroup.Get("/parameters", deps.GovernanceHandler.GetParameters)
-	govGroup.Put("/parameters", deps.GovernanceHandler.UpdateParameters)
-	govGroup.Get("/audit/logs", deps.GovernanceHandler.GetAuditLogs)
-	govGroup.Get("/users", deps.GovernanceHandler.ListUsers)
+
+	// Onboarding: registering the participant record is Admission-exclusive; the
+	// registry read is shared. These two are the reason the group guard is a union.
+	govGroup.Post("/participants", middleware.RequireRole("ROLE_ADMISSION"), deps.GovernanceHandler.RegisterParticipant)
+	govGroup.Get("/registry", middleware.RequireRole("ROLE_GOVERNANCE", "ROLE_ADMISSION"), deps.GovernanceHandler.GetRegistry)
+
+	// Certificate issuance stays with governance: SubmitCSR signs the participant
+	// certificate with the central bank's CA key, which is the same class of act as
+	// an on-chain signature. The Admission profile authorizes no central-bank key
+	// operation (FR-002a).
+	govGroup.Post("/registry/csr", middleware.RequireRole("ROLE_GOVERNANCE"), deps.GovernanceHandler.SubmitCSR)
+
+	// Governance-retained: value/freeze, circuit breaker, parameters, audit, users.
+	// Each needs an explicit guard now that the group guard is a union (FR-004).
+	govGroup.Get("/accounts", middleware.RequireRole("ROLE_GOVERNANCE"), deps.GovernanceHandler.GetAccounts)
+	govGroup.Post("/accounts/freeze", middleware.RequireRole("ROLE_GOVERNANCE"), deps.GovernanceHandler.FreezeAccount)
+	govGroup.Post("/accounts/unfreeze", middleware.RequireRole("ROLE_GOVERNANCE"), deps.GovernanceHandler.UnfreezeAccount)
+	govGroup.Get("/circuit-breaker/status", middleware.RequireRole("ROLE_GOVERNANCE"), deps.GovernanceHandler.GetCircuitBreakerStatus)
+	govGroup.Post("/circuit-breaker/toggle", middleware.RequireRole("ROLE_GOVERNANCE"), deps.GovernanceHandler.ToggleCircuitBreaker)
+	govGroup.Get("/parameters", middleware.RequireRole("ROLE_GOVERNANCE"), deps.GovernanceHandler.GetParameters)
+	govGroup.Put("/parameters", middleware.RequireRole("ROLE_GOVERNANCE"), deps.GovernanceHandler.UpdateParameters)
+	govGroup.Get("/audit/logs", middleware.RequireRole("ROLE_GOVERNANCE"), deps.GovernanceHandler.GetAuditLogs)
+	govGroup.Get("/users", middleware.RequireRole("ROLE_GOVERNANCE"), deps.GovernanceHandler.ListUsers)
 
 	// Audit log READ is shared across the CB portals (treasury/supervisor also consume it).
 	// It is served on a dedicated path OUTSIDE the /governance group so the group's
@@ -113,7 +177,7 @@ func Setup(app *fiber.App, deps Dependencies) {
 		middleware.RequireRole("ROLE_GOVERNANCE", "ROLE_TREASURY", "ROLE_SUPERVISOR"),
 		deps.GovernanceHandler.GetAuditLogs,
 	)
-	govGroup.Get("/users/:userId", deps.GovernanceHandler.GetUser)
+	govGroup.Get("/users/:userId", middleware.RequireRole("ROLE_GOVERNANCE"), deps.GovernanceHandler.GetUser)
 
 	// --- Payment Proxy (commercial bank → Central Bank) ---
 	// Routes: POST/GET /api/v1/payments/{deposits,redeems}
@@ -129,6 +193,20 @@ func Setup(app *fiber.App, deps Dependencies) {
 		payments.Get("/escrows", deps.PaymentProxyHandler.ListEscrows)
 		payments.Post("/redeems", deps.PaymentProxyHandler.RequestRedeem)
 		payments.Get("/redeems", deps.PaymentProxyHandler.ListRedeems)
+
+		// Bridge positions come from the central bank too, for the same reason the payment
+		// records do: this gateway holds none. An incoming cross-currency delivery is recorded
+		// where the burn and release happen, so a beneficiary bank asking its own gateway saw
+		// its balance change and no payment at all.
+		//
+		// Registered HERE, before v2router.Register below, on purpose: the v2 router also
+		// serves /api/v2/bridge/positions from this gateway's own (empty) table, and Fiber runs
+		// the first matching handler. A bank gateway is exactly the case where the local answer
+		// is wrong, and PaymentProxyHandler is non-nil only on a bank gateway.
+		app.Get("/api/v2/bridge/positions",
+			middleware.RequireCookieAuth(deps.AuthProvider),
+			deps.PaymentProxyHandler.ListBridgePositions,
+		)
 	}
 
 	// --- Payment Handler — Central Bank gateway routes (direct gRPC, no proxy) ---
@@ -194,6 +272,24 @@ func Setup(app *fiber.App, deps Dependencies) {
 		internalPayments.Get("/deposits", scopeToCaller, deps.PaymentHandler.ListDeposits)
 		internalPayments.Get("/escrows", scopeToCaller, deps.PaymentHandler.ListEscrows)
 		internalPayments.Get("/redeems", scopeToCaller, deps.PaymentHandler.ListRedeems)
+
+		// One bank's bridge positions, so a beneficiary can see the payment it received. The
+		// delivery position is created here, on the CB's gateway; the bank's own gateway holds
+		// none, so the receiving institution saw a balance change and no payment at all.
+		//
+		// Registered inside this group, and WITHOUT its own auth middleware, because the group
+		// already authenticates every /internal/v1 request. A second RequireRelayAuth here runs
+		// the replay guard twice over one request: the first pass records the signature, the
+		// second sees it recorded and rejects the call. Live, that made the route answer
+		// RELAY_SIGNATURE_REPLAYED to its very first caller.
+		//
+		// The owner is scoped inside the handler rather than by ScopeRequesterToCaller: that
+		// middleware binds requester_id, an ADDRESS, while positions are keyed by owner_bank_id
+		// — the entity id whose signature was verified. Same rule, different key.
+		if deps.V2Deps.BridgePositionReader != nil {
+			bridgePositions := handlers.NewBridgeHandler(nil, nil, deps.V2Deps.BridgePositionReader)
+			internal.Get("/bridge/positions", bridgePositions.ListPositionsForCaller)
+		}
 	}
 
 	// --- Internal spoke self-registration (hub only) ---

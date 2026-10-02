@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { identityApi } from "../services/api/identity.api";
+import { apiErrorMessage } from "@cbweb3/ui";
 
 type IdentityState = {
   identities: string[];
@@ -29,7 +30,7 @@ export const useIdentityStore = create<IdentityState>((set) => ({
         status: "error",
         configured: false,
         identities: [],
-        error: error instanceof Error ? error.message : "Unable to load identities",
+        error: apiErrorMessage(error, "Unable to load identities"),
       });
     }
   },

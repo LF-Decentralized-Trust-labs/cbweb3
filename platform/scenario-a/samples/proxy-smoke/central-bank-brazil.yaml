@@ -70,6 +70,9 @@ spec:
     - role: ROLE_SUPERVISOR
       username: admin@brasil.supervisor.gov
       password: brasil-supervisor-local
+    - role: ROLE_ADMISSION
+      username: admin@brasil.admission.gov
+      password: brasil-admission-local
     - role: ROLE_NOC_ADMIN
       username: admin@brasil.noc.gov
       password: brasil-noc-local

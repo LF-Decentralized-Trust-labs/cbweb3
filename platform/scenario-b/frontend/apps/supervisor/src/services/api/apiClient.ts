@@ -15,6 +15,26 @@ export class ApiError extends Error {
   }
 }
 
+// readCSRFToken returns the XSRF-TOKEN cookie the gateway sets alongside the session.
+//
+// axios attaches this header on its own; fetch does not, so this portal has to do it
+// by hand. Without it every mutating request answers 403 once the gateway's CSRF
+// guard is enabled — and no backend test would catch that, because Go tests set the
+// header themselves.
+//
+// The cookie is deliberately not HttpOnly: reading it here IS the double-submit
+// mechanism, and it is safe because the session cookie beside it stays HttpOnly.
+function readCSRFToken(): string | null {
+  const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+// csrfHeader is the double-submit half this client sends back.
+function csrfHeader(): Record<string, string> {
+  const token = readCSRFToken();
+  return token ? { "X-XSRF-TOKEN": token } : {};
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return requestWithAuthRetry<T>(path, init, false);
 }
@@ -35,6 +55,7 @@ async function requestWithAuthRetry<T>(
     headers: {
       "Content-Type": "application/json",
       "X-Correlation-Id": newCorrelationId(),
+      ...csrfHeader(),
       ...(init?.headers ?? {}),
     },
   });

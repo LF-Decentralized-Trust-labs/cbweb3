@@ -1,5 +1,20 @@
+# Container log rotation. Same policy as the provisioning templates (50m x 5 =
+# 250 MB), declared here because this file is NOT under provisioning/templates —
+# the relay is brought up separately by provisioning/scripts/start-cacti.sh, so it
+# sat outside the template guard and was the one container in a 69-container stack
+# still running on the uncapped json-file default.
+#
+# It is also the wrong service to leave uncapped: it is long-lived and polls both
+# chains continuously, so it writes steadily rather than in bursts.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   cacti-liquidity-relay:
+    logging: *cbweb3_logging
     build:
       context: ../../..
       dockerfile: interop/hub-and-spoke/cacti/Dockerfile
@@ -39,9 +54,9 @@ services:
       RELAY_SIGNING_KEY_FILE: "${RELAY_SIGNING_KEY_FILE:-/data/cacti-relay.key}"
       # Hub Besu RPC — the LiquidityCommitWatcher and the cross-currency bridge-out
       # circuit-breaker gate (isPaused() on the pair's AMM) read the HUB, not a spoke.
-      # The sample hub listens on 33845 (Scenario B host ports shifted +25000
+      # The sample hub listens on 9345 (Scenario B host ports shifted +500
       # so both scenarios coexist on one host).
-      HUB_BESU_RPC: "${HUB_BESU_RPC:-http://host.docker.internal:33845}"
+      HUB_BESU_RPC: "${HUB_BESU_RPC:-http://host.docker.internal:9345}"
       LCR_WATCHER_START_BLOCK: "${LCR_WATCHER_START_BLOCK:-0}"
       # Durable path for the watcher's block watermark + delivered-event set. MUST live on the
       # /data volume: on the ephemeral default (/tmp) a rebuild recreates the container, the

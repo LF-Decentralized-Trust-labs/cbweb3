@@ -5,6 +5,7 @@ package server_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -286,4 +287,83 @@ func TestFX_TradeIDRequired(t *testing.T) {
 			t.Errorf("expected InvalidArgument for empty trade_id")
 		}
 	}
+}
+
+// The two parsers on origin_amount/counter_amount must agree.
+//
+// Validation used to use big.Rat while the on-chain conversion uses
+// big.Int.SetString(s, 10), which is strictly narrower. "1000.10" — the value an
+// operator types — passed validation and was refused later by
+// buildFXProposalParams, reaching the portal as "invalid FX proposal params".
+//
+// Asserting only InvalidArgument would not catch a regression, because both
+// layers return InvalidArgument. The message says which layer answered, so that
+// is what this pins. Kept deliberately in step with Scenario A's
+// TestFX_Propose_AmountParsersAgree (docs/scenario-drift.md).
+func TestFX_Propose_AmountParsersAgree(t *testing.T) {
+	env := newFlowEnv(t)
+	ctx := context.Background()
+
+	for _, amount := range []string{
+		"1000.10", // a decimal: the reported defect
+		"1000.00", // a decimal that happens to be whole
+		"0.5",
+		"0x10",  // hexadecimal — big.Rat reads 16
+		"1_000", // Go digit separator — big.Rat reads 1000
+		"1e3",   // scientific notation
+		"1/3",   // rational fraction, non-terminating
+		"+5",    // big.Int takes a sign; the boundary does not
+		"1,000",
+	} {
+		t.Run("origin="+amount, func(t *testing.T) {
+			_, err := env.client.ProposeFXAgreement(ctx, &pb.ProposeFXAgreementRequest{
+				Originator: "0xorig", CounterpartyB: "0xcp",
+				OriginAmount: amount, CounterAmount: "500",
+				OriginCurrency: "BRL", CounterCurrency: "USD",
+				Rate: "5", ExpiryDate: futureExpiry(),
+			})
+			if status.Code(err) != codes.InvalidArgument {
+				t.Fatalf("expected InvalidArgument, got %v", err)
+			}
+			msg := status.Convert(err).Message()
+			if !strings.Contains(msg, "origin_amount must be a positive integer in base units") {
+				t.Errorf("refused by the wrong layer: want the boundary message, got %q", msg)
+			}
+			if strings.Contains(msg, "invalid FX proposal params") {
+				t.Errorf("reached the on-chain converter before being refused: %q", msg)
+			}
+		})
+	}
+
+	t.Run("counter=500.50", func(t *testing.T) {
+		_, err := env.client.ProposeFXAgreement(ctx, &pb.ProposeFXAgreementRequest{
+			Originator: "0xorig", CounterpartyB: "0xcp",
+			OriginAmount: "100", CounterAmount: "500.50",
+			OriginCurrency: "BRL", CounterCurrency: "USD",
+			Rate: "5", ExpiryDate: futureExpiry(),
+		})
+		msg := status.Convert(err).Message()
+		if !strings.Contains(msg, "counter_amount must be a positive integer in base units") {
+			t.Errorf("want the boundary message for counter_amount, got %q", msg)
+		}
+	})
+
+	t.Run("rate=0x5 is not a rate of 5", func(t *testing.T) {
+		_, err := env.client.ProposeFXAgreement(ctx, &pb.ProposeFXAgreementRequest{
+			Originator: "0xorig", CounterpartyB: "0xcp",
+			OriginAmount: "100", CounterAmount: "500",
+			OriginCurrency: "BRL", CounterCurrency: "USD",
+			Rate: "0x5", ExpiryDate: futureExpiry(),
+		})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Fatalf("expected InvalidArgument for a hex rate, got %v", err)
+		}
+	})
+
+	// Positive control: the integer form the rest of the stack sends still works.
+	t.Run("integer amounts still accepted", func(t *testing.T) {
+		if tid := proposeValid(t, env); tid == "" {
+			t.Fatal("valid integer propose returned no trade id")
+		}
+	})
 }

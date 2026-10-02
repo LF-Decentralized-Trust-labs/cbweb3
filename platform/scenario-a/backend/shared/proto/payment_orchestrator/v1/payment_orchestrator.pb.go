@@ -2728,8 +2728,14 @@ func (x *GetBalanceRequest) GetIdentity() string {
 }
 
 type GetBalanceResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Balance       string                 `protobuf:"bytes,1,opt,name=balance,proto3" json:"balance,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Balance string                 `protobuf:"bytes,1,opt,name=balance,proto3" json:"balance,omitempty"`
+	// Scale of the tCeBM balance. tCeBM is a Zeto note, not an ERC-20, so this is not
+	// read from a contract: a note holds a bare integer and the scale is the convention
+	// fixed in ADR-009 — one note unit is 10^-18 tCeBM, matching fCeBM so tokenisation
+	// stays 1:1 with the fCeBM side and an HTLC leg keeps matching its FX leg.
+	Decimals      uint32 `protobuf:"varint,2,opt,name=decimals,proto3" json:"decimals,omitempty"`
+	Symbol        string `protobuf:"bytes,3,opt,name=symbol,proto3" json:"symbol,omitempty"` // display symbol for the privacy token, e.g. "tCeBM"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2767,6 +2773,20 @@ func (*GetBalanceResponse) Descriptor() ([]byte, []int) {
 func (x *GetBalanceResponse) GetBalance() string {
 	if x != nil {
 		return x.Balance
+	}
+	return ""
+}
+
+func (x *GetBalanceResponse) GetDecimals() uint32 {
+	if x != nil {
+		return x.Decimals
+	}
+	return 0
+}
+
+func (x *GetBalanceResponse) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
 	}
 	return ""
 }
@@ -2810,6 +2830,8 @@ func (*GetFiatBalanceRequest) Descriptor() ([]byte, []int) {
 type GetFiatBalanceResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Balance       string                 `protobuf:"bytes,1,opt,name=balance,proto3" json:"balance,omitempty"`
+	Decimals      uint32                 `protobuf:"varint,2,opt,name=decimals,proto3" json:"decimals,omitempty"` // ERC-20 token decimal places (read from the contract)
+	Symbol        string                 `protobuf:"bytes,3,opt,name=symbol,proto3" json:"symbol,omitempty"`      // ERC-20 token symbol, e.g. "fCeBM_BRL" (read from the contract)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2847,6 +2869,20 @@ func (*GetFiatBalanceResponse) Descriptor() ([]byte, []int) {
 func (x *GetFiatBalanceResponse) GetBalance() string {
 	if x != nil {
 		return x.Balance
+	}
+	return ""
+}
+
+func (x *GetFiatBalanceResponse) GetDecimals() uint32 {
+	if x != nil {
+		return x.Decimals
+	}
+	return 0
+}
+
+func (x *GetFiatBalanceResponse) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
 	}
 	return ""
 }
@@ -4696,12 +4732,16 @@ const file_payment_orchestrator_v1_payment_orchestrator_proto_rawDesc = "" +
 	"\x15TransferTokenResponse\x12\x17\n" +
 	"\atx_hash\x18\x01 \x01(\tR\x06txHash\"/\n" +
 	"\x11GetBalanceRequest\x12\x1a\n" +
-	"\bidentity\x18\x01 \x01(\tR\bidentity\".\n" +
+	"\bidentity\x18\x01 \x01(\tR\bidentity\"b\n" +
 	"\x12GetBalanceResponse\x12\x18\n" +
-	"\abalance\x18\x01 \x01(\tR\abalance\"\x17\n" +
-	"\x15GetFiatBalanceRequest\"2\n" +
+	"\abalance\x18\x01 \x01(\tR\abalance\x12\x1a\n" +
+	"\bdecimals\x18\x02 \x01(\rR\bdecimals\x12\x16\n" +
+	"\x06symbol\x18\x03 \x01(\tR\x06symbol\"\x17\n" +
+	"\x15GetFiatBalanceRequest\"f\n" +
 	"\x16GetFiatBalanceResponse\x12\x18\n" +
-	"\abalance\x18\x01 \x01(\tR\abalance\"\xfa\x02\n" +
+	"\abalance\x18\x01 \x01(\tR\abalance\x12\x1a\n" +
+	"\bdecimals\x18\x02 \x01(\rR\bdecimals\x12\x16\n" +
+	"\x06symbol\x18\x03 \x01(\tR\x06symbol\"\xfa\x02\n" +
 	"\rDepositRecord\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\frequester_id\x18\x02 \x01(\tR\vrequesterId\x124\n" +

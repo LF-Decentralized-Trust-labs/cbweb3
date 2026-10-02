@@ -2,7 +2,6 @@
 - [Home](README.md)
 # src
   - [❱ interfaces](src/interfaces/README.md)
-    - [IAutomatedMarketMaker](src/interfaces/IAutomatedMarketMaker.sol/interface.IAutomatedMarketMaker.md)
     - [IFXAgreement](src/interfaces/IFXAgreement.sol/interface.IFXAgreement.md)
     - [IFiatCentralBankMoney](src/interfaces/IFiatCentralBankMoney.sol/interface.IFiatCentralBankMoney.md)
     - [IHashTimeLockedContract](src/interfaces/IHashTimeLockedContract.sol/interface.IHashTimeLockedContract.md)
@@ -12,7 +11,6 @@
     - [ISpokeBridge](src/interfaces/ISpokeBridge.sol/interface.ISpokeBridge.md)
     - [ITokenizedCentralBankMoney](src/interfaces/ITokenizedCentralBankMoney.sol/interface.ITokenizedCentralBankMoney.md)
   - [❱ libraries](src/libraries/README.md)
-    - [AutomatedMarketMakerLibrary](src/libraries/AutomatedMarketMakerLibrary.sol/library.AutomatedMarketMakerLibrary.md)
     - [FXAgreementLibrary](src/libraries/FXAgreementLibrary.sol/library.FXAgreementLibrary.md)
     - [FiatCentralBankMoneyLibrary](src/libraries/FiatCentralBankMoneyLibrary.sol/library.FiatCentralBankMoneyLibrary.md)
     - [HashTimeLockedContractLibrary](src/libraries/HashTimeLockedContractLibrary.sol/library.HashTimeLockedContractLibrary.md)
@@ -21,7 +19,6 @@
     - [PriceOracleLibrary](src/libraries/PriceOracleLibrary.sol/library.PriceOracleLibrary.md)
     - [SpokeBridgeLibrary](src/libraries/SpokeBridgeLibrary.sol/library.SpokeBridgeLibrary.md)
     - [TokenizedCentralBankMoneyLibrary](src/libraries/TokenizedCentralBankMoneyLibrary.sol/library.TokenizedCentralBankMoneyLibrary.md)
-  - [AutomatedMarketMaker](src/AutomatedMarketMaker.sol/contract.AutomatedMarketMaker.md)
   - [FXAgreement](src/FXAgreement.sol/contract.FXAgreement.md)
   - [FiatCentralBankMoney](src/FiatCentralBankMoney.sol/contract.FiatCentralBankMoney.md)
   - [HashTimeLockedContract](src/HashTimeLockedContract.sol/contract.HashTimeLockedContract.md)

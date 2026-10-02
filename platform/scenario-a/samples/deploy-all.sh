@@ -1,10 +1,23 @@
 #!/usr/bin/env bash
 #
-# deploy-all.sh — bring up ALL Scenario A samples via the cbweb3 CLI.
+# deploy-all.sh — bring up the default Scenario A sample stack via the cbweb3 CLI.
 #
 # Deploys two spokes and their commercial banks, end to end:
-#   • Brazil  (spoke-brl): central-bank-brazil  + bank-itau, bank-bradesco
-#   • Colombia(spoke-cop): central-bank-colombia + bank-bancolombia, bank-davivienda
+#   • Brazil     (spoke-brl):        central-bank-brazil     + bank-itau, bank-bradesco
+#   • Costa Rica (spoke-costa-rica): central-bank-costa-rica + cb1, cb2
+#
+# The two spokes use the two DIFFERENT live naming conventions on purpose:
+#
+#     spoke-brl-bank-itau        spokeId=spoke-brl         bankId=bank-itau
+#     spoke-costa-rica-cb1       spokeId=spoke-costa-rica  bankId=cb1
+#
+# Code that recovers a bank or spoke id by splitting a node name on "-" is right
+# for the first and wrong for the second. Four defects of that one root cause
+# reached a deployed environment because every sample spoke used to have a
+# two-segment id, so no local bring-up could reproduce the second shape
+# (PRs #210, #211, #212, #213). Costa Rica replaced Colombia here rather than
+# being added to it, so the default bring-up covers the class at the same cost.
+# Colombia is still available in deploy-three.sh.
 #
 # Each central bank FOUNDS its spoke (Besu+Paladin, contracts, relay registration,
 # operational backend + frontend portals) and emits a join bundle; each commercial
@@ -123,15 +136,15 @@ copy_bundle spoke-brl
 apply "Brazil — join bank-itau"     "${SCRIPT_DIR}/brazil/bank-itau.yaml"
 apply "Brazil — join bank-bradesco" "${SCRIPT_DIR}/brazil/bank-bradesco.yaml"
 
-# --- Colombia spoke -----------------------------------------------------------
+# --- Costa Rica spoke (the LNET convention: hyphenated id + bare bank ids) ----
 # Both founding central banks default their Paladin to host port 31648; on a single
 # host the second spoke must use a distinct port. (Besu/backend/frontend ports are
 # already derived per-entity from each manifest's Besu RPC port.)
 export CBWEB3_PALADIN_CB_URL="http://localhost:31748"
-apply "Colombia — found central-bank-colombia (spoke-cop)" "${SCRIPT_DIR}/colombia/central-bank-colombia.yaml"
-copy_bundle spoke-cop
-apply "Colombia — join bank-bancolombia" "${SCRIPT_DIR}/colombia/bank-bancolombia.yaml"
-apply "Colombia — join bank-davivienda"  "${SCRIPT_DIR}/colombia/bank-davivienda.yaml"
+apply "Costa Rica — found central-bank-costa-rica (spoke-costa-rica)" "${SCRIPT_DIR}/costa-rica/central-bank-costa-rica.yaml"
+copy_bundle spoke-costa-rica
+apply "Costa Rica — join cb1" "${SCRIPT_DIR}/costa-rica/cb1.yaml"
+apply "Costa Rica — join cb2" "${SCRIPT_DIR}/costa-rica/cb2.yaml"
 
 # --- summary ------------------------------------------------------------------
 log "all samples deployed. Endpoints (api-gateway /healthz, portals on /):"
@@ -148,16 +161,23 @@ cat <<'EOF'
     bank-bradesco  api http://localhost:18647   portal     http://localhost:25647
                                                  launcher   http://localhost:5193
 
-  Colombia (spoke-cop)
-    central-bank   api http://localhost:18745   governance http://localhost:25745
-                                                 treasury   http://localhost:26745
-                                                 supervisor http://localhost:30745
-                                                 noc        http://localhost:32745
-                                                 launcher   http://localhost:5197
-    bank-bancolombia api http://localhost:18746 portal     http://localhost:25746
-                                                 launcher   http://localhost:5198
-    bank-davivienda  api http://localhost:18747 portal     http://localhost:25747
-                                                 launcher   http://localhost:5199
+  Costa Rica (spoke-costa-rica) — LNET convention: hyphenated spoke id, bare bank ids
+    central-bank   api http://localhost:18685   governance http://localhost:25685
+                                                 treasury   http://localhost:26685
+                                                 supervisor http://localhost:30685
+                                                 noc        http://localhost:32685
+                                                 launcher   http://localhost:5200
+    cb1            api http://localhost:18686   portal     http://localhost:25686
+                                                 launcher   http://localhost:5201
+    cb2            api http://localhost:18687   portal     http://localhost:25687
+                                                 launcher   http://localhost:5202
+
+  The identities below are the ones a positional split gets wrong — use them when
+  exercising anything that maps a Paladin identity to a bank or spoke id:
+
+    funded_operator@spoke-costa-rica-cb   spokeId spoke-costa-rica  (a CB node)
+    funded_operator@spoke-costa-rica-cb1  bankId  cb1  (a split reads "rica-cb1")
+    funded_operator@spoke-costa-rica-cb2  bankId  cb2  (a split reads "rica-cb2")
 
   The launcher (per entity) is the A/B entry point; it lists that entity's Scenario A
   and B portals. Build the image once: ( cd ../../launcher && ./build.sh ).

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 )
 
@@ -33,6 +34,23 @@ type configTemplateData struct {
 	// FundedOperatorKey is the hex (no 0x) secp256k1 private key for this node's
 	// `funded_operator` base-ledger submitter. It MUST be unique per node — see fundedOperatorKey.
 	FundedOperatorKey string
+	// LogLevel is Paladin's own log level. See paladinLogLevel for why it defaults
+	// to info rather than debug.
+	LogLevel string
+}
+
+// paladinLogLevel resolves Paladin's log level: PALADIN_LOG_LEVEL if set, else info.
+//
+// It used to be hardcoded to debug in five templates, which is how the Scenario A
+// Paladin containers reached 96 GB of logs — about 2.4 GB/day — with no rotation to
+// bound them. debug is genuinely useful during a bring-up, so it stays one
+// environment variable away; what changes is the default, and that turning it on is
+// now a deliberate act rather than something nobody noticed.
+func paladinLogLevel() string {
+	if v := strings.TrimSpace(os.Getenv("PALADIN_LOG_LEVEL")); v != "" {
+		return v
+	}
+	return "info"
 }
 
 // fundedOperatorKey derives a deterministic, per-node secp256k1 private key (hex, no 0x) for a
@@ -97,6 +115,7 @@ func (s *renderConfigsStep) Run(ctx context.Context) error {
 			RegistryContractAddress: addrs.RegistryContractAddress,
 			ZetoFactoryAddress:      addrs.ZetoFactoryAddress,
 			PenteFactoryAddress:     addrs.PenteFactoryAddress,
+			LogLevel:                paladinLogLevel(),
 		}
 
 		rendered, err := renderTemplateToBytes(tmplPath, data)

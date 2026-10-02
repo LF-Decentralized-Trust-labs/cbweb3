@@ -3,32 +3,77 @@
 # separate noc template. Each SPA bakes its api-gateway URL at BUILD time (VITE_*),
 # so the toolkit builds a per-entity image; here we only run it. All apps serve on
 # nginx container port 80. Stateless; no secrets.
+# Container log rotation, applied to every service in this file.
+#
+# Without it Docker's json-file driver has no size cap and no rotation: the
+# Scenario A Paladin containers reached 96 GB (~2.4 GB/day) and a full disk takes
+# the whole network down. 50m x 5 caps each service at 250 MB.
+#
+# Both options are load-bearing. max-size alone rotates into an unbounded number of
+# files; max-file alone caps the count of files that each grow forever.
+#
+# The anchor is not brevity: without it a new service is added with no logging block
+# and the ceiling silently fails to apply to that container. With it the omission is
+# visible in review, and toolkit/engine/composetemplate fails the build.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
+# Why these services carry an explicit network alias
+#
+# The reverse proxy reaches each portal BY NAME over this network, and a DNS label
+# cannot exceed 63 octets (RFC 1035). The container_name below is
+# "${CONTAINER_PREFIX}-${ENTITY}-<role>-frontend", which for a central bank repeats the
+# role twice — "sc-b-cbweb3-central-bank-costa-rica-central-bank-governance-frontend" is
+# 68 octets. Docker's embedded DNS then refuses the name outright ("bad address") and
+# every portal answers 502 through the proxy, while the api-gateway (60 octets) keeps
+# working — which is what made this look like a routing fault rather than a naming one.
+#
+# The alias is short and unique per entity network, so the proxy resolves it whatever the
+# entity is called. It is the same remedy already applied to PAYMENT_GRPC_ADDR in
+# entity-backend.compose.yaml; the container_name is left alone because nothing else
+# resolves it (docker logs and the noc-agent address containers over the socket, not DNS).
+#
+# ProxyRoutes() in toolkit/engine/orchestrator must point at these aliases, not at
+# container_name. TestProxyUpstreamsFitDNSLabel and TestComposeAliasesMatchProxyRoutes
+# fail if either half drifts.
 services:
   governance-frontend:
+    logging: *cbweb3_logging
     image: "${GOVERNANCE_FRONTEND_IMAGE:?}"
     container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-governance-frontend"
     ports:
       - "${GOVERNANCE_FRONTEND_PORT:?}:80"
     networks:
-      - entity_net
+      entity_net:
+        aliases:
+          - "${ENTITY_NET_PREFIX:?}-governance"
     restart: always
 
   treasury-frontend:
+    logging: *cbweb3_logging
     image: "${TREASURY_FRONTEND_IMAGE:?}"
     container_name: "${CONTAINER_PREFIX}-${ENTITY}-treasury-frontend"
     ports:
       - "${TREASURY_FRONTEND_PORT:?}:80"
     networks:
-      - entity_net
+      entity_net:
+        aliases:
+          - "${ENTITY_NET_PREFIX:?}-treasury"
     restart: always
 
   supervisor-frontend:
+    logging: *cbweb3_logging
     image: "${SUPERVISOR_FRONTEND_IMAGE:?}"
     container_name: "${CONTAINER_PREFIX}-${ENTITY}-supervisor-frontend"
     ports:
       - "${SUPERVISOR_FRONTEND_PORT:?}:80"
     networks:
-      - entity_net
+      entity_net:
+        aliases:
+          - "${ENTITY_NET_PREFIX:?}-supervisor"
     restart: always
 
 networks:

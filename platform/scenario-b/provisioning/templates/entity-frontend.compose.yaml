@@ -1,7 +1,26 @@
 # entity-frontend template (TK-B4) — per-entity frontend app.
 # Parametrized; stateless; no secrets embedded.
+# Container log rotation, applied to every service in this file.
+#
+# Without it Docker's json-file driver has no size cap and no rotation: the
+# Scenario A Paladin containers reached 96 GB (~2.4 GB/day) and a full disk takes
+# the whole network down. 50m x 5 caps each service at 250 MB.
+#
+# Both options are load-bearing. max-size alone rotates into an unbounded number of
+# files; max-file alone caps the count of files that each grow forever.
+#
+# The anchor is not brevity: without it a new service is added with no logging block
+# and the ceiling silently fails to apply to that container. With it the omission is
+# visible in review, and toolkit/engine/composetemplate fails the build.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   frontend:
+    logging: *cbweb3_logging
     # The api-gateway URL is baked into the SPA at build time (VITE_API_URL), so the
     # toolkit builds a per-entity image; nginx serves it on container port 80.
     image: "${FRONTEND_IMAGE:-cbweb3b/bank-frontend:local}"
@@ -9,7 +28,19 @@ services:
     ports:
       - "${FRONTEND_PORT:?}:80"
     networks:
-      - entity_net
+      entity_net:
+        # Short, entity-unique alias for the reverse proxy. The container_name is
+        # "${CONTAINER_PREFIX}-${ENTITY}-frontend" and a DNS label stops at 63 octets
+        # (RFC 1035), so a long enough entity id makes the full name unresolvable and
+        # every portal request answers 502. See cb-frontend.compose.yaml for the incident
+        # this comes from; ProxyRoutes() must point here, and TestProxyUpstreamsFitDNSLabel
+        # fails if it drifts back to the container name.
+        #
+        # "-frontend", not "-bank": this template is rendered for a joining BANK and for
+        # the HUB (step_found_hub.go renders it with ENTITY=hub), and the service it names
+        # is "frontend" in both. ENTITY_NET_PREFIX keeps it unique per entity.
+        aliases:
+          - "${ENTITY_NET_PREFIX:?}-frontend"
     restart: always
 
 networks:

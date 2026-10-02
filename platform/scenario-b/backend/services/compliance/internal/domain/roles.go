@@ -10,6 +10,9 @@ const (
 	RoleSupervisor        = "ROLE_SUPERVISOR"         // Password-only login
 	RoleNOC               = "ROLE_NOC"                // Password-only login
 	RoleGovernanceOfficer = "ROLE_GOVERNANCE_OFFICER" // Password-only login
+	// RoleAdmission owns commercial-bank onboarding management (spec 042).
+	// Password-only: intentionally absent from PKIRoles below.
+	RoleAdmission = "ROLE_ADMISSION" // Password-only login
 )
 
 // PKIRoles lists the roles that require an X.509 certificate for authentication.

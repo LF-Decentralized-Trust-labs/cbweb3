@@ -27,9 +27,9 @@ spec:
   node:
     advertisedHost: cbweb3-spoke-ars-besu.central-bank-argentina
     rpc:
-      port: 8845
+      port: 8665
     ws:
-      port: 8855
+      port: 8675
     p2p:
       port: 31503
     dataDir: cbweb3-data/central-bank-argentina
@@ -64,6 +64,9 @@ spec:
     - role: ROLE_SUPERVISOR
       username: admin@argentina.supervisor.gov
       password: argentina-supervisor-local
+    - role: ROLE_ADMISSION
+      username: admin@argentina.admission.gov
+      password: argentina-admission-local
     - role: ROLE_NOC_ADMIN
       username: admin@argentina.noc.gov
       password: argentina-noc-local

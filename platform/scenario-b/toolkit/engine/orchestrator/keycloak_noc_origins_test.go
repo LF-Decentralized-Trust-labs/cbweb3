@@ -27,14 +27,14 @@ func nocClientCmd(t *testing.T, origins []string) string {
 }
 
 func TestAppendNOCPortalClient_NoWildcardWebOrigins(t *testing.T) {
-	cmd := nocClientCmd(t, []string{"http://localhost:45845"})
+	cmd := nocClientCmd(t, []string{"http://localhost:21345"})
 	if strings.Contains(cmd, `"*"`) {
 		t.Errorf("noc-portal client still grants a wildcard web origin:\n%s", cmd)
 	}
 }
 
 func TestAppendNOCPortalClient_UsesThePortalOrigins(t *testing.T) {
-	origins := []string{"http://localhost:45845", "http://10.0.0.7:45845"}
+	origins := []string{"http://localhost:21345", "http://10.0.0.7:21345"}
 	cmd := nocClientCmd(t, origins)
 	for _, o := range origins {
 		if !strings.Contains(cmd, o) {
@@ -46,18 +46,18 @@ func TestAppendNOCPortalClient_UsesThePortalOrigins(t *testing.T) {
 // nocPortalOrigins must resolve to the portal's own port (RPC+12000), add the routable
 // host when there is one, and collapse to the single proxy origin behind the proxy.
 func TestNOCPortalOrigins(t *testing.T) {
-	local := nocPortalOrigins(33845, "localhost", false)
-	if len(local) != 1 || local[0] != "http://localhost:45845" {
-		t.Errorf("local origins = %v, want [http://localhost:45845]", local)
+	local := nocPortalOrigins(9345, "localhost", false)
+	if len(local) != 1 || local[0] != "http://localhost:21345" {
+		t.Errorf("local origins = %v, want [http://localhost:21345]", local)
 	}
 
-	routable := nocPortalOrigins(33845, "10.0.0.7", false)
-	if len(routable) != 2 || !strings.Contains(strings.Join(routable, ","), "http://10.0.0.7:45845") {
-		t.Errorf("routable origins = %v, want localhost + 10.0.0.7 on :45845", routable)
+	routable := nocPortalOrigins(9345, "10.0.0.7", false)
+	if len(routable) != 2 || !strings.Contains(strings.Join(routable, ","), "http://10.0.0.7:21345") {
+		t.Errorf("routable origins = %v, want localhost + 10.0.0.7 on :21345", routable)
 	}
 
-	proxied := nocPortalOrigins(33845, "cb.example.org", true)
-	if len(proxied) != 1 || strings.Contains(proxied[0], ":45845") {
+	proxied := nocPortalOrigins(9345, "cb.example.org", true)
+	if len(proxied) != 1 || strings.Contains(proxied[0], ":21345") {
 		t.Errorf("proxied origins = %v, want a single proxy origin with no portal port", proxied)
 	}
 }
@@ -98,7 +98,7 @@ func TestJSONStringArray_RejectsAnEmptyList(t *testing.T) {
 }
 
 func TestJSONStringArray_EncodesTheOriginsItAccepts(t *testing.T) {
-	in := []string{"http://localhost:45845", "http://10.0.0.7:45845", "https://cb.example.org"}
+	in := []string{"http://localhost:21345", "http://10.0.0.7:21345", "https://cb.example.org"}
 	got, err := jsonStringArray(in)
 	if err != nil {
 		t.Fatalf("jsonStringArray(%v): %v", in, err)
@@ -115,7 +115,7 @@ func TestJSONStringArray_EncodesTheOriginsItAccepts(t *testing.T) {
 // End to end: whatever reaches the -s argument must parse as a JSON array. This is the
 // assertion that would have failed on the original `[\"*\"]` form.
 func TestAppendNOCPortalClient_WebOriginsArgumentParsesAsJSON(t *testing.T) {
-	cmd := nocClientCmd(t, []string{"http://localhost:45845", "http://10.0.0.7:45845"})
+	cmd := nocClientCmd(t, []string{"http://localhost:21345", "http://10.0.0.7:21345"})
 	const marker = "-s 'webOrigins="
 	i := strings.Index(cmd, marker)
 	if i < 0 {
@@ -155,7 +155,7 @@ func TestAppendNOCPortalClient_FailsClosedOnAnUnsafeOrigin(t *testing.T) {
 // and nobody saw it. The create is now followed by an existence check that exits
 // non-zero, converting that into a named error.
 func TestAppendNOCPortalClient_VerifiesTheClientExists(t *testing.T) {
-	cmd := nocClientCmd(t, []string{"http://localhost:45845"})
+	cmd := nocClientCmd(t, []string{"http://localhost:21345"})
 	for _, want := range []string{
 		"get clients -r " + spokeKeycloakRealm + " -q clientId=" + nocKeycloakClient,
 		"exit 1",
@@ -182,8 +182,8 @@ func TestAppendNOCPortalClient_VerifiesTheClientExists(t *testing.T) {
 // mode's port. These pin the extra origins the manifest declares.
 
 func TestNOCPortalOrigins_AppendsTheStandalonePortalOrigin(t *testing.T) {
-	got := nocPortalOrigins(33845, "localhost", false, "http://localhost:3030")
-	want := []string{"http://localhost:45845", "http://localhost:3030"}
+	got := nocPortalOrigins(9345, "localhost", false, "http://localhost:3030")
+	want := []string{"http://localhost:21345", "http://localhost:3030"}
 	if len(got) != len(want) {
 		t.Fatalf("nocPortalOrigins() = %v; want %v", got, want)
 	}
@@ -196,7 +196,7 @@ func TestNOCPortalOrigins_AppendsTheStandalonePortalOrigin(t *testing.T) {
 
 // A NOC on another host is the case the co-located calculation cannot reach at all.
 func TestNOCPortalOrigins_AppendsARemoteNOCOrigin(t *testing.T) {
-	got := nocPortalOrigins(33845, "10.0.0.7", false, "http://10.0.0.9:3030")
+	got := nocPortalOrigins(9345, "10.0.0.7", false, "http://10.0.0.9:3030")
 	if len(got) != 3 || got[2] != "http://10.0.0.9:3030" {
 		t.Fatalf("nocPortalOrigins() = %v; want the remote NOC origin appended", got)
 	}
@@ -205,14 +205,14 @@ func TestNOCPortalOrigins_AppendsARemoteNOCOrigin(t *testing.T) {
 // Behind the proxy the entity's own portals collapse to one origin — but a NOC stack elsewhere
 // is not fronted by that proxy, so its origin must still be added.
 func TestNOCPortalOrigins_AppendsExtrasBehindTheProxy(t *testing.T) {
-	got := nocPortalOrigins(33845, "cb.example.org", true, "http://localhost:3030")
+	got := nocPortalOrigins(9345, "cb.example.org", true, "http://localhost:3030")
 	if len(got) != 2 || got[1] != "http://localhost:3030" {
 		t.Fatalf("nocPortalOrigins() = %v; want the extra origin appended behind the proxy", got)
 	}
 }
 
 func TestNOCPortalOrigins_IgnoresDuplicatesAndBlanks(t *testing.T) {
-	got := nocPortalOrigins(33845, "localhost", false, "http://localhost:45845", "  ", "")
+	got := nocPortalOrigins(9345, "localhost", false, "http://localhost:21345", "  ", "")
 	if len(got) != 1 {
 		t.Fatalf("nocPortalOrigins() = %v; want no duplicate or blank entries", got)
 	}
@@ -220,8 +220,8 @@ func TestNOCPortalOrigins_IgnoresDuplicatesAndBlanks(t *testing.T) {
 
 // The extras reach the kcadm command, which is what Keycloak actually stores.
 func TestAppendNOCPortalClient_CarriesTheStandaloneOrigin(t *testing.T) {
-	cmd := nocClientCmd(t, nocPortalOrigins(33845, "localhost", false, "http://localhost:3030"))
-	for _, o := range []string{"http://localhost:45845", "http://localhost:3030"} {
+	cmd := nocClientCmd(t, nocPortalOrigins(9345, "localhost", false, "http://localhost:3030"))
+	for _, o := range []string{"http://localhost:21345", "http://localhost:3030"} {
 		if !strings.Contains(cmd, o) {
 			t.Errorf("noc-portal webOrigins is missing %q:\n%s", o, cmd)
 		}
@@ -235,7 +235,7 @@ func TestAppendNOCPortalClient_CarriesTheStandaloneOrigin(t *testing.T) {
 func TestAppendNOCPortalClient_RejectsAMalformedExtraOrigin(t *testing.T) {
 	var b strings.Builder
 	err := appendNOCPortalClient(&b, "/opt/keycloak/bin/kcadm.sh", spokeKeycloakRealm,
-		[]string{"http://localhost:45845", "http://localhost:3030/"})
+		[]string{"http://localhost:21345", "http://localhost:3030/"})
 	if err == nil {
 		t.Fatal("no error; a trailing slash is not a valid web origin and must not be embedded")
 	}

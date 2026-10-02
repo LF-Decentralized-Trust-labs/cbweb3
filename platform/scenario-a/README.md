@@ -138,7 +138,7 @@ This single command executes the following for each spoke:
 1. **PKI generation** — Creates X.509 certificates for all entities (idempotent, skipped if they exist)
 2. **Infrastructure** — Starts Keycloak (OIDC), PostgreSQL, and Redis (shared across spokes)
 3. **Besu network** — Launches 3 Besu QBFT validator nodes per spoke
-4. **Smart contracts** — Compiles and deploys tCeBM, HTLC, AMM, IdentityRegistry, SpokeBridge
+4. **Smart contracts** — Compiles and deploys tCeBM, HTLC, IdentityRegistry, SpokeBridge
 5. **Participant registration** — Registers banks on-chain via IdentityRegistry
 6. **Paladin setup** — Deploys privacy contracts, generates certs, registers nodes, starts Paladin
 7. **Zeto token** — Creates the ZKP-based tCeBM token instance
@@ -289,7 +289,6 @@ Built with **Foundry** (Solidity 0.8.20, OpenZeppelin 5.0.2).
 |----------|-------------|
 | `TokenizedCentralBankMoney.sol` | ERC-20 tCeBM token with role-based minting (central bank only) |
 | `HashTimeLockedContract.sol` | HTLC for atomic cross-spoke swaps (LOCKED → SETTLED / REFUNDED) |
-| `AutomatedMarketMaker.sol` | Constant-product AMM for FX liquidity pools *(used in Scenario B)* |
 | `IdentityRegistry.sol` | On-chain participant registry with governance RBAC |
 | `SpokeBridge.sol` | Cross-spoke bridge contract |
 | `ManualOracle.sol` | Manual FX price oracle *(used in Scenario B)* |
@@ -520,19 +519,25 @@ cd samples && ./deploy-all.sh
 
 ### Paladin
 
-```bash
-make paladin.start-spoke-a     # Start Paladin nodes for spoke-a
-make paladin.start-spoke-b     # Start Paladin nodes for spoke-b
-make paladin.stop-spoke-a      # Stop Paladin nodes for spoke-a
-make paladin.stop-spoke-b      # Stop Paladin nodes for spoke-b
-```
+The per-spoke targets (`make paladin.start-spoke-a`, `paladin.stop-spoke-a` and their
+`spoke-b` pair) went with the legacy path. Paladin comes up as steps of `apply` —
+`start-paladin` when a central bank founds its spoke, `start-paladin-join` when a
+commercial bank joins — so there is no separate Paladin phase to run, and no
+spoke-a/spoke-b split: each entity gets its own node from its own manifest.
 
 ### Relay
 
+`make relay-up` and `relay-down` went with the legacy path. The relay is a script,
+because `apply`'s `register-relay` step needs it already running:
+
 ```bash
-make relay-up                  # Start HTLC cross-spoke relay
-make relay-down                # Stop relay
+provisioning/scripts/start-cacti.sh          # up, then wait for health
+provisioning/scripts/start-cacti.sh --down   # tear it down
 ```
+
+`samples/deploy-all.sh`, `deploy-three.sh` and `proxy-smoke.sh` each call it before
+their first `apply`, so a sample bring-up needs no separate step. On LNET the relay is
+centrally operated; `deploy-lnet/deploy.sh cacti` starts a local one when it is not.
 
 ### Protobuf
 

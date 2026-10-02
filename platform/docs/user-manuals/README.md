@@ -22,9 +22,9 @@ behaves in that scenario**.
 - Find your scenario, then your portal, in the table below.
 - Each manual walks through every screen that is currently available in that
   portal, with a status reference and a troubleshooting section.
-- Screenshots are referenced as placeholders (`<!-- TODO: capture screenshot -->`)
-  pointing at `img/<scenario>/…`. They will be captured against the running test
-  environment and dropped into those folders.
+- Screenshots are captured against a running test environment and stored under
+  `img/<scenario>/<portal>/`. Every manual embeds real images; no placeholders
+  remain.
 
 ---
 

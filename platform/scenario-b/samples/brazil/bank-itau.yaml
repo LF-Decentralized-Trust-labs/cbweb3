@@ -17,9 +17,9 @@ spec:
   joinBundleRef: ../bundles/spoke-brl.bundle.yaml
   node:
     advertisedHost: host.docker.internal
-    rpc:  { port: 33646 }
-    ws:   { port: 33656 }
-    p2p:  { port: 56304 }
+    rpc:  { port: 9146 }
+    ws:   { port: 9156 }
+    p2p:  { port: 30304 }
     dataDir: cbweb3-data/bank-itau
     validator: false               # non-validating full node
   image: build

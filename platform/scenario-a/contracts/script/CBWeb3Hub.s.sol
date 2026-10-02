@@ -4,14 +4,13 @@ pragma solidity 0.8.20;
 import {Script, console} from "forge-std/Script.sol";
 import {TokenizedCentralBankMoney} from "../src/TokenizedCentralBankMoney.sol";
 import {HashTimeLockedContract} from "../src/HashTimeLockedContract.sol";
-import {AutomatedMarketMaker} from "../src/AutomatedMarketMaker.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {FXAgreement} from "../src/FXAgreement.sol";
 import {ManualOracle} from "../src/ManualOracle.sol";
 
 /// @title DeployCBWeb3Hub
 /// @notice Hub deployment script — deploys all core platform contracts on the hub ledger.
-/// @dev Deploys Identity Registry, tCeBM tokens (BRL + EUR), HTLC (Scenario A), AMM (Scenario B),
+/// @dev Deploys Identity Registry, tCeBM tokens (BRL + EUR), HTLC (Scenario A),
 ///      FXAgreement (bilateral deal registry), and ManualOracle (CB-set FX rates).
 contract DeployCBWeb3Hub is Script {
     /// @notice Central Identity and Compliance Registry
@@ -27,7 +26,6 @@ contract DeployCBWeb3Hub is Script {
     HashTimeLockedContract public htlc;
 
     /// @notice Automated Market Maker for liquidity pool operations
-    AutomatedMarketMaker public amm;
 
     /// @notice On-chain bilateral FX agreement registry
     FXAgreement public fxAgreement;
@@ -48,7 +46,7 @@ contract DeployCBWeb3Hub is Script {
     /// @dev Deployment Order:
     ///      1. Identity & Governance (Registry)
     ///      2. Base Assets (tCeBM_BRL and tCeBM_EUR)
-    ///      3. Settlement Logic (HTLC and AMM)
+    ///      3. Settlement Logic (HTLC)
     ///      4. FX Agreement Registry
     ///      5. Manual FX Oracle
     function run() public {
@@ -73,10 +71,7 @@ contract DeployCBWeb3Hub is Script {
         /// @dev 4: Deploy HTLC (Scenario A - Correspondent Banking, with FX Agreement gate)
         htlc = new HashTimeLockedContract(address(identityRegistry), address(fxAgreement), address(0));
 
-        /// @dev 5: Deploy AMM (Scenario B - Liquidity Pool)
-        amm = new AutomatedMarketMaker(address(tokenBrl), address(tokenEur), address(identityRegistry));
-
-        /// @dev 6: Deploy Manual FX Oracle (REQ-FX-002)
+        /// @dev 5: Deploy Manual FX Oracle (REQ-FX-002)
         oracle = new ManualOracle(adminAddress, centralBankAddress);
 
         vm.stopBroadcast();
@@ -89,7 +84,6 @@ contract DeployCBWeb3Hub is Script {
         console.log("tCeBM_BRL Address: ", address(tokenBrl));
         console.log("tCeBM_EUR Address: ", address(tokenEur));
         console.log("HTLC Address:      ", address(htlc));
-        console.log("AMM Address:       ", address(amm));
         console.log("FX Agreement:      ", address(fxAgreement));
         console.log("Manual Oracle:     ", address(oracle));
         console.log("===============================================\n");

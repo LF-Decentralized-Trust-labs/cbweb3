@@ -42,6 +42,8 @@ func (f *failingFiat) Burn(context.Context, string, string) (string, error) {
 }
 func (f *failingFiat) BalanceOf(context.Context, string) (string, error) { return "0", nil }
 func (f *failingFiat) GetFiatBalance(context.Context) (string, error)    { return "0", nil }
+func (f *failingFiat) Decimals(context.Context) (uint8, error)           { return 18, nil }
+func (f *failingFiat) Symbol(context.Context) (string, error)            { return "fCeBM_TEST", nil }
 
 type escrowEnv struct {
 	client     pb.PaymentOrchestratorServiceClient

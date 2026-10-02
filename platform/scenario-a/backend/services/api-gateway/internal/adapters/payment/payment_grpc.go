@@ -205,8 +205,12 @@ func (a *GRPCAdapter) TransferToken(ctx context.Context, to, amount string) (*To
 	return &TokenResult{TxHash: resp.TxHash}, nil
 }
 
+// BalanceResult carries the tCeBM balance and the scale needed to render it. The scale
+// is a convention rather than a contract read — tCeBM is a Zeto note, see ADR-009.
 type BalanceResult struct {
-	Balance string `json:"balance"`
+	Balance  string `json:"balance"`
+	Decimals uint32 `json:"decimals"`
+	Symbol   string `json:"symbol"`
 }
 
 func (a *GRPCAdapter) GetBalance(ctx context.Context) (*BalanceResult, error) {
@@ -214,11 +218,16 @@ func (a *GRPCAdapter) GetBalance(ctx context.Context) (*BalanceResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &BalanceResult{Balance: resp.Balance}, nil
+	return &BalanceResult{Balance: resp.Balance, Decimals: resp.Decimals, Symbol: resp.Symbol}, nil
 }
 
+// FiatBalanceResult carries the fCeBM balance with the token's own scale and symbol,
+// both read from the contract. Without the scale the client cannot tell 1000 wei from
+// 1000 reais — which is exactly what the portal used to get wrong.
 type FiatBalanceResult struct {
-	Balance string `json:"balance"`
+	Balance  string `json:"balance"`
+	Decimals uint32 `json:"decimals"`
+	Symbol   string `json:"symbol"`
 }
 
 func (a *GRPCAdapter) GetFiatBalance(ctx context.Context) (*FiatBalanceResult, error) {
@@ -226,7 +235,7 @@ func (a *GRPCAdapter) GetFiatBalance(ctx context.Context) (*FiatBalanceResult, e
 	if err != nil {
 		return nil, err
 	}
-	return &FiatBalanceResult{Balance: resp.Balance}, nil
+	return &FiatBalanceResult{Balance: resp.Balance, Decimals: resp.Decimals, Symbol: resp.Symbol}, nil
 }
 
 func lockToStatus(l *pb.HTLCLock) *HTLCStatus {

@@ -60,6 +60,25 @@ func (h *PaymentProxyHandler) ListDeposits(c *fiber.Ctx) error {
 	return h.proxyScopedList(c, "/internal/v1/payments/deposits")
 }
 
+// ListBridgePositions proxies GET /api/v2/bridge/positions to the Central Bank.
+//
+// A commercial bank's gateway holds no bridge positions: an incoming cross-currency delivery
+// is recorded where the burn and release happen, on its central bank's gateway. Asking its own
+// gateway returned nothing, so the beneficiary saw its balance change with no record of the
+// payment — not the amount, not the counterparty, not the time.
+//
+// Deliberately NOT scoped here. Unlike the payment listings, this one carries no requester
+// parameter for the proxy to bind: the central bank derives the owner from the identity whose
+// signature it verified, which is the only value a bank cannot forge. Adding a parameter here
+// would invent one it could.
+func (h *PaymentProxyHandler) ListBridgePositions(c *fiber.Ctx) error {
+	path := "/internal/v1/bridge/positions"
+	if qs := string(c.Request().URI().QueryString()); qs != "" {
+		path += "?" + qs
+	}
+	return h.proxy(c, http.MethodGet, path, nil)
+}
+
 // RequestFiatExchange proxies POST /payments/deposits/exchange to the Central Bank.
 func (h *PaymentProxyHandler) RequestFiatExchange(c *fiber.Ctx) error {
 	return h.proxy(c, http.MethodPost, "/internal/v1/payments/deposits/exchange", c.Body())

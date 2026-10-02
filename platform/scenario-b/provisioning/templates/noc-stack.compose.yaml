@@ -3,8 +3,27 @@
 # NOC is a dedicated participant, not co-located inside an entity's network.
 # Agents run WITH each entity (found-*/join) and push here over the published
 # backend port. DB state in a named volume; no secrets embedded.
+# Container log rotation, applied to every service in this file.
+#
+# Without it Docker's json-file driver has no size cap and no rotation: the
+# Scenario A Paladin containers reached 96 GB (~2.4 GB/day) and a full disk takes
+# the whole network down. 50m x 5 caps each service at 250 MB.
+#
+# Both options are load-bearing. max-size alone rotates into an unbounded number of
+# files; max-file alone caps the count of files that each grow forever.
+#
+# The anchor is not brevity: without it a new service is added with no logging block
+# and the ceiling silently fails to apply to that container. With it the omission is
+# visible in review, and toolkit/engine/composetemplate fails the build.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   noc-db:
+    logging: *cbweb3_logging
     image: "postgres:${NOC_DB_IMAGE_TAG:-15-alpine}"
     container_name: "${CONTAINER_PREFIX:?}-noc-db"
     environment:
@@ -18,6 +37,7 @@ services:
     restart: always
 
   noc-backend:
+    logging: *cbweb3_logging
     image: "${NOC_BACKEND_IMAGE:-cbweb3b/noc-backend:local}"
     container_name: "${CONTAINER_PREFIX:?}-noc-backend"
     depends_on:
@@ -26,11 +46,44 @@ services:
       # Listen on 8080 to match the container-side of the port mapping below.
       NOC_BACKEND_PORT: "8080"
       DATABASE_URL: "postgres://${NOC_DB_USER}:${NOC_DB_PASSWORD}@${CONTAINER_PREFIX}-noc-db:5432/${NOC_DB_NAME:-noc}?sslmode=disable"
-      # Local dev: no Keycloak NOC realm is provisioned by the toolkit, so bypass
-      # JWT validation (NEVER in production). The admin API is then reachable with
-      # any bearer, which is how the toolkit registers spokes + provisions keys.
-      NOC_SKIP_AUTH: "true"
-      NOC_FRONTEND_ORIGIN: "${NOC_FRONTEND_ORIGIN:-*}"
+      # Keycloak auth stays OFF by default on the toolkit's local stacks — but no longer for
+      # the reason the old comment gave. It said no NOC realm was provisioned; that is FALSE.
+      # found-spoke creates a public "noc-portal" client with directAccessGrantsEnabled in
+      # every spoke realm, which is exactly what the backend's password grant needs, and a
+      # browser login against it was verified working with this flag off.
+      #
+      # What blocks turning it on is narrower and worth stating so nobody re-discovers it:
+      # the realm is reachable under TWO names — "localhost:<port>" from the host, where the
+      # toolkit runs, and "host.docker.internal:<port>" from a container, where this backend
+      # runs. Keycloak stamps the token's issuer from whichever name the caller used, and
+      # validation compares it exactly. So the toolkit's own token is refused by this
+      # backend, and provisioning fails at register-noc-spoke. host.docker.internal does not
+      # resolve on the host, so the toolkit cannot simply ask under the other name.
+      #
+      # The fix is to pin the realm's hostname so the issuer stops depending on the network
+      # path (KC_HOSTNAME on the entity Keycloak). That is a change to configuration every
+      # portal depends on, so it is tracked separately rather than folded in here.
+      #
+      # Set NOC_SKIP_AUTH=false to run with real validation: the login, refresh, logout and
+      # cookie handling all work: only the toolkit's provisioning calls fail.
+      NOC_SKIP_AUTH: "${NOC_SKIP_AUTH:-true}"
+      KEYCLOAK_URL: "${NOC_KEYCLOAK_URL:-}"
+      KEYCLOAK_REALM: "${NOC_KEYCLOAK_REALM:-cbweb3}"
+      # The public client found-spoke provisions. Public, so no secret is sent — and an
+      # empty client_secret is omitted rather than posted blank, which some realms reject.
+      KEYCLOAK_CLIENT_ID: "${NOC_KEYCLOAK_CLIENT_ID:-noc-portal}"
+      # Session cookies over plain HTTP locally. A browser SILENTLY DISCARDS a Secure
+      # cookie on an insecure origin, which presents as a login that succeeds and a session
+      # that never exists — so this must be false wherever the portal is served over http.
+      COOKIE_SECURE: "${NOC_COOKIE_SECURE:-false}"
+      # Keys the HMAC binding each CSRF token to its session. Supplied by the toolkit and
+      # stable per stack: a value that changes on restart refuses every token issued before
+      # it, which looks like a browser fault rather than a configuration one.
+      CSRF_SECRET: "${NOC_CSRF_SECRET:-}"
+      # Must name the portal exactly. NOT "*": a browser refuses to send credentials to a
+      # wildcard origin, and the session is a cookie now — a wildcard would let the portal
+      # log in and be anonymous on every request afterwards.
+      NOC_FRONTEND_ORIGIN: "${NOC_FRONTEND_ORIGIN:?NOC_FRONTEND_ORIGIN must name the portal origin; a wildcard cannot carry credentials}"
       # Pool Stability data source (spec.noc.ammGatewayURL). Must be reachable from
       # THIS container: the NOC owns its own network, so another stack's service name
       # does not resolve — use the host and the gateway's published port. Unset leaves
@@ -40,8 +93,15 @@ services:
       AMM_PAIRS: "${AMM_PAIRS:-}"
     ports:
       - "${NOC_BACKEND_PORT:?}:8080"
+    # The reverse proxy dials this by ALIAS, not by container_name. A DNS label stops at 63
+    # octets (RFC 1035) and a container name repeats the prefix, so the name grows with the
+    # deployment while the alias does not. Same reason as cb-frontend/entity-backend, which
+    # moved off container names in PR #226; this stack was the one they missed.
+    # TestComposeAliasesMatchProxyRoutes pins this against ObserveConfig.ProxyRoutes().
     networks:
-      - noc_net
+      noc_net:
+        aliases:
+          - "${NOC_NET_PREFIX:?}-noc-backend"
     # The NOC runs on its own network, so the AMM gateway of a co-located entity is
     # reached over the host's published port — which needs host.docker.internal to
     # resolve inside this container (same idiom as entity-backend.compose.yaml).
@@ -50,12 +110,15 @@ services:
     restart: always
 
   noc-portal:
+    logging: *cbweb3_logging
     image: "${NOC_PORTAL_IMAGE:-cbweb3b/noc-portal:local}"
     container_name: "${CONTAINER_PREFIX:?}-noc-portal"
     ports:
       - "${NOC_PORTAL_PORT:?}:80"
     networks:
-      - noc_net
+      noc_net:
+        aliases:
+          - "${NOC_NET_PREFIX:?}-noc-portal"
     restart: always
 
 networks:

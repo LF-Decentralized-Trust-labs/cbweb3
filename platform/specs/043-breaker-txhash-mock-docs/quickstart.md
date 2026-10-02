@@ -60,8 +60,8 @@ provisioning: each central bank proposes/confirms it from its governance portal,
 test — without it the breaker runs its off-chain path and correctly produces no hash.
 
 Two *distinct* central banks are required: the resume quorum counts institutions, so one
-operator cannot reach quorum alone. On the sample topology that is Brazil (`:41645`,
-portal `:42645`) and Argentina (`:41745`, portal `:42745`).
+operator cannot reach quorum alone. On the sample topology that is Brazil (`:17145`,
+portal `:18145`) and Argentina (`:17245`, portal `:18245`).
 
 ### Walk the breaker lifecycle
 

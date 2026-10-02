@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -276,4 +277,213 @@ func TestPollEvents_NoStoreStartsAtJournalHead(t *testing.T) {
 	if gotSince != 0 {
 		t.Fatalf("nil-store poll since=%d, want 0 (journal head)", gotSince)
 	}
+}
+
+// ── journal retention: finding out that the cursor fell off the end ──────────────
+//
+// The relay's journal is capped. A consumer that lags past the cap receives the entries that
+// survived and advances over the ones that did not, silently. For the settle journal that is a
+// lost settlement, and it cannot be recovered from anywhere else: an HTLC leg is settled by
+// transferLocked on its owner's own Paladin node, so the owner is the only party that can do
+// it, and the journal is how it finds out that it must. Until now only the relay knew, in a
+// warning nobody reads — the orchestrator that actually loses learned nothing.
+//
+// The relay serves the highest seq it has dropped. A persisted cursor at or below that means
+// events are gone.
+
+// logCapture collects records so a test can assert what an operator would see.
+type logCapture struct {
+	mu      sync.Mutex
+	records []string
+}
+
+func (c *logCapture) Enabled(context.Context, slog.Level) bool { return true }
+func (c *logCapture) Handle(_ context.Context, r slog.Record) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	msg := r.Level.String() + " " + r.Message
+	r.Attrs(func(a slog.Attr) bool {
+		msg += " " + a.Key + "=" + a.Value.String()
+		return true
+	})
+	c.records = append(c.records, msg)
+	return nil
+}
+func (c *logCapture) WithAttrs([]slog.Attr) slog.Handler { return c }
+func (c *logCapture) WithGroup(string) slog.Handler      { return c }
+func (c *logCapture) all() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.records...)
+}
+
+func containsAll(records []string, level string, needles ...string) bool {
+	for _, r := range records {
+		if !strings.HasPrefix(r, level) {
+			continue
+		}
+		ok := true
+		for _, n := range needles {
+			if !strings.Contains(r, n) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
+}
+
+// A cursor behind the relay's trim mark means settlements were missed. It must be reported at
+// ERROR, naming the range, because nothing downstream will notice on its own.
+func TestPollEvents_ReportsEventsLostToJournalRetention(t *testing.T) {
+	polls := make(chan int64, 8)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
+		select {
+		case polls <- s:
+		default:
+		}
+		w.Header().Set(journalTrimmedHeader, "500") // the relay dropped everything through seq 500
+		_, _ = io.WriteString(w, `[{"spoke":"spoke-a","contractId":"c1","secret":"ab","seq":501}]`)
+	}))
+	defer srv.Close()
+
+	store := newMemWatermarkStore()
+	store.values[watermarkStoreKey("settle")] = 100 // we are 400 seqs behind the trim
+
+	cap := &logCapture{}
+	relay := NewCactiRelay(srv.URL, "secret", store, slog.New(cap))
+	relay.pollInterval = 5 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go relay.pollEvents(ctx, "settle", func(ports.InteroperabilityProof) error { return nil })
+
+	deadline := time.After(3 * time.Second)
+	for {
+		if containsAll(cap.all(), "ERROR", "101", "500") {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("no ERROR naming the lost seq range; got: %v", cap.all())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	cancel()
+}
+
+// Losing events must not also stop the ones that survived: they are the settlements this
+// entity can still make, and stalling would turn a data loss into an outage — the mistake
+// this whole line of work exists to undo. Report, then carry on past the gap.
+func TestPollEvents_ContinuesPastTheGapInsteadOfStalling(t *testing.T) {
+	var handled int64
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(journalTrimmedHeader, "500")
+		s, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
+		if s >= 501 {
+			_, _ = io.WriteString(w, `[]`)
+			return
+		}
+		_, _ = io.WriteString(w, `[{"spoke":"spoke-a","contractId":"c1","secret":"ab","seq":501}]`)
+	}))
+	defer srv.Close()
+
+	store := newMemWatermarkStore()
+	store.values[watermarkStoreKey("settle")] = 100
+
+	relay := NewCactiRelay(srv.URL, "secret", store, testLogger())
+	relay.pollInterval = 5 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go relay.pollEvents(ctx, "settle", func(ports.InteroperabilityProof) error {
+		mu.Lock()
+		handled++
+		mu.Unlock()
+		return nil
+	})
+
+	deadline := time.After(3 * time.Second)
+	for {
+		if v, ok := store.lastSet(watermarkStoreKey("settle")); ok && v >= 501 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("the poller stalled at the gap instead of processing what survived")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	cancel()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if handled == 0 {
+		t.Error("the surviving event was never handled")
+	}
+}
+
+// A consumer that has never persisted a cursor — a bank joining a network that has been
+// running — legitimately starts at the head and has no claim to events that predate it.
+// Reporting those as lost would cry wolf on every new participant.
+func TestPollEvents_DoesNotReportLossForAFirstEverStart(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(journalTrimmedHeader, "500")
+		_, _ = io.WriteString(w, `[]`)
+	}))
+	defer srv.Close()
+
+	cap := &logCapture{}
+	relay := NewCactiRelay(srv.URL, "secret", newMemWatermarkStore(), slog.New(cap))
+	relay.pollInterval = 5 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go relay.pollEvents(ctx, "settle", func(ports.InteroperabilityProof) error { return nil })
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	for _, r := range cap.all() {
+		if strings.HasPrefix(r, "ERROR") && strings.Contains(r, "retention") {
+			t.Errorf("a first-ever start must not report lost events; got: %s", r)
+		}
+	}
+}
+
+// A relay that predates the header sends nothing, and an orchestrator must keep working
+// against it — they are deployed separately.
+func TestPollEvents_ToleratesARelayWithoutTheHeader(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `[{"spoke":"spoke-a","contractId":"c1","secret":"ab","seq":7}]`)
+	}))
+	defer srv.Close()
+
+	store := newMemWatermarkStore()
+	store.values[watermarkStoreKey("settle")] = 1
+
+	relay := NewCactiRelay(srv.URL, "secret", store, testLogger())
+	relay.pollInterval = 5 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go relay.pollEvents(ctx, "settle", func(ports.InteroperabilityProof) error { return nil })
+
+	deadline := time.After(2 * time.Second)
+	for {
+		if v, ok := store.lastSet(watermarkStoreKey("settle")); ok && v == 7 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("the poller must keep working against a relay that does not send the header")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	cancel()
 }

@@ -26,6 +26,34 @@ var ErrGenesisCorrupt = errors.New("orchestrator: genesis.json is present but co
 // Exposed here for documentation convenience; canonical source is deps.go.
 var defaultTimeoutsDoc = DefaultTimeouts()
 
+// RunOutcome records what a run actually DID, which the persisted state cannot say.
+//
+// State stores "done" both for a step whose Run succeeded and for one the Check
+// found already satisfied — deliberately, so a stale "failed" converges on an
+// idempotent re-run, and two steps branch on that exact value
+// (step_register_nodes.go, step_register_paladin_node.go). Widening the persisted
+// vocabulary would therefore change when those steps re-execute.
+//
+// So the distinction travels back to the caller instead. The apply report needs it:
+// inferring "executed" from a before/after state snapshot answers a different
+// question — "was this step already recorded?" — and the two answers diverge exactly
+// when a step's Check short-circuits with no prior entry, which is the case that
+// makes a report claim work nobody did.
+type RunOutcome struct {
+	// Ran holds the steps whose Run was invoked AND returned nil. A step satisfied
+	// by Check is absent; so is one whose Run failed, which the report shows as
+	// failed rather than executed.
+	Ran map[string]bool
+}
+
+// ranStep records a step the engine actually executed.
+func (o *RunOutcome) ranStep(name string) {
+	if o.Ran == nil {
+		o.Ran = map[string]bool{}
+	}
+	o.Ran[name] = true
+}
+
 // RunFound provisions a new spoke in mode:found (central bank founding a new network).
 // It executes the 11-step sequence idempotently: each step is skipped if already complete.
 // The first step (start-besu) brings up the spoke bootnode and generates genesis,
@@ -42,21 +70,26 @@ var defaultTimeoutsDoc = DefaultTimeouts()
 // Returns ErrGenesisCorrupt if SPOKE_DATA_DIR/genesis/genesis.json exists but is corrupt.
 // Returns ErrProvisioningLocked if another process holds the file lock.
 // Returns a wrapped step error on step failure.
-func RunFound(ctx context.Context, m *manifest.Manifest, deps Deps) error {
+func RunFound(ctx context.Context, m *manifest.Manifest, deps Deps) (RunOutcome, error) {
 	return runFoundWithSteps(ctx, m, deps, os.Stdout, nil)
 }
 
 // runFoundWithSteps is the internal implementation that accepts an explicit step list
 // and log writer, enabling unit testing without subprocesses or Docker.
 // When steps is nil, the production step list is constructed from manifest and deps.
-func runFoundWithSteps(ctx context.Context, m *manifest.Manifest, deps Deps, w io.Writer, steps []Step) error {
+func runFoundWithSteps(ctx context.Context, m *manifest.Manifest, deps Deps, w io.Writer, steps []Step) (RunOutcome, error) {
 	spokeID := m.Spec.Spoke.ID
 	dataDir := m.Spec.Node.DataDir
 	deps.Timeouts = deps.Timeouts.resolved()
 
+	// Accumulated as the loop goes, and returned on EVERY path including failure:
+	// the steps that ran before an abort still ran, and a report that dropped them
+	// would describe a different run than the one that happened.
+	var outcome RunOutcome
+
 	// Validate required deps.
 	if deps.PaladinCBURL == "" {
-		return fmt.Errorf("orchestrator: deps.PaladinCBURL is required")
+		return outcome, fmt.Errorf("orchestrator: deps.PaladinCBURL is required")
 	}
 
 	// 1. Inspect genesis state (non-destructive). mode:found now owns the Besu
@@ -65,23 +98,23 @@ func runFoundWithSteps(ctx context.Context, m *manifest.Manifest, deps Deps, w i
 	// genesis aborts — genesis-init must never overwrite/regenerate it (FIX-2).
 	result, err := genesis.GuardGenesis(spokeID, dataDir, false, w)
 	if err != nil {
-		return fmt.Errorf("orchestrator: genesis check: %w", err)
+		return outcome, fmt.Errorf("orchestrator: genesis check: %w", err)
 	}
 	if result.Decision == genesis.DecisionAbort {
-		return ErrGenesisCorrupt
+		return outcome, ErrGenesisCorrupt
 	}
 
 	// 2. Acquire file lock to prevent concurrent provisioning of the same spoke.
 	unlock, err := lockState(dataDir)
 	if err != nil {
-		return err // ErrProvisioningLocked or I/O error
+		return outcome, err // ErrProvisioningLocked or I/O error
 	}
 	defer unlock()
 
 	// 3. Load persisted state.
 	state, err := LoadState(dataDir)
 	if err != nil {
-		return fmt.Errorf("orchestrator: load state: %w", err)
+		return outcome, fmt.Errorf("orchestrator: load state: %w", err)
 	}
 	if state.SpokeID == "" {
 		state.SpokeID = spokeID
@@ -95,12 +128,19 @@ func runFoundWithSteps(ctx context.Context, m *manifest.Manifest, deps Deps, w i
 	// 5. Execute each step: check → skip or run → persist.
 	for _, step := range steps {
 		if err := ctx.Err(); err != nil {
-			return err
+			return outcome, err
 		}
 
 		done, err := step.Check(ctx)
 		if err != nil {
-			return fmt.Errorf("step %s: check: %w", step.Name(), err)
+			return outcome, fmt.Errorf("step %s: check: %w", step.Name(), err)
+		}
+		// --rebuild overrides a satisfied Check for the build steps: a healthy
+		// container proves the service is up, not that it is running the current
+		// source. Logged so a forced re-run is never a mystery in the log.
+		if done && deps.Force[step.Name()] {
+			logDetail(w, spokeID, step.Name(), "forced by --rebuild: check reported satisfied, rebuilding anyway")
+			done = false
 		}
 		if done {
 			logSkipped(w, spokeID, step.Name())
@@ -108,7 +148,7 @@ func runFoundWithSteps(ctx context.Context, m *manifest.Manifest, deps Deps, w i
 			// run converges to the real state on idempotent re-runs.
 			state = markStep(state, step.Name(), "done", time.Now().UTC().Format(time.RFC3339))
 			if err := saveState(dataDir, state); err != nil {
-				return fmt.Errorf("step %s: save state: %w", step.Name(), err)
+				return outcome, fmt.Errorf("step %s: save state: %w", step.Name(), err)
 			}
 			continue
 		}
@@ -122,17 +162,18 @@ func runFoundWithSteps(ctx context.Context, m *manifest.Manifest, deps Deps, w i
 			state = markStep(state, step.Name(), "failed", "")
 			_ = saveState(dataDir, state)
 			logFailed(w, spokeID, step.Name(), runErr)
-			return fmt.Errorf("step %s: %w", step.Name(), runErr)
+			return outcome, fmt.Errorf("step %s: %w", step.Name(), runErr)
 		}
 
+		outcome.ranStep(step.Name())
 		state = markStep(state, step.Name(), "done", time.Now().UTC().Format(time.RFC3339))
 		if err := saveState(dataDir, state); err != nil {
-			return fmt.Errorf("step %s: save state: %w", step.Name(), err)
+			return outcome, fmt.Errorf("step %s: save state: %w", step.Name(), err)
 		}
 		logCompleted(w, spokeID, step.Name())
 	}
 
-	return nil
+	return outcome, nil
 }
 
 // buildSteps constructs the ordered list of production Step implementations.
@@ -153,7 +194,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 
 	besuImage := deps.BesuImage
 	if besuImage == "" {
-		besuImage = defaultBesuImage
+		besuImage = DefaultBesuImage
 	}
 
 	steps := []Step{
@@ -222,6 +263,14 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 		cbImageTag = entity + proxyImageVariant(fHost)
 	}
 
+	// One realm plan for the three steps that consume it. It used to be recomputed at each
+	// call site; a third copy for reconcile-keycloak-realm would have made it likelier that one
+	// of them is edited alone, and the whole point of these two reconcile steps is that the
+	// import and the convergence agree about what the realm should contain.
+	cbRealms := centralBankRealmPlans(entity, m.Spec.AdminUsers, m.Spec.Environment,
+		splitOrigins(cbCORSOriginsFor(ports, frontendAdvertisedHost(m), proxyEnabled)))
+	kcAdminPass := mustInfraSecret(dataDir, "KC_ADMIN_PASSWORD")
+
 	steps = append(steps,
 		newRenderCBEnvStep(spokeID, entity, m.Spec.Spoke.Currency, besuRPCPort, m.Spec.Spoke.ChainID, dataDir, operatorKeyHex, frontendAdvertisedHost(m), m.Spec.FXPartyRoster, cactiContainerURL(manifestRelayEndpoint(m)), proxyEnabled),
 		newStartInfraStep(StepStartCBInfra, prefix, net, dataDir,
@@ -232,14 +281,21 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			ComposePath: filepath.Join(templatesDir, "entity-keycloak", "keycloak-compose.yaml"),
 			KCDBURL:     kcDBURL, KCUser: "default",
 			KCPassword:      mustInfraSecret(dataDir, "POSTGRES_PASSWORD"),
-			KCAdminPassword: mustInfraSecret(dataDir, "KC_ADMIN_PASSWORD"),
+			KCAdminPassword: kcAdminPass,
 			HostPort:        ports.Keycloak, Timeout: stackTO,
 			// The realm's redirectUris/webOrigins are the SAME origins the api-gateway is
 			// given as CORS_ALLOW_ORIGINS, so Keycloak and the gateway cannot disagree about
 			// which portals may talk to them (finding R1-10.7 — they used to be "*").
-			Realms: centralBankRealmPlans(entity, m.Spec.AdminUsers, m.Spec.Environment,
-				splitOrigins(cbCORSOriginsFor(ports, frontendAdvertisedHost(m), proxyEnabled))),
+			Realms: cbRealms,
 		}),
+		// Runs after provision-keycloak and converges the declared operators every time: the realm
+		// import above only applies to a realm that does not yet exist, so on an upgraded entity a
+		// newly declared role would otherwise never be created. See keycloak_admin_users_reconcile.go.
+		newReconcileAdminUsersStep(StepReconcileAdminUsers, prefix, kcAdminPass, cbRealms),
+		// The same argument for everything the realm carries that is NOT a user: the clients'
+		// webOrigins and redirectUris, and the realm's sslRequired and token lifespan. A portal
+		// origin added to the manifest reached the import volume and stopped there.
+		newReconcileKeycloakRealmStep(StepReconcileKeycloakRealm, prefix, kcAdminPass, cbRealms),
 		newStartBackendStackStep(StepStartCBBackend, backendStackParams{
 			SpokeID: spokeID, EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
 			// tls/central-bank.{crt,key} (gen-tls) lives in the named volume
@@ -274,10 +330,11 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			APIBase:     cbAPIBase,
 			BasePaths:   cbBasePaths,
 			PortalOwner: entity + "-operator", FiatSymbol: m.Spec.Spoke.Currency, Institution: m.DisplayNameOr(entity),
-			// The NOC portal password-grants directly against Keycloak in the browser, so its
-			// Keycloak URL stays the operator-provided host-port origin even behind the proxy
-			// (Keycloak is not proxied; under TLS the operator supplies an https realm URL).
-			KeycloakURL: frontendAPIBase(frontendAdvertisedHost(m), ports.Keycloak), KeycloakRealm: "cbweb3", KeycloakClient: "cbweb3-noc",
+			// The NOC portal used to password-grant directly against Keycloak in the browser,
+			// which is why its realm URL was passed here. It no longer does: the login goes
+			// to the NOC backend, which performs the grant and sets an HttpOnly cookie the
+			// page cannot read. The realm now reaches that BACKEND through the observe
+			// step's environment instead.
 			LauncherURL: launcherURLForManifest(m),
 			// The NOC portal (co-located, built here) talks to the observe-deployed NOC
 			// backend on the fixed host port (path suffix /api/v1 matches the backend routes),
@@ -316,15 +373,8 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 
 	// Per-host reverse proxy (soft): route this CB's portals + api-gateway by path on :80.
 	if proxyEnabled {
-		steps = append(steps, newProxyStep(m.Spec.Proxy, fHost, m.Spec.LauncherPort, []string{net}, []ProxyRoute{
-			{Segment: "governance", Upstream: prefix + "-governance-frontend:80"},
-			{Segment: "treasury", Upstream: prefix + "-treasury-frontend:80"},
-			{Segment: "supervisor", Upstream: prefix + "-supervisor-frontend:80"},
-			// The NOC portal is co-located on the entity network (built here); its backend
-			// route (/a/noc-api/) is written separately by the observe deployment.
-			{Segment: nocProxyPortalSegment, Upstream: prefix + "-noc-frontend:80"},
-			{Segment: "api", Upstream: prefix + "-api-gateway:8080", IsAPI: true},
-		}, ""))
+		steps = append(steps, newProxyStep(m.Spec.Proxy, fHost, m.Spec.LauncherPort, []string{net},
+			centralBankProxyRoutes(prefix), ""))
 	}
 	return steps
 }
@@ -526,16 +576,37 @@ var ErrBundleNotFound = errors.New("orchestrator: join bundle is required for mo
 //   - b is a validated join bundle (see bundle.ValidateForJoin).
 //   - deps.KeyProvider is non-nil and deps.BankCode is non-empty.
 //   - deps.ComposeTemplatePath points at the commercial-bank docker-compose.yaml.
-func RunJoin(ctx context.Context, m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps) error {
+func RunJoin(ctx context.Context, m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps) (RunOutcome, error) {
 	return runJoinWithSteps(ctx, m, b, deps, os.Stdout, nil)
 }
 
-func runJoinWithSteps(ctx context.Context, m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, w io.Writer, steps []Step) error {
+func runJoinWithSteps(ctx context.Context, m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, w io.Writer, steps []Step) (RunOutcome, error) {
+	// See RunFound: returned on every path, because a step that ran before an abort
+	// still ran.
+	var outcome RunOutcome
+
 	if b == nil {
-		return ErrBundleNotFound
+		return outcome, ErrBundleNotFound
 	}
 	if deps.BankCode == "" {
-		return fmt.Errorf("orchestrator: deps.BankCode is required for mode:join")
+		return outcome, fmt.Errorf("orchestrator: deps.BankCode is required for mode:join")
+	}
+	// A bank settles its own HTLC leg — transferLocked runs on its Paladin node, so no one can
+	// do it for it — and it learns that a leg needs settling from the relay's journal, which it
+	// polls at CACTI_API_URL. Without an endpoint that URL falls back to the co-located
+	// http://host.docker.internal:4000: non-empty, so the orchestrator's own startup check
+	// passes, and on a separate host it points at nothing. The bank would join clean and then
+	// never see a counterpart lock or a revealed secret, with nothing anywhere saying why.
+	// Refuse while an operator is still watching.
+	if bundleRelayEndpoint(m, b) == "" {
+		return outcome, fmt.Errorf(
+			"orchestrator: no relay endpoint for mode:join — the bundle for spoke %q carries none "+
+				"and this manifest sets no spec.relay.endpoint override. The bank polls the relay's "+
+				"settle journal to settle its own legs; without it it joins but never settles. "+
+				"Re-emit the bundle from a founding manifest that declares spec.relay.endpoint, or "+
+				"set the override here",
+			m.Spec.Spoke.ID,
+		)
 	}
 	spokeID := m.Spec.Spoke.ID
 	dataDir := m.Spec.Node.DataDir
@@ -543,13 +614,13 @@ func runJoinWithSteps(ctx context.Context, m *manifest.Manifest, b *bundle.JoinB
 
 	unlock, err := lockState(dataDir)
 	if err != nil {
-		return err
+		return outcome, err
 	}
 	defer unlock()
 
 	state, err := LoadState(dataDir)
 	if err != nil {
-		return fmt.Errorf("orchestrator: load state: %w", err)
+		return outcome, fmt.Errorf("orchestrator: load state: %w", err)
 	}
 	if state.SpokeID == "" {
 		state.SpokeID = spokeID
@@ -561,12 +632,19 @@ func runJoinWithSteps(ctx context.Context, m *manifest.Manifest, b *bundle.JoinB
 
 	for _, step := range steps {
 		if err := ctx.Err(); err != nil {
-			return err
+			return outcome, err
 		}
 
 		done, err := step.Check(ctx)
 		if err != nil {
-			return fmt.Errorf("step %s: check: %w", step.Name(), err)
+			return outcome, fmt.Errorf("step %s: check: %w", step.Name(), err)
+		}
+		// --rebuild overrides a satisfied Check for the build steps: a healthy
+		// container proves the service is up, not that it is running the current
+		// source. Logged so a forced re-run is never a mystery in the log.
+		if done && deps.Force[step.Name()] {
+			logDetail(w, spokeID, step.Name(), "forced by --rebuild: check reported satisfied, rebuilding anyway")
+			done = false
 		}
 		if done {
 			logSkipped(w, spokeID, step.Name())
@@ -574,7 +652,7 @@ func runJoinWithSteps(ctx context.Context, m *manifest.Manifest, b *bundle.JoinB
 			// run converges to the real state on idempotent re-runs.
 			state = markStep(state, step.Name(), "done", time.Now().UTC().Format(time.RFC3339))
 			if err := saveState(dataDir, state); err != nil {
-				return fmt.Errorf("step %s: save state: %w", step.Name(), err)
+				return outcome, fmt.Errorf("step %s: save state: %w", step.Name(), err)
 			}
 			continue
 		}
@@ -601,17 +679,18 @@ func runJoinWithSteps(ctx context.Context, m *manifest.Manifest, b *bundle.JoinB
 			if step.Name() == StepStartBackend {
 				continue
 			}
-			return fmt.Errorf("step %s: %w", step.Name(), runErr)
+			return outcome, fmt.Errorf("step %s: %w", step.Name(), runErr)
 		}
 
+		outcome.ranStep(step.Name())
 		state = markStep(state, step.Name(), "done", time.Now().UTC().Format(time.RFC3339))
 		if err := saveState(dataDir, state); err != nil {
-			return fmt.Errorf("step %s: save state: %w", step.Name(), err)
+			return outcome, fmt.Errorf("step %s: save state: %w", step.Name(), err)
 		}
 		logCompleted(w, spokeID, step.Name())
 	}
 
-	return nil
+	return outcome, nil
 }
 
 // buildJoinSteps constructs the ordered list of production Step implementations
@@ -633,7 +712,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 	// repository — resolve it to the default Besu image (same as mode:found).
 	besuImage := m.Spec.Image
 	if besuImage == "" || besuImage == "build" {
-		besuImage = defaultBesuImage
+		besuImage = DefaultBesuImage
 	}
 
 	// Local single-host adaptation (feature 018): the bundle carries the CB's
@@ -650,6 +729,11 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 	}
 
 	steps := []Step{
+		// First, and deliberately: a bank that cannot reach the relay settles nothing, and
+		// finding that out here costs seconds instead of a full Besu + Paladin + backend
+		// bring-up followed by silence. See checkRelayStep for why this is the settlement path
+		// and not a nicety.
+		newCheckRelayStep(bundleRelayEndpoint(m, b), deps.Timeouts.WaitSync, deps.Timeouts.WaitSyncInterval, w),
 		newWriteGenesisStep(spokeID, deps.BankCode, b.Spec.Genesis.Content, b.Spec.Genesis.Hash),
 		newStartBesuJoinStep(spokeID, deps.BankCode, dataDir, deps.ComposeTemplatePath, deps.BesuRPCURL,
 			ep.bootnodeEnode, m.Spec.Node.AdvertisedHost, besuImage, rpcPort, wsPort, p2pPort),
@@ -705,6 +789,12 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		bankImageTag = bank + proxyImageVariant(fHost)
 	}
 
+	// One realm plan for the three steps that consume it, as in the found pipeline: the import
+	// and the two convergences must agree about what the bank's realm should contain.
+	bankRealms := []KeycloakRealmPlan{commercialBankRealmPlan(bank, m.Spec.AdminUsers, m.Spec.Environment,
+		splitOrigins(bankCORSOriginsFor(ports, frontendAdvertisedHost(m), proxyEnabled)))}
+	kcAdminPass := mustInfraSecret(dataDir, "KC_ADMIN_PASSWORD")
+
 	steps = append(steps,
 		newRenderBankEnvStep(bankEnvParams{
 			SpokeID: spokeID, BankCode: bank, Currency: b.Spec.Currency,
@@ -730,12 +820,20 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			ComposePath: filepath.Join(templatesDir, "entity-keycloak", "keycloak-compose.yaml"),
 			KCDBURL:     kcDBURL, KCUser: "default",
 			KCPassword:      mustInfraSecret(dataDir, "POSTGRES_PASSWORD"),
-			KCAdminPassword: mustInfraSecret(dataDir, "KC_ADMIN_PASSWORD"),
+			KCAdminPassword: kcAdminPass,
 			HostPort:        ports.Keycloak, Timeout: stackTO,
 			// Same origin list the bank's api-gateway receives as CORS_ALLOW_ORIGINS.
-			Realms: []KeycloakRealmPlan{commercialBankRealmPlan(bank, m.Spec.AdminUsers, m.Spec.Environment,
-				splitOrigins(bankCORSOriginsFor(ports, frontendAdvertisedHost(m), proxyEnabled)))},
+			Realms: bankRealms,
 		}),
+		// Join had no reconcile step at all, so everything the found pipeline converges for a
+		// central bank was first-apply-only for a bank: a role newly declared in spec.adminUsers,
+		// and the client origins that follow spec.frontendHost / spec.proxy. Both are
+		// manifest-driven, so the motivating case — a portal moves host, the manifest gains an
+		// origin, the apply reports success and the browser's calls are refused by CORS —
+		// reproduced on every commercial bank. Same two steps, same order, against the bank's
+		// own realm.
+		newReconcileAdminUsersStep(StepReconcileAdminUsers, prefix, kcAdminPass, bankRealms),
+		newReconcileKeycloakRealmStep(StepReconcileKeycloakRealm, prefix, kcAdminPass, bankRealms),
 		newStartBackendStackStep(StepStartBackend, backendStackParams{
 			SpokeID: spokeID, EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
 			// Mount the bank's <dataDir>/pki: gen-csr writes <bank>.csr here, which the
@@ -809,10 +907,8 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 
 	// Per-host reverse proxy (soft): route this bank's portal + api-gateway by path on :80.
 	if proxyEnabled {
-		steps = append(steps, newProxyStep(m.Spec.Proxy, fHost, m.Spec.LauncherPort, []string{net}, []ProxyRoute{
-			{Segment: "bank", Upstream: prefix + "-bank-frontend:80"},
-			{Segment: "api", Upstream: prefix + "-api-gateway:8080", IsAPI: true},
-		}, ""))
+		steps = append(steps, newProxyStep(m.Spec.Proxy, fHost, m.Spec.LauncherPort, []string{net},
+			commercialBankProxyRoutes(prefix), ""))
 	}
 	return steps
 }

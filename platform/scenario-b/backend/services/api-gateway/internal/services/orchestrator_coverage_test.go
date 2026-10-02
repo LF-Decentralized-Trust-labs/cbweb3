@@ -18,6 +18,11 @@ type statefulSwapRepo struct {
 	op        *domain.CrossCurrencySwapOperation
 	createErr error
 	getErr    error
+	// bridgeOut* capture what the orchestrator recorded about the delivery leg, so a test can
+	// assert a failed bridge-out was marked RETRYABLE rather than only logged as needing a human.
+	bridgeOutStatus        domain.BridgeOutDeliveryStatus
+	bridgeOutAttempts      int
+	bridgeOutNextAttemptAt *time.Time
 }
 
 func (r *statefulSwapRepo) Create(_ context.Context, op *domain.CrossCurrencySwapOperation) error {
@@ -66,6 +71,16 @@ func (r *statefulSwapRepo) UpdateFailureReason(_ context.Context, _, reason stri
 	}
 	return nil
 }
+
+// UpdateBridgeOutDelivery captures the delivery state so a test can assert that a failed
+// bridge-out was marked retryable rather than only logged.
+func (r *statefulSwapRepo) UpdateBridgeOutDelivery(_ context.Context, _ string, status domain.BridgeOutDeliveryStatus, attempts int, nextAttemptAt *time.Time) error {
+	r.bridgeOutStatus = status
+	r.bridgeOutAttempts = attempts
+	r.bridgeOutNextAttemptAt = nextAttemptAt
+	return nil
+}
+
 func (r *statefulSwapRepo) UpdateResidue(_ context.Context, _, amount, positionID string, status domain.ResidueReturnStatus) error {
 	if r.op != nil {
 		r.op.ResidueAmount = amount

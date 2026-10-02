@@ -21,7 +21,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuthStore } from "../stores";
-import { hasGovernanceAccess } from "../auth/authorization";
+import { hasPortalAccess } from "../auth/authorization";
 
 const schema = z.object({
   username: z.string().min(3, "Username must be at least 3 characters"),
@@ -57,7 +57,7 @@ export function LoginPage() {
   }, [initialized, checkSession]);
 
   useEffect(() => {
-    if (isAuthenticated && hasGovernanceAccess(profile)) {
+    if (isAuthenticated && hasPortalAccess(profile)) {
       toast("Signed in", {
         description: "Welcome to the Governance Portal.",
       });

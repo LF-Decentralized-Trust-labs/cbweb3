@@ -17,9 +17,9 @@ spec:
   joinBundleRef: ../bundles/spoke-cop.bundle.yaml
   node:
     advertisedHost: host.docker.internal
-    rpc:  { port: 33947 }
-    ws:   { port: 33957 }
-    p2p:  { port: 56605 }
+    rpc:  { port: 9447 }
+    ws:   { port: 9457 }
+    p2p:  { port: 30605 }
     dataDir: cbweb3-data/bank-davivienda
     validator: false
   image: build

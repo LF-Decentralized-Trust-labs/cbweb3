@@ -33,7 +33,7 @@ type HubConfig struct {
 
 	GenesisDir     string // legacy; node state now lives in named volumes
 	ValidatorCount int    // QBFT validators (default 1)
-	BesuImage      string // besu image for genesis generation (default hyperledger/besu:25.8.0)
+	BesuImage      string // besu image for genesis generation (defaults to DefaultBesuImage)
 
 	// Compose interpolation for the hub template (rendered into HubEnvFile before
 	// start-besu-hub). Node state is seeded into the `<VolumePrefix>_*` volumes.
@@ -75,7 +75,7 @@ func (c *HubConfig) WithDefaults() {
 		c.ValidatorCount = 1
 	}
 	if c.BesuImage == "" {
-		c.BesuImage = "hyperledger/besu:25.8.0"
+		c.BesuImage = DefaultBesuImage
 	}
 	if c.GenesisDir == "" {
 		c.GenesisDir = filepath.Join(c.OutDir, "genesis")
@@ -221,14 +221,26 @@ func (c HubConfig) corsOrigins() string {
 // NetName is the hub's external docker network (created by the infra step).
 func (c HubConfig) NetName() string { return c.NetPrefix + "_net" }
 
+// frontendAlias / apiGatewayAlias are the network aliases the reverse proxy resolves the
+// hub's portal and gateway by (must match entity-frontend.compose.yaml and
+// entity-backend.compose.yaml, which the hub renders with ENTITY=hub).
+//
+// Container names cannot serve, for the reason the CB and bank paths already moved off
+// them: a DNS label stops at 63 octets (RFC 1035) and the container name carries the
+// container prefix and the entity role, so a long enough hub name makes it unresolvable
+// and every proxied request answers 502. The hub's own names are short today —
+// "sc-b-cbweb3-hub-hub-frontend" is 28 — but the bound has to hold for the name someone
+// chooses next, not for the one in the samples.
+func (c HubConfig) frontendAlias() string   { return c.NetPrefix + "-frontend" }
+func (c HubConfig) apiGatewayAlias() string { return c.NetPrefix + "-api-gateway" }
+
 // ProxyRoutes are the path routes the reverse proxy exposes for the hub: its governance
-// portal + the api-gateway (container names match entity-frontend/entity-backend with
-// ENTITY=hub). The hub has no launcher, so the proxy also root-redirects to governance.
+// portal + the api-gateway. The hub has no launcher, so the proxy also root-redirects to
+// governance.
 func (c HubConfig) ProxyRoutes() []ProxyRoute {
 	return []ProxyRoute{
-		// entity-frontend.compose.yaml has a single `frontend` service: <PREFIX>-hub-frontend.
-		{Segment: "governance", Upstream: fmt.Sprintf("%s-hub-frontend", c.ContainerPrefix) + ":80"},
-		{Segment: "api", Upstream: fmt.Sprintf("%s-hub-api-gateway", c.ContainerPrefix) + ":8080", IsAPI: true},
+		{Segment: "governance", Upstream: c.frontendAlias() + ":80"},
+		{Segment: "api", Upstream: c.apiGatewayAlias() + ":8080", IsAPI: true},
 	}
 }
 
@@ -249,8 +261,21 @@ func (c HubConfig) buildImage(ctx context.Context, image, dockerfileRel, context
 const accessTokenLifespanSeconds = 300
 
 // buildBackendImage builds the api-gateway image (context: scenario-b/backend).
+// buildBackendImage builds every image hub-backend.compose.yaml runs.
+//
+// Both, not just the gateway: compose would otherwise try to PULL cbweb3b/auth:local, a tag
+// that exists only where somebody built it. Same reasoning as start-spoke-backend, which builds
+// its three for the multi-VM case.
 func (c HubConfig) buildBackendImage(ctx context.Context) error {
-	return c.buildImage(ctx, hubBackendImage, "backend/services/api-gateway/Dockerfile", "backend")
+	for _, b := range []struct{ image, dockerfile, context string }{
+		{hubAuthImage, "backend/services/auth/Dockerfile", "backend"},
+		{hubBackendImage, "backend/services/api-gateway/Dockerfile", "backend"},
+	} {
+		if err := c.buildImage(ctx, b.image, b.dockerfile, b.context); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // provisionKeycloakRealm creates (idempotently) the realm + client with a fixed
@@ -258,22 +283,16 @@ func (c HubConfig) buildBackendImage(ctx context.Context) error {
 func (c HubConfig) provisionKeycloakRealm(ctx context.Context) error {
 	kc := "/opt/keycloak/bin/kcadm.sh"
 	var b strings.Builder
-	// Caveat, stated rather than glossed: kcadm takes the password as an argument, so
-	// it transits the Keycloak container's process list for the duration of this exec.
-	// There is no env equivalent for `kcadm config credentials` (unlike REDISCLI_AUTH,
-	// which is why Redis is handled differently). This is not new — the value used to be
-	// the constant admin — but the exposure window is real and belongs in a follow-up
-	// once realm provisioning moves to an imported realm file, as Scenario A does it.
 	b.WriteString(kcadmPreamble)
 	fmt.Fprintf(&b,
-		"%[1]s config credentials --server http://localhost:8080 --realm master --user %[2]s --password %[3]s && "+
-			"(%[1]s create realms -s realm=%[4]s -s enabled=true || kcw 'create realm') && "+
+		"%[2]s && "+
+			"(%[1]s create realms -s realm=%[3]s -s enabled=true || kcw 'create realm') && "+
 			// Local lab HTTP: relax sslRequired so the browser-direct NOC portal
 			// password grant is not rejected with "HTTPS required" (never in prod).
-			"(%[1]s update realms/%[4]s -s sslRequired=NONE -s accessTokenLifespan=%[8]d || kcw 'update realm settings') && "+
-			"(%[1]s create clients -r %[4]s -s clientId=%[5]s -s secret=%[6]s -s enabled=true "+
-			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[7]s || kcw 'create backend client') && ",
-		kc, "admin", mustInfraSecret(secretsDirOf(c.HubEnvFile), "KC_ADMIN_PASSWORD"),
+			"(%[1]s update realms/%[3]s -s sslRequired=NONE -s accessTokenLifespan=%[7]d || kcw 'update realm settings') && "+
+			"(%[1]s create clients -r %[3]s -s clientId=%[4]s -s secret=%[5]s -s enabled=true "+
+			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[6]s || kcw 'create backend client') && ",
+		kc, kcadmLogin(kc),
 		hubKeycloakRealm, hubKeycloakClient, hubKeycloakSecret, audienceMapperArg(keycloakBackendAudience),
 		accessTokenLifespanSeconds)
 	// Public noc-portal client so the hub's co-located NOC portal can password-grant
@@ -347,6 +366,7 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"GATEWAY_URL":   fmt.Sprintf("http://localhost:%d", c.RPCPort+8000),
 		"BACKEND_IMAGE": hubBackendImage,
 		// compliance (hub self-registration of spokes on the IdentityRegistry)
+		"AUTH_IMAGE":                 hubAuthImage,
 		"COMPLIANCE_IMAGE":           hubComplianceImage,
 		"COMPLIANCE_GRPC_ADDR":       e + "-hub-compliance:9093",
 		"HUB_CHAIN_ID":               itoa(int(c.ChainID)),
@@ -512,7 +532,6 @@ func FoundHubSteps(c HubConfig) []Step {
 			Check: func(ctx context.Context) (bool, error) {
 				return nocOriginsAlreadyRegistered(ctx, c.Runner, c.keycloakContainer(),
 					keycloakAdminCLI, hubKeycloakRealm,
-					mustInfraSecret(secretsDirOf(c.HubEnvFile), "KC_ADMIN_PASSWORD"),
 					nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...))
 			},
 			Run: func(ctx context.Context) error {
@@ -525,7 +544,6 @@ func FoundHubSteps(c HubConfig) []Step {
 				}
 				return reconcileNOCOrigins(ctx, c.Runner, c.keycloakContainer(),
 					keycloakAdminCLI, hubKeycloakRealm,
-					mustInfraSecret(secretsDirOf(c.HubEnvFile), "KC_ADMIN_PASSWORD"),
 					nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy(), c.NOCPortalOrigins...))
 			},
 		},
@@ -564,8 +582,11 @@ func FoundHubSteps(c HubConfig) []Step {
 		{
 			Name: "build-hub-backend-image",
 			Check: func(ctx context.Context) (bool, error) {
-				// imageExists (not an inline inspect) so --rebuild reaches this gate too.
-				return imageExists(ctx, c.Runner, hubBackendImage), nil
+				// BOTH images, or a host that has the gateway but not auth skips the step and
+				// `compose up` fails pulling a local-only tag. imageExists (not an inline
+				// inspect) so --rebuild reaches this gate too.
+				return imageExists(ctx, c.Runner, hubBackendImage) &&
+					imageExists(ctx, c.Runner, hubAuthImage), nil
 			},
 			Run: func(ctx context.Context) error { return c.buildBackendImage(ctx) },
 		},
@@ -605,12 +626,12 @@ func FoundHubSteps(c HubConfig) []Step {
 				if err := c.buildImage(ctx, hubComplianceImage, "backend/services/compliance/Dockerfile", "backend"); err != nil {
 					return err
 				}
-				// Build the auth image here too (shared): the hub does not run auth,
-				// but every spoke/bank backend does, and images are built once on the
-				// hub host before spokes/banks start.
-				if err := c.buildImage(ctx, hubAuthImage, "backend/services/auth/Dockerfile", "backend"); err != nil {
-					return err
-				}
+				// The auth image used to be built here too, "because the hub does not run
+				// auth but every spoke/bank does". Both halves of that stopped being true:
+				// the hub runs one now (ADR-011), and start-spoke-backend builds its own
+				// three for the separate-daemon case. It is built by
+				// build-hub-backend-image, next to the gateway it ships with, and gated by
+				// that step's Check.
 				return compose("entity-compliance")(ctx)
 			},
 		},

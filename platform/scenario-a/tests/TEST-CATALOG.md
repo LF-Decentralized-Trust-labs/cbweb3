@@ -20,7 +20,7 @@
 - [Scenario A — API Unit Tests](#scenario-a--api-unit-tests)
 - [Scenario A — API Integration Tests](#scenario-a--api-integration-tests)
 - [Scenario A — E2E Tests](#scenario-a--e2e-tests)
-- [AMM Smart Contract Unit Tests (Scenario A's AMM copy)](#amm-smart-contract-unit-tests-scenario-as-amm-copy)
+- [AMM Smart Contract Unit Tests — RETIRED](#amm-smart-contract-unit-tests--retired)
 - [Scenario B — API and E2E Tests](#scenario-b--api-and-e2e-tests)
 
 ---
@@ -335,41 +335,22 @@ See `SpokeBridge.t.sol` for function-level test list. Tests cover cross-spoke me
 
 ---
 
-## AMM Smart Contract Unit Tests (Scenario A's AMM copy)
+## AMM Smart Contract Unit Tests — RETIRED
 
-> **Status**: implemented. Run with `forge test --match-path "test/AutomatedMarketMaker.t.sol"` from `scenario-a/contracts/`.
+> **Status**: retired. Scenario A's `AutomatedMarketMaker.sol` and its Foundry suite
+> (`AutomatedMarketMaker.t.sol`, plus the `AutomatedMarketMakerInvariant` and
+> `AMMHandlerReachability` invariant suites) were removed: Scenario A settles over the
+> two-layer hash-locked transfer and never executed a swap. The engine existed only so a
+> circuit breaker had somewhere to live, and that breaker is a governance flag recorded in
+> the database.
 >
-> These cover **Scenario A's own** `AutomatedMarketMaker.sol`. Scenario B is
-> implemented and carries its own contract tree and its own test suite — including
-> `AutomatedMarketMaker.t.sol`, `PairRegistry.t.sol`, `LiquidityCommitRegistry.t.sol`,
-> `CurrencyRegistry.t.sol` and `SpokeBridge.t.sol`. Those are catalogued in
-> [`scenario-b/tests/TEST-CATALOG.md`](../../scenario-b/tests/TEST-CATALOG.md), not here.
+> **`UT-SC-B-01` through `UT-SC-B-18` no longer have a Scenario A implementation.** The IDs
+> are recorded here rather than deleted, so Deliverable 12 traceability resolves to an
+> explicit retirement instead of a missing section.
 >
-> The `UT-SC-B-*` test IDs below are kept unchanged for traceability against
-> Deliverable 12, despite naming Scenario A's file.
-
-**File**: `contracts/test/AutomatedMarketMaker.t.sol`
-
-| Test ID | Function | Title | Expected Result | Status |
-|---------|----------|-------|-----------------|--------|
-| UT-SC-B-01 | `test_AddLiquidity_Success` | Add liquidity — success | LP tokens minted to provider; reserves updated | [Implemented] |
-| UT-SC-B-02 | `test_Revert_AddLiquidity_ZeroAmount` | Add liquidity — zero amount | Transaction reverts | [Implemented] |
-| UT-SC-B-03 | `test_GetAmountIn_Math` | getAmountIn — constant product math | Returns correct input for given output based on `x·y=k` formula | [Implemented] |
-| UT-SC-B-04 | `test_Revert_GetAmountIn_InsufficientLiquidity` | getAmountIn — insufficient liquidity | Reverts with `INSUFFICIENT_LIQUIDITY` when output exceeds reserves | [Implemented] |
-| UT-SC-B-05 | `test_SwapTokensForExactTokens_Success` | Exact-output swap — happy path | Beneficiary receives exact requested output; payer debited correct input; pool reserves updated | [Implemented] |
-| UT-SC-B-06 | `test_Revert_Swap_SlippageExceeded` | Exact-output swap — slippage exceeded | Transaction reverts; no tokens transferred | [Implemented] |
-| UT-SC-B-07 | `test_Revert_Swap_InvalidToken` | Swap — invalid token address | Transaction reverts | [Implemented] |
-| UT-SC-B-08 | `test_CircuitBreaker_Pause_Success` | Circuit breaker — governance pause | Contract state = `PAUSED`; all swaps revert | [Implemented] |
-| UT-SC-B-09 | `test_CircuitBreaker_Unpause_Success` | Circuit breaker — governance unpause | Contract state = `ACTIVE`; swaps resume | [Implemented] |
-| UT-SC-B-10 | `test_Revert_CircuitBreaker_Unauthorized` | Circuit breaker — unauthorized caller | Transaction reverts; only `CENTRAL_BANK` or `GOVERNANCE` can pause | [Implemented] |
-| UT-SC-B-11 | `test_Revert_Swap_ZeroAmount` | Swap — zero amount | Transaction reverts | [Implemented] |
-| UT-SC-B-12 | `test_SwapTokensForExactTokens_ReverseDirection` | Exact-output swap — reverse direction (tCeBMb→tCeBMa) | Correct pricing in reverse direction | [Implemented] |
-| UT-SC-B-13 | `test_Revert_Constructor_ZeroAddressTokenA` | Constructor — zero address tokenA | Deployment reverts | [Implemented] |
-| UT-SC-B-14 | `test_Revert_Constructor_ZeroAddressTokenB` | Constructor — zero address tokenB | Deployment reverts | [Implemented] |
-| UT-SC-B-15 | `test_Revert_Constructor_ZeroAddressIdentityRegistry` | Constructor — zero address registry | Deployment reverts | [Implemented] |
-| UT-SC-B-16 | `test_Revert_AddLiquidity_UnverifiedCaller` | Add liquidity — unverified caller | Transaction reverts; IdentityRegistry check enforced | [Implemented] |
-| UT-SC-B-17 | `test_Revert_Swap_UnverifiedSender` | Swap — unverified sender | Transaction reverts | [Implemented] |
-| UT-SC-B-18 | `test_Revert_Swap_UnverifiedTo` | Swap — unverified recipient | Transaction reverts | [Implemented] |
+> Scenario B carries its own `AutomatedMarketMaker.sol` — a different, larger contract — and
+> its own suite, catalogued in
+> [`scenario-b/tests/TEST-CATALOG.md`](../../scenario-b/tests/TEST-CATALOG.md).
 
 ---
 

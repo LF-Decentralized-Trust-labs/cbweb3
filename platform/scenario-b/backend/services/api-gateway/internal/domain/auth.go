@@ -62,6 +62,13 @@ const (
 	RoleSupervisor        = "ROLE_SUPERVISOR"
 	RoleNOC               = "ROLE_NOC"
 	RoleGovernanceOfficer = "ROLE_GOVERNANCE_OFFICER"
+	// RoleAdmission owns the mutating commercial-bank onboarding actions (approve
+	// KYC, register the participant record) — see spec 042. It is deliberately NOT
+	// in adminRoles below: the Admission operator is provisioned from the entity
+	// manifest (spec.adminUsers), never through POST /compliance/register, so it is
+	// also absent from that endpoint's assignable-role enums. It holds no signing
+	// key and authorizes no central-bank key operation (on-chain or CA).
+	RoleAdmission = "ROLE_ADMISSION"
 
 	// Legacy constants kept for backward-compat with existing tests.
 	RoleCentralBank = "CENTRAL_BANK"

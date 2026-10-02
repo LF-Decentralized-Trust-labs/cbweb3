@@ -26,8 +26,9 @@ ENV VITE_INSTITUTION_NAME=${VITE_INSTITUTION_NAME}
 ARG VITE_KC_CLIENT_ID
 ENV VITE_KC_CLIENT_ID=${VITE_KC_CLIENT_ID}
 
-ARG VITE_KC_CLIENT_SECRET
-ENV VITE_KC_CLIENT_SECRET=${VITE_KC_CLIENT_SECRET}
+# VITE_KC_CLIENT_SECRET is deliberately NOT a build arg here. Vite inlines build-time
+# values into the bundle, so accepting one would put a confidential client secret in
+# JavaScript that any visitor can read. The login form starts empty instead.
 
 ARG VITE_BASE_PATH
 ENV VITE_BASE_PATH=${VITE_BASE_PATH}

@@ -17,9 +17,9 @@ spec:
   joinBundleRef: ../bundles/spoke-brl.bundle.yaml
   node:
     advertisedHost: host.docker.internal
-    rpc:  { port: 33647 }
-    ws:   { port: 33657 }
-    p2p:  { port: 56305 }
+    rpc:  { port: 9147 }
+    ws:   { port: 9157 }
+    p2p:  { port: 30305 }
     dataDir: cbweb3-data/bank-bradesco
     validator: false
   image: build

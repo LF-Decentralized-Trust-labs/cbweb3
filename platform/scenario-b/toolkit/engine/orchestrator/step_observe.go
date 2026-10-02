@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -66,6 +68,10 @@ type ObserveConfig struct {
 	AMMGatewayURL string
 	// LauncherURL is baked as the portal's VITE_LAUNCHER_URL (back-to-launcher).
 	LauncherURL string
+	// AdminUsers carries the manifest's operators. The NOC_ADMIN among them is what the
+	// toolkit authenticates its own admin calls with, now that the NOC backend validates
+	// tokens for real.
+	AdminUsers []AdminUser
 	// ProxyEnabled (spec.proxy == "enable") serves the NOC portal + its backend API
 	// behind the per-host reverse proxy under /b/noc/ and /b/noc-api/ on the single
 	// proxy origin. When false the portal + backend stay port-based (local default).
@@ -115,6 +121,28 @@ func (c *ObserveConfig) WithDefaults() {
 }
 
 // ComposeEnv is the process env the noc-stack template resolves its ${...} from.
+// ProxyRoutes is the observe stack's route set, alongside SpokeConfig's, JoinConfig's and
+// HubConfig's. A method rather than a literal at the call site so a guard can evaluate it for a
+// prefix nobody has deployed — the bound has to hold for the next NOC, not the two that exist.
+//
+// The upstreams are network ALIASES, not container names. A DNS label stops at 63 octets
+// (RFC 1035); a container name repeats the prefix and grows with it, which is what took the
+// Costa Rica portals down. PR #226 moved the CB, bank and hub route sets off container names and
+// left this one behind — the observe stack has its own template and its own network, so nothing
+// about that fix reached it.
+func (c ObserveConfig) ProxyRoutes() []ProxyRoute {
+	return []ProxyRoute{
+		{Segment: nocProxyPortalSegment, Upstream: c.nocPortalAlias() + ":80"},
+		{Segment: nocProxyAPISegment, Upstream: c.nocBackendAlias() + ":8080"},
+	}
+}
+
+// The aliases noc-stack.compose.yaml declares. TestComposeAliasesMatchProxyRoutes holds the two
+// halves together: change one without the other and the route renders, the apply succeeds, and
+// the portal answers 502.
+func (c ObserveConfig) nocPortalAlias() string  { return c.NetPrefix + "-noc-portal" }
+func (c ObserveConfig) nocBackendAlias() string { return c.NetPrefix + "-noc-backend" }
+
 func (c ObserveConfig) ComposeEnv() []string {
 	vars := map[string]string{
 		"CONTAINER_PREFIX":  c.ContainerPrefix,
@@ -128,10 +156,29 @@ func (c ObserveConfig) ComposeEnv() []string {
 		"NOC_BACKEND_IMAGE": hubNocBackendImage,
 		"NOC_PORTAL_IMAGE":  c.portalImage(),
 	}
+	// The realm the NOC backend password-grants against. It moved here from the PORTAL's
+	// build args when the login moved to the server: the browser no longer performs the
+	// grant, because a cookie it cannot read can only be set by a server. Same operator-
+	// provided routable URL (spec.noc.keycloakURL), now consumed by the backend.
+	if c.KeycloakURL != "" {
+		vars["NOC_KEYCLOAK_URL"] = containerReachableURL(c.KeycloakURL)
+		vars["NOC_KEYCLOAK_REALM"] = spokeKeycloakRealm
+		vars["NOC_KEYCLOAK_CLIENT_ID"] = nocKeycloakClient
+	}
+	// Keys the HMAC binding each CSRF token to its session. Derived from the container
+	// prefix so it is stable across restarts of THIS stack — a per-process secret would
+	// refuse every token issued before the last restart.
+	vars["NOC_CSRF_SECRET"] = deriveNOCCSRFSecret(c.ContainerPrefix)
+
+	// CORS origin. It must name the portal exactly, never "*": a browser refuses to send
+	// credentials to a wildcard origin, and the session is a cookie now — so a wildcard
+	// would let the portal log in and then be anonymous on every request, with no error
+	// anywhere to explain it.
 	if c.ProxyEnabled {
-		// Behind the proxy the portal is same-origin with the backend, so the backend's
-		// browser CORS collapses to the single proxy origin (vs the local "*" default).
+		// Behind the proxy the portal is same-origin with the backend.
 		vars["NOC_FRONTEND_ORIGIN"] = proxyOrigin(c.FrontendHost)
+	} else {
+		vars["NOC_FRONTEND_ORIGIN"] = fmt.Sprintf("http://%s:%d", c.FrontendHost, c.PortalPort)
 	}
 	if c.AMMGatewayURL != "" {
 		// Pool Stability data source. Pairs are discovered from this gateway, so no
@@ -153,12 +200,12 @@ func (c ObserveConfig) ComposeEnv() []string {
 // distinct from BackendURL (the toolkit's localhost admin path). VITE_KEYCLOAK_URL is
 // the operator-provided routable realm in both modes (never proxied).
 func (c ObserveConfig) portalViteArgs() map[string]string {
+	// No VITE_KEYCLOAK_* any more: the portal does not talk to the realm. The login goes
+	// to its own backend, which performs the grant and sets an HttpOnly cookie — the whole
+	// reason the tokens left localStorage.
 	args := map[string]string{
-		"VITE_NOC_BACKEND_URL":    fmt.Sprintf("http://%s:%d/api/v1", c.FrontendHost, c.BackendPort),
-		"VITE_KEYCLOAK_URL":       c.KeycloakURL,
-		"VITE_KEYCLOAK_REALM":     spokeKeycloakRealm,
-		"VITE_KEYCLOAK_CLIENT_ID": nocKeycloakClient,
-		"VITE_LAUNCHER_URL":       c.LauncherURL,
+		"VITE_NOC_BACKEND_URL": fmt.Sprintf("http://%s:%d/api/v1", c.FrontendHost, c.BackendPort),
+		"VITE_LAUNCHER_URL":    c.LauncherURL,
 	}
 	if c.ProxyEnabled {
 		// Served under /b/noc/; assets + router resolve under the prefix.
@@ -199,6 +246,113 @@ func (c ObserveConfig) composeUpArgs() []string {
 	return []string{"compose", "-p", c.ContainerPrefix, "-f", c.template("noc-stack"), "up", "-d"}
 }
 
+// nocAdminBearer returns the token the toolkit authenticates its NOC admin calls with.
+//
+// It performs the same password grant the NOC backend performs for a browser, using the
+// manifest's NOC_ADMIN operator against the same realm. That is what makes the call work
+// against a backend that actually validates tokens.
+//
+// Falls back to the legacy placeholder when the manifest names no NOC operator, or when the
+// grant fails: a stack still running NOC_SKIP_AUTH=true accepts anything, so the fallback
+// keeps that deployment working instead of failing it on a credential it does not need.
+// The failure is logged rather than swallowed, because on a validating backend the next
+// call answers 401 and the reason must be visible.
+func (c ObserveConfig) nocAdminBearer(ctx context.Context) string {
+	user, pass, ok := c.nocAdminCredential()
+	if !ok || c.KeycloakURL == "" {
+		return nocLocalAdminBearer
+	}
+	form := url.Values{}
+	form.Set("grant_type", "password")
+	form.Set("client_id", nocKeycloakClient)
+	form.Set("username", user)
+	form.Set("password", pass)
+
+	endpoint := fmt.Sprintf("%s/realms/%s/protocol/openid-connect/token",
+		strings.TrimRight(c.KeycloakURL, "/"), spokeKeycloakRealm)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		log.Printf("[observe] noc admin token: %v — falling back to the skip-auth placeholder", err)
+		return nocLocalAdminBearer
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		log.Printf("[observe] noc admin token: realm unreachable at %s: %v — falling back to the skip-auth placeholder", endpoint, err)
+		return nocLocalAdminBearer
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[observe] noc admin token: realm returned %d for %q — falling back to the skip-auth placeholder", resp.StatusCode, user)
+		return nocLocalAdminBearer
+	}
+	var tr struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil || tr.AccessToken == "" {
+		log.Printf("[observe] noc admin token: unreadable grant response — falling back to the skip-auth placeholder")
+		return nocLocalAdminBearer
+	}
+	return tr.AccessToken
+}
+
+// nocAdminCredential returns the manifest's NOC_ADMIN operator.
+//
+// It exists because the toolkit used to authenticate its admin calls with the literal
+// string "local-dev" — see the comment on nocLocalAdminBearer. That was never a credential:
+// it passed only because NOC_SKIP_AUTH made the validator accept any string. With real
+// validation the deploy fails at register-noc-spoke with 401, which is exactly what
+// happened the first time the flag was switched off.
+//
+// Reports whether one was found, rather than returning a placeholder: a caller that cannot
+// authenticate should say so, not send something that will be refused.
+func (c ObserveConfig) nocAdminCredential() (username, password string, ok bool) {
+	for _, u := range c.AdminUsers {
+		if strings.EqualFold(u.Role, "NOC_ADMIN") && u.Username != "" {
+			return u.Username, u.Password, true
+		}
+	}
+	return "", "", false
+}
+
+// containerReachableURL rewrites a host-facing "localhost" URL into one a CONTAINER can
+// reach.
+//
+// spec.noc.keycloakURL was written for the browser, which is where the password grant used
+// to run — and "localhost" is exactly right there. The grant now runs in the NOC backend,
+// inside a container on its own network, where "localhost" is the container itself. Left
+// alone, every existing manifest would break at login with a connection refused and nothing
+// pointing at the cause.
+//
+// The container side is host.docker.internal, which noc-stack.compose.yaml already maps via
+// extra_hosts for the same reason AMM_GATEWAY_URL needs it. A URL that already names a
+// routable host is untouched.
+func containerReachableURL(u string) string {
+	for _, local := range []string{"//localhost:", "//127.0.0.1:"} {
+		if strings.Contains(u, local) {
+			return strings.Replace(u, local, "//host.docker.internal:", 1)
+		}
+	}
+	return u
+}
+
+// deriveNOCCSRFSecret produces a stable per-stack CSRF secret.
+//
+// Derived rather than random so it survives a restart: the secret keys the HMAC that binds
+// each CSRF token to its session, so a value that changes on boot refuses every token
+// issued before it — a browser holding a perfectly good session suddenly gets 403 on every
+// action, with nothing to suggest the cause.
+//
+// It is not a production secret and does not pretend to be: this is the LOCAL toolkit path,
+// where the whole stack's credentials are derived the same way. A production deployment
+// supplies CSRF_SECRET itself, which is why the backend reads the env var rather than
+// deriving anything of its own.
+func deriveNOCCSRFSecret(containerPrefix string) string {
+	sum := sha256.Sum256([]byte("cbweb3-noc-csrf:" + containerPrefix))
+	return hex.EncodeToString(sum[:])
+}
+
 // nocNetName is the dedicated observe network the NOC stack owns (noc-stack.compose.yaml:
 // noc_net → <NOC_NET_PREFIX>_net). The proxy attaches to it to reach the portal + backend.
 func (c ObserveConfig) nocNetName() string { return c.NetPrefix + "_net" }
@@ -215,10 +369,7 @@ func nocProxyStep(c ObserveConfig) Step {
 		SiteHost: c.FrontendHost,
 		Fragment: nocProxyFragment,
 		Networks: []string{c.nocNetName()},
-		Routes: []ProxyRoute{
-			{Segment: nocProxyPortalSegment, Upstream: c.ContainerPrefix + "-noc-portal:80"},
-			{Segment: nocProxyAPISegment, Upstream: c.ContainerPrefix + "-noc-backend:8080"},
-		},
+		Routes:   c.ProxyRoutes(),
 	})
 	step.Name = "start-noc-proxy"
 	step.Deps = []string{"start-noc-stack"}
@@ -360,7 +511,7 @@ func (c ObserveConfig) spokeRegistered(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	req.Header.Set("Authorization", "Bearer "+nocLocalAdminBearer)
+	req.Header.Set("Authorization", "Bearer "+c.nocAdminBearer(ctx))
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return false
@@ -406,7 +557,7 @@ func (c ObserveConfig) adminPost(ctx context.Context, path string, body []byte, 
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+nocLocalAdminBearer)
+	req.Header.Set("Authorization", "Bearer "+c.nocAdminBearer(ctx))
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("observe: POST %s: %w", path, err)

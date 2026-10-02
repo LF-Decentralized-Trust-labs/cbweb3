@@ -1,7 +1,6 @@
 
 
 # Contents
-- [IAutomatedMarketMaker](IAutomatedMarketMaker.sol/interface.IAutomatedMarketMaker.md)
 - [IFXAgreement](IFXAgreement.sol/interface.IFXAgreement.md)
 - [IFiatCentralBankMoney](IFiatCentralBankMoney.sol/interface.IFiatCentralBankMoney.md)
 - [IHashTimeLockedContract](IHashTimeLockedContract.sol/interface.IHashTimeLockedContract.md)

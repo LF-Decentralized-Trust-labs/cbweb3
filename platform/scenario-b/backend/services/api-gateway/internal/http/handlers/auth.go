@@ -4,13 +4,16 @@
 package handlers
 
 import (
-	"log"
-
+	"fmt"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/middleware"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/gofiber/fiber/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"log"
+	"strings"
+	"time"
 )
 
 // AuthHandler implements authentication endpoints.
@@ -20,13 +23,58 @@ type AuthHandler struct {
 	clientSecretChanger interfaces.IClientSecretChanger // optional; nil if not supported
 	kycChecker          interfaces.KYCChecker
 	kycManager          interfaces.KYCManager
-	cookieSecure        bool // mirrors COOKIE_SECURE env var; true = HTTPS only
+	cookieSecure        bool   // mirrors COOKIE_SECURE env var; true = HTTPS only
+	csrfSecret          []byte // keys the HMAC binding a CSRF token to its session
+	// entityWallet is this gateway's own on-chain address (ENTITY_BESU_ADDRESS), served on
+	// /auth/me when the identity provider issues no wallet claim — which is always, today.
+	//
+	// The portal renders this field on the issuance screen so an operator can confirm which
+	// wallet money will be created against. With nothing to render it said "Not available in
+	// session", minutes after onboarding had shown the address on its own success screen. The
+	// address was never missing: it is what every deposit this gateway creates carries as
+	// requester_besu_address.
+	entityWallet string
 }
 
 type loginRequest struct {
 	ClientID     string `json:"clientId"`
 	ClientSecret string `json:"clientSecret"`
 }
+
+// Stable error codes for the auth routes.
+//
+// The five portals used to render axios's own `error.message`, so an operator saw "Request failed
+// with status code 400" and could not tell a wrong secret from an empty field from a gateway that
+// was down. Keying the frontend on the prose instead would break the moment a message is reworded,
+// and keying on the status is not enough: 400 covers both a missing field and a malformed body.
+//
+// So the body carries a code as well as the message — the same convention the relay-rejection
+// classifier already relies on. `error` is unchanged: it is what logs and existing clients read.
+//
+// Scoped to the login and refresh routes, the ones the portals key on. The other handlers in this
+// file still answer with `error` alone; extending them is a separate change with its own callers.
+const (
+	// CodeInvalidRequest is a request the gateway could not parse. A client bug, not something the
+	// operator can fix by typing more carefully.
+	CodeInvalidRequest = "INVALID_REQUEST"
+	// CodeMissingCredentials is an absent clientId or clientSecret. One code for either field: the
+	// message may name which, but no caller should have to parse prose to find out.
+	CodeMissingCredentials = "MISSING_CREDENTIALS"
+	// CodeInvalidCredentials is a credential the identity provider refused. One code for both an
+	// unknown client and a wrong secret — distinguishing them is user enumeration.
+	CodeInvalidCredentials = "INVALID_CREDENTIALS" //#nosec G101 -- not a secret; a wire error code, no credential material
+	// CodeAuthServiceUnavailable is the auth service being unreachable or not ready. Deliberately
+	// not an auth failure: telling an operator their credentials are wrong when the service is down
+	// sends them to rotate a secret that was fine.
+	CodeAuthServiceUnavailable = "AUTH_SERVICE_UNAVAILABLE"
+	// CodeMissingRefreshToken means no refresh token was presented — usually a session-restore probe
+	// on a page that has no session yet. A caller that recognises this can stay silent instead of
+	// rendering "refreshToken is required" as a login failure, which is what an operator reported
+	// seeing on a login screen.
+	CodeMissingRefreshToken = "MISSING_REFRESH_TOKEN"
+	// CodeInvalidRefreshToken is a refresh token the identity provider rejected: a real expiry.
+	CodeInvalidRefreshToken = "INVALID_REFRESH_TOKEN"
+)
 
 // NewAuthHandler builds an AuthHandler with its required dependencies.
 // cookieSecure should be true when the gateway is served over HTTPS so that
@@ -58,11 +106,25 @@ func NewAuthHandler(
 	}
 }
 
+// WithCSRFSecret sets the key that binds CSRF tokens to their session.
+//
+// A setter rather than a constructor parameter because NewAuthHandler has a dozen
+// call sites across tests; the wiring that matters is in main.go, and a test that
+// does not exercise CSRF should not have to name a secret.
+func (h *AuthHandler) WithCSRFSecret(secret []byte) *AuthHandler {
+	h.csrfSecret = secret
+	return h
+}
+
 // setAuthCookies injects HttpOnly auth cookies for the access and refresh tokens.
 // The refresh cookie uses its own MaxAge (refreshExpiresIn) so it outlives the
 // access token, enabling silent refresh. When refreshExpiresIn is 0 the access
 // token lifetime is used as fallback.
-func setAuthCookies(c *fiber.Ctx, accessToken, refreshToken string, expiresIn, refreshExpiresIn int, secure bool) {
+// The CSRF token is minted HERE, alongside the session, rather than at login only.
+// It is bound to the access token, and a refresh issues a new access token — so a
+// token minted at login stops validating the moment the session is refreshed. Both
+// paths already funnel through this function, which is why it is the right place.
+func setAuthCookies(c *fiber.Ctx, accessToken, refreshToken string, expiresIn, refreshExpiresIn int, secure bool, csrfSecret []byte) error {
 	c.Cookie(&fiber.Cookie{
 		Name:     "access_token",
 		Value:    accessToken,
@@ -87,28 +149,60 @@ func setAuthCookies(c *fiber.Ctx, accessToken, refreshToken string, expiresIn, r
 			SameSite: "Strict",
 		})
 	}
+
+	csrfToken, err := middleware.NewCSRFToken(csrfSecret, accessToken)
+	if err != nil {
+		// Propagated, never swallowed: emitting an empty XSRF-TOKEN cookie would
+		// lock the browser out of every mutating request, and the only clue would
+		// be a 403 with no cause.
+		return fmt.Errorf("mint csrf token: %w", err)
+	}
+	// Deliberately NOT HttpOnly: the browser has to read this one to echo it in the
+	// X-XSRF-TOKEN header. That is the whole double-submit mechanism, and it is safe
+	// precisely because the session cookie beside it stays HttpOnly.
+	c.Cookie(&fiber.Cookie{
+		Name:     middleware.CSRFCookieName,
+		Value:    csrfToken,
+		Path:     "/",
+		MaxAge:   expiresIn,
+		HTTPOnly: false,
+		Secure:   secure,
+		SameSite: "Strict",
+	})
+	return nil
 }
 
-// clearAuthCookies removes the auth cookies from the browser by expiring them immediately.
+// clearAuthCookies deletes the auth cookies from the browser.
+//
+// Expires-in-the-past, NOT MaxAge: -1. Fiber writes a Max-Age attribute only when the value is
+// positive, so a negative one is dropped without warning and the browser receives a cookie with
+// an empty value and NO expiry — cleared in effect, since an empty session fails authentication,
+// but still sitting in the jar until the browser closes. Setting Expires is what deletes it.
+//
+// The bug was invisible from Go: a test that reads MaxAge back sees the value the handler set,
+// not what Fiber wrote, so it passes both before and after. logout_cookie_wire_test.go asserts
+// the Set-Cookie header instead, which is the only place the difference exists.
+//
+// The NOC backend already did it this way, and already tested it
+// (noc-backend/internal/api/auth_test.go, TestLogout_ExpiresEveryAuthCookie); this gateway is
+// the half that had not caught up on either. Both scenarios carry the same fix — the same hole was on
+// each side, so it is not drift.
 func clearAuthCookies(c *fiber.Ctx, secure bool) {
-	c.Cookie(&fiber.Cookie{
-		Name:     "access_token",
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HTTPOnly: true,
-		Secure:   secure,
-		SameSite: "Strict",
-	})
-	c.Cookie(&fiber.Cookie{
-		Name:     "refresh_token",
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HTTPOnly: true,
-		Secure:   secure,
-		SameSite: "Strict",
-	})
+	past := time.Now().Add(-time.Hour)
+	for _, name := range []string{middleware.CSRFCookieName, "access_token", "refresh_token"} {
+		c.Cookie(&fiber.Cookie{
+			Name:  name,
+			Value: "",
+			Path:  "/",
+			// Expires, not MaxAge — see above.
+			Expires: past,
+			// The CSRF cookie is read by the browser's JS to echo the token back; the session
+			// cookies are not. Unchanged from before this fix.
+			HTTPOnly: name != middleware.CSRFCookieName,
+			Secure:   secure,
+			SameSite: "Strict",
+		})
+	}
 }
 
 // Login authenticates a client and returns tokens or a PKI nonce challenge.
@@ -127,13 +221,13 @@ func clearAuthCookies(c *fiber.Ctx, secure bool) {
 func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	var req loginRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body", "code": CodeInvalidRequest})
 	}
 	if req.ClientID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientId is required"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientId is required", "code": CodeMissingCredentials})
 	}
 	if req.ClientSecret == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientSecret is required"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientSecret is required", "code": CodeMissingCredentials})
 	}
 
 	// Attempt PKI nonce flow first (ROLE_COMMERCIAL_BANK / ROLE_TREASURY).
@@ -149,17 +243,17 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		st, ok := status.FromError(err)
 		if !ok {
 			// Non-gRPC error (network, timeout, context cancelled) — treat as service unavailable.
-			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authentication service unavailable"})
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authentication service unavailable", "code": CodeAuthServiceUnavailable})
 		}
 		switch st.Code() {
 		case codes.NotFound, codes.PermissionDenied:
 			// "participant not found" or "PKI_NOT_REQUIRED" — fall through to direct login.
 		case codes.Unauthenticated:
 			// PKI first factor failed (wrong clientSecret).
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials", "code": CodeInvalidCredentials})
 		default:
 			// Internal error, Unavailable (service not ready), etc. — do not leak as auth failure.
-			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authentication service unavailable"})
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authentication service unavailable", "code": CodeAuthServiceUnavailable})
 		}
 	}
 
@@ -167,9 +261,15 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	// or other non-PKI roles (ROLE_SUPERVISOR, ROLE_NOC, ROLE_GOVERNANCE_OFFICER).
 	token, err := h.authProvider.Authenticate(c.UserContext(), req.ClientID, req.ClientSecret)
 	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials", "code": CodeInvalidCredentials})
 	}
-	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure)
+	if err := setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure, h.csrfSecret); err != nil {
+		log.Printf("[auth] %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "could not establish a session",
+			"code":  CodeAuthServiceUnavailable,
+		})
+	}
 	resp := fiber.Map{
 		"accessToken": token.AccessToken,
 		"expiresIn":   token.ExpiresIn,
@@ -195,14 +295,20 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 		rt = c.Cookies("refresh_token")
 	}
 	if rt == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "refreshToken is required"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "refreshToken is required", "code": CodeMissingRefreshToken})
 	}
 
 	token, err := h.authProvider.RefreshToken(c.UserContext(), rt)
 	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid or expired refresh token"})
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid or expired refresh token", "code": CodeInvalidRefreshToken})
 	}
-	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure)
+	if err := setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure, h.csrfSecret); err != nil {
+		log.Printf("[auth] %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "could not establish a session",
+			"code":  CodeAuthServiceUnavailable,
+		})
+	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"accessToken":  token.AccessToken,
 		"refreshToken": token.RefreshToken,
@@ -273,7 +379,13 @@ func (h *AuthHandler) WalletBind(c *fiber.Ctx) error {
 		return c.Status(httpStatus).JSON(fiber.Map{"error": errMsg})
 	}
 
-	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure)
+	if err := setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure, h.csrfSecret); err != nil {
+		log.Printf("[auth] %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "could not establish a session",
+			"code":  CodeAuthServiceUnavailable,
+		})
+	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"accessToken":  token.AccessToken,
 		"refreshToken": token.RefreshToken,
@@ -314,6 +426,14 @@ func (h *AuthHandler) ChangeClientSecret(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "client secret changed successfully"})
 }
 
+// WithEntityWallet sets this gateway's own on-chain address, published on /auth/me when the
+// token carries no wallet claim. Optional: a gateway without one omits the field entirely
+// rather than answering with an empty string, which a portal would render as a wallet.
+func (h *AuthHandler) WithEntityWallet(address string) *AuthHandler {
+	h.entityWallet = strings.TrimSpace(address)
+	return h
+}
+
 // Me returns the authenticated user's profile from the claims injected by RequireCookieAuth middleware.
 func (h *AuthHandler) Me(c *fiber.Ctx) error {
 	claims, ok := c.Locals("claims").(domain.TokenClaims)
@@ -325,8 +445,13 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
 		"issuer":  claims.Issuer,
 		"roles":   claims.Roles,
 	}
+	// The claim wins when present — it is the caller's own identity, while entityWallet is the
+	// gateway's. They coincide on a bank gateway, where the operator acts as the institution,
+	// and a future provider that does issue the claim must not be overridden by configuration.
 	if claims.Wallet != "" {
 		resp["wallet"] = claims.Wallet
+	} else if h.entityWallet != "" {
+		resp["wallet"] = h.entityWallet
 	}
 	if claims.Country != "" {
 		resp["country"] = claims.Country

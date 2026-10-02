@@ -15,9 +15,9 @@ import (
 
 // runnerFuncs holds injectable engine functions for testing.
 type runnerFuncs struct {
-	runFound   func(ctx context.Context, m *manifest.Manifest, deps orchestrator.Deps) error
+	runFound   func(ctx context.Context, m *manifest.Manifest, deps orchestrator.Deps) (orchestrator.RunOutcome, error)
 	emitBundle func(ctx context.Context, in bundle.BundleInput) (*bundle.JoinBundle, error)
-	runJoin    func(ctx context.Context, m *manifest.Manifest, b *bundle.JoinBundle, deps orchestrator.JoinDeps) error
+	runJoin    func(ctx context.Context, m *manifest.Manifest, b *bundle.JoinBundle, deps orchestrator.JoinDeps) (orchestrator.RunOutcome, error)
 	loadBundle func(path string) (*bundle.JoinBundle, error)
 }
 
@@ -81,13 +81,16 @@ func runFoundMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyRes
 		result.Steps = pendingSteps(m)
 		return result, err
 	}
+	deps.Force = rebuildForced(in, m)
 
-	// Run the 10-step idempotent provisioning engine.
-	runErr := fns.runFound(ctx, m, deps)
+	// Run the 10-step idempotent provisioning engine. The outcome names the steps it
+	// actually executed — the report cannot infer that from state, because a step the
+	// engine's Check found already satisfied is persisted exactly like one that ran.
+	outcome, runErr := fns.runFound(ctx, m, deps)
 
 	// Read final state to build the step report regardless of error.
 	state, _ := orchestrator.LoadState(m.Spec.Node.DataDir)
-	result.Steps = buildStepResults(plannedStepOrder(m), state)
+	result.Steps = buildStepResults(plannedStepOrder(m), state, outcome.Ran)
 
 	if ctx.Err() != nil {
 		// Mark the last step that was running when context was cancelled (recorded
@@ -209,11 +212,12 @@ func runJoinMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyResu
 		result.Steps = pendingSteps(m)
 		return result, err
 	}
+	deps.Force = rebuildForced(in, m)
 
-	runErr := fns.runJoin(ctx, m, b, deps)
+	outcome, runErr := fns.runJoin(ctx, m, b, deps)
 
 	state, _ := orchestrator.LoadState(m.Spec.Node.DataDir)
-	result.Steps = buildStepResults(plannedStepOrder(m), state)
+	result.Steps = buildStepResults(plannedStepOrder(m), state, outcome.Ran)
 
 	if ctx.Err() != nil {
 		for i := len(result.Steps) - 1; i >= 0; i-- {
@@ -249,6 +253,16 @@ func runJoinMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyResu
 	return result, nil
 }
 
+// rebuildForced resolves --rebuild into the set of steps the engine must run even
+// when their Check reports satisfied. Nil unless the flag was given, so an ordinary
+// apply keeps every Check and does not pay for an image build it does not need.
+func rebuildForced(in ApplyInput, m *manifest.Manifest) orchestrator.ForcedSteps {
+	if !in.Rebuild {
+		return nil
+	}
+	return orchestrator.RebuildForcedSteps(m.Spec.Mode)
+}
+
 // plannedStepOrder returns the steps this manifest will actually execute. Both the
 // apply report and the dry-run plan go through here so they cannot diverge — never
 // read orchestrator.CanonicalStepOrder / CanonicalJoinStepOrder directly.
@@ -257,7 +271,20 @@ func plannedStepOrder(m *manifest.Manifest) []string {
 }
 
 // buildStepResults constructs the step report from orchestrator state.
-func buildStepResults(stepOrder []string, state orchestrator.ProvisioningState) []StepResult {
+//
+// ran comes from the engine and names the steps whose Run this invocation actually
+// called. A finished step is reported as "executed" only when it is in that set, and
+// "skipped" when the engine's Check found the work already done.
+//
+// The engine has to answer this because state cannot: a step whose Check was
+// satisfied is persisted as "done" exactly like a step that ran, deliberately, so a
+// stale "failed" converges on an idempotent re-run. This function used to infer the
+// answer by diffing state against a snapshot taken before the run, which is a
+// different question — "is it done now that was not done before" — and the two
+// diverge precisely when someone deletes a step from the state file to force a
+// rebuild: the step reported "executed" while Check short-circuited and the work
+// never happened.
+func buildStepResults(stepOrder []string, state orchestrator.ProvisioningState, ran map[string]bool) []StepResult {
 	results := make([]StepResult, len(stepOrder))
 	for i, name := range stepOrder {
 		sr := StepResult{Name: name}
@@ -267,7 +294,11 @@ func buildStepResults(stepOrder []string, state orchestrator.ProvisioningState) 
 				found = true
 				switch s.Status {
 				case "done":
-					sr.Status = "skipped"
+					if ran[name] {
+						sr.Status = "executed"
+					} else {
+						sr.Status = "skipped"
+					}
 					sr.CompletedAt = s.CompletedAt
 				case "failed":
 					sr.Status = "failed"
@@ -314,8 +345,8 @@ func resolveLocalProfileFromInput(in ApplyInput) LocalProfile {
 		CommercialBankComposePath:        firstNonEmpty(in.CommercialBankComposePath, envOr("CBWEB3_COMMERCIAL_BANK_COMPOSE", "")),
 		BackendComposePath:               firstNonEmpty(in.BackendComposePath, envOr("CBWEB3_BACKEND_COMPOSE", "")),
 		CentralBankComposePath:           firstNonEmpty(in.CentralBankComposePath, envOr("CBWEB3_CENTRAL_BANK_COMPOSE", "")),
-		BesuImage:                        firstNonEmpty(in.BesuImage, envOr("CBWEB3_BESU_IMAGE", "hyperledger/besu:25.8.0")),
-		PaladinImage:                     firstNonEmpty(in.PaladinImage, envOr("CBWEB3_PALADIN_IMAGE", "docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1")),
+		BesuImage:                        firstNonEmpty(in.BesuImage, envOr("CBWEB3_BESU_IMAGE", orchestrator.DefaultBesuImage)),
+		PaladinImage:                     firstNonEmpty(in.PaladinImage, envOr("CBWEB3_PALADIN_IMAGE", orchestrator.DefaultPaladinImage)),
 		ContractsOutDir:                  firstNonEmpty(in.ContractsOutDir, envOr("CBWEB3_CONTRACTS_OUT", "")),
 		CommercialBankPaladinComposePath: firstNonEmpty(in.CommercialBankPaladinComposePath, envOr("CBWEB3_COMMERCIAL_BANK_PALADIN_COMPOSE", "")),
 	}

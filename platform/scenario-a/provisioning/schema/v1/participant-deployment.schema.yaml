@@ -132,6 +132,12 @@ definitions:
         minLength: 1
         description: "'self-signed' for local development (CB generates its own CA and signs CSRs). 'ca://<endpoint>' for CA-signed certificates in staging/prod."
 
+      # Contextually required when mode is "found": the founding central bank's endpoint is
+      # copied into the join bundle, and every bank that joins the spoke points its
+      # payment-orchestrator at it. That subscription is what settles a bank's destination leg
+      # — the relay cannot do it, since an HTLC leg is settled by transferLocked on its owner's
+      # own Paladin node. Enforced in Go (manifest.Validate); schema-level conditional
+      # enforcement is deferred, as for joinBundleRef.
       relay:
         $ref: "#/definitions/Relay"
 
@@ -151,6 +157,20 @@ definitions:
           backendURL: { type: string }
           keycloakURL: { type: string }
           launcherURL: { type: string }
+          # Browser origins allowed to call this NOC backend with credentials.
+          #
+          # A list, not a single value, because one NOC backend is shared: every CB on the
+          # host serves its own NOC portal and they all point at the same :28645. The
+          # session is a cookie now, and a browser refuses to send credentials to a
+          # wildcard origin — so each portal that may log in has to be named.
+          # The pattern mirrors the Go validation (engine/manifest/validate.go): scheme, host,
+          # optional port, nothing else. It is here as well so an editor refuses a wildcard
+          # or a path before an apply does.
+          portalOrigins:
+            type: array
+            items:
+              type: string
+              pattern: "^https?://[A-Za-z0-9._-]+(:[0-9]{1,5})?$"
           pushIntervalSeconds: { type: integer, minimum: 0 }
           components:
             type: array

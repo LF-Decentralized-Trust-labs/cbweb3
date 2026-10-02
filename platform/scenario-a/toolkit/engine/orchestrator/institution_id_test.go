@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// The AMM resume quorum counts distinct institutions, and that only works if every wallet
-// of one institution resolves to the SAME institutionId. The id is keccak256(bankCode),
+// Institution attribution only works if every wallet of one institution resolves to the
+// SAME institutionId. The id is keccak256(bankCode),
 // computed in three independent implementations:
 //
 //   - this toolkit (institutionIDFromCode), which onboards entities in real deployments;
@@ -40,7 +40,7 @@ func TestInstitutionIDFromCode_MatchesThePinnedValues(t *testing.T) {
 			t.Errorf("institutionIDFromCode(%q) = %s, want %s\n"+
 				"  The Go services and the seed script pin the same value. A toolkit-registered\n"+
 				"  wallet and a service-registered wallet of one institution now resolve to\n"+
-				"  different ids, which the AMM reads as two institutions.", code, got, want)
+				"  different ids, which read as two institutions.", code, got, want)
 		}
 	}
 }
@@ -54,8 +54,8 @@ func TestInstitutionIDFromCode_DistinctCodesDistinctIDs(t *testing.T) {
 	}
 }
 
-// bytes32(0) is what an unregistered address returns, and both the registry and the AMM
-// reject it. The toolkit must never produce it for a real code.
+// bytes32(0) is what an unregistered address returns, and the registry rejects it at
+// registration. The toolkit must never produce it for a real code.
 func TestInstitutionIDFromCode_IsNeverZero(t *testing.T) {
 	t.Parallel()
 	var zero [32]byte

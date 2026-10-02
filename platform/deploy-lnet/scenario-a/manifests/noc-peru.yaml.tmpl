@@ -31,3 +31,20 @@ spec:
   noc:
     pushIntervalSeconds: 15
     components: [BESU]
+    # Realm the BACKEND performs the password grant against — it moved off the browser when
+    # the NOC session became an HttpOnly cookie. central-bank-peru's Keycloak on this VM
+    # (Besu RPC 8645 + 16000). Unused while the stack runs with NOC_SKIP_AUTH=true (the
+    # default), and what NOC_SKIP_AUTH=false needs in order to be reachable at all.
+    keycloakURL: http://${IP_CB_PERU}:24645
+  # The portal is served by central-bank-peru's `found`, behind THIS host's proxy at
+  # /a/noc/ — so the backend has to be routed there too, same-origin, at /a/noc-api/. Both
+  # fields are load-bearing for that:
+  #
+  #   proxy: enable   runs the observe deployment's start-noc-proxy step, which writes the
+  #                   /a/noc-api/ route. Without it the portal calls a route that does not
+  #                   exist, and the browser gets a 404 with nothing pointing at the cause.
+  #   frontendHost    is the origin the backend answers CORS with (https://<host>). Absent,
+  #                   it resolved to http://localhost:32645 — an origin no browser on a
+  #                   remote VM will ever present, so no portal could log in.
+  frontendHost: cb-peru.cbweb3.l-net.io
+  proxy: enable

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  amountRefusalMessage,
+  apiErrorMessage,
   Button,
   Card,
   CardContent,
@@ -9,6 +11,7 @@ import {
   CardTitle,
   Input,
   Label,
+  parseCurrencyAmount,
   Select,
   SelectContent,
   SelectItem,
@@ -18,6 +21,9 @@ import {
 } from "@cbweb3/ui";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { spokeIdsFromRoster } from "../features/fx/spoke-roster";
+import { displayToBase } from "../types";
+import { usePaymentStore } from "../stores";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
 import { useIdentityStore } from "../stores/identity.store";
 
@@ -59,14 +65,6 @@ function OptionSelect({
   );
 }
 
-// Derive the spoke id (e.g. "spoke-brl") from a Paladin identity such as
-// "funded_operator@spoke-brl-bank-itau".
-function spokeFromIdentity(identity: string): string {
-  const node = identity.includes("@") ? identity.slice(identity.indexOf("@") + 1) : identity;
-  const parts = node.split("-");
-  return parts.length >= 2 ? `${parts[0]}-${parts[1]}` : node;
-}
-
 // Latin American settlement currencies (ISO 4217) selectable on the receive leg.
 const LATAM_CURRENCIES = [
   "ARS", "BOB", "BRL", "CLP", "COP", "CRC", "CUP", "DOP", "GTQ",
@@ -86,6 +84,8 @@ const defaultExpiry = () => {
 export function AgreementProposalPage() {
   const navigate = useNavigate();
   const propose = useFxAgreementStore((s) => s.propose);
+  // The FX leg carries the same unit as the HTLC leg that settles it (ADR-009).
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
   const status = useFxAgreementStore((s) => s.status);
   const identities = useIdentityStore((s) => s.identities);
   const fetchIdentities = useIdentityStore((s) => s.fetchAll);
@@ -105,11 +105,10 @@ export function AgreementProposalPage() {
       ? identityError ?? "Unable to load the identity roster. Check the API gateway and try again."
       : "The Paladin identity roster is not configured. Set PALADIN_IDENTITIES or enable Pente group membership on the API gateway, then reload.";
 
-  // Unique spoke ids derived from the identity roster, sorted.
-  const spokes = useMemo(
-    () => Array.from(new Set(identities.map(spokeFromIdentity))).sort(),
-    [identities],
-  );
+  // Spoke ids from the roster's central-bank entries. Derived there and not from
+  // the bank entries because a bank node carries no separator that tells the
+  // spoke id from the bank id — see features/fx/spoke-roster.ts.
+  const spokes = useMemo(() => spokeIdsFromRoster(identities), [identities]);
 
   const [counterpartyB, setCounterpartyB] = useState("");
   const [settlementAgent, setSettlementAgent] = useState("");
@@ -126,12 +125,29 @@ export function AgreementProposalPage() {
   const [expiryDateTime, setExpiryDateTime] = useState(defaultExpiry);
   const [showConfirm, setShowConfirm] = useState(false);
 
+  // Parsed once and reused, so the rate on screen, the validation message and
+  // the value posted can never disagree about what the operator typed.
+  // Each leg is bounded by ITS OWN declared currency, which is where the table earns
+  // its keep: the counter leg can be CLP or PYG, and neither has a subunit.
+  const parsedOrigin = useMemo(
+    () => parseCurrencyAmount(originAmount, originCurrency),
+    [originAmount, originCurrency],
+  );
+  const parsedCounter = useMemo(
+    () => parseCurrencyAmount(counterAmount, counterCurrency),
+    [counterAmount, counterCurrency],
+  );
+
   const rate = useMemo(() => {
-    const o = parseFloat(originAmount);
-    const c = parseFloat(counterAmount);
-    if (o > 0 && c > 0) return (c / o).toFixed(6);
-    return "";
-  }, [originAmount, counterAmount]);
+    if (!parsedOrigin.ok || !parsedCounter.ok) return "";
+    return (parsedCounter.value / parsedOrigin.value).toFixed(6);
+  }, [parsedOrigin, parsedCounter]);
+
+  // What the confirmation shows: the normalised figure that will actually be
+  // sent, not the keystrokes. An operator who typed "1000,10" is asked to
+  // approve "1000.10", which is the number the orchestrator will receive.
+  const originDisplay = parsedOrigin.ok ? parsedOrigin.canonical : originAmount;
+  const counterDisplay = parsedCounter.ok ? parsedCounter.canonical : counterAmount;
 
   const validate = () => {
     if (!counterpartyB.trim()) {
@@ -150,12 +166,12 @@ export function AgreementProposalPage() {
       toast.error("Beneficiary identity is required.");
       return false;
     }
-    if (!originAmount || parseFloat(originAmount) <= 0) {
-      toast.error("Send amount must be a positive number.");
+    if (!parsedOrigin.ok) {
+      toast.error(amountRefusalMessage("Send amount", parsedOrigin.refusal));
       return false;
     }
-    if (!counterAmount || parseFloat(counterAmount) <= 0) {
-      toast.error("Receive amount must be a positive number.");
+    if (!parsedCounter.ok) {
+      toast.error(amountRefusalMessage("Receive amount", parsedCounter.refusal));
       return false;
     }
     if (!expiryDateTime) {
@@ -176,14 +192,23 @@ export function AgreementProposalPage() {
   };
 
   const onConfirm = async () => {
+    // Unreachable in the UI: the confirmation card only renders after validate()
+    // accepted both amounts. Kept because it is what narrows the union, and
+    // because an amount edited while the card is open must not slip past.
+    if (!parsedOrigin.ok || !parsedCounter.ok) {
+      setShowConfirm(false);
+      return;
+    }
     try {
       const result = await propose({
         counterparty_b: counterpartyB.trim(),
         settlement_agent: settlementAgent.trim(),
         custodian: custodian.trim(),
         beneficiary: beneficiary.trim(),
-        origin_amount: originAmount,
-        counter_amount: counterAmount,
+        // Scaled with the SAME decimals the HTLC leg uses. The two must stay equal:
+        // sample-tryout locks an HTLC of the origin amount against this very field.
+        origin_amount: displayToBase(parsedOrigin.canonical, tCeBMDecimals),
+        counter_amount: displayToBase(parsedCounter.canonical, tCeBMDecimals),
         origin_currency: originCurrency,
         counter_currency: counterCurrency,
         rate: rate,
@@ -196,7 +221,7 @@ export function AgreementProposalPage() {
       toast.success("Trade agreement proposed successfully.");
       navigate(`/agreements/${result.trade_id}`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to propose trade agreement.");
+      toast.error(apiErrorMessage(error, "Unable to propose trade agreement."));
     }
   };
 
@@ -278,10 +303,10 @@ export function AgreementProposalPage() {
               <Label htmlFor="origin-amount">Send Amount</Label>
               <Input
                 id="origin-amount"
-                type="number"
-                min="0"
-                step="any"
-                placeholder="1000"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                placeholder="1000.00"
                 value={originAmount}
                 onChange={(e) => setOriginAmount(e.target.value)}
               />
@@ -298,10 +323,10 @@ export function AgreementProposalPage() {
               <Label htmlFor="counter-amount">Receive Amount</Label>
               <Input
                 id="counter-amount"
-                type="number"
-                min="0"
-                step="any"
-                placeholder="5000"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                placeholder="5000.00"
                 value={counterAmount}
                 onChange={(e) => setCounterAmount(e.target.value)}
               />
@@ -373,10 +398,10 @@ export function AgreementProposalPage() {
             <p className="text-sm">Source Receiver: {sourceReceiver || "—"}</p>
             <p className="text-sm">Destination Receiver: {destReceiver || "—"}</p>
             <p className="text-sm">
-              Send: {originAmount} {originCurrency}
+              Send: {originDisplay} {originCurrency}
             </p>
             <p className="text-sm">
-              Receive: {counterAmount} {counterCurrency}
+              Receive: {counterDisplay} {counterCurrency}
             </p>
             <p className="text-sm">Exchange Rate: {rate}</p>
             <p className="text-sm">Expiry: {new Date(expiryDateTime).toLocaleString()}</p>

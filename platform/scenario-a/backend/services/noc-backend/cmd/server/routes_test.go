@@ -11,6 +11,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/noc-backend/internal/keycloak"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/noc-backend/internal/middleware"
 )
 
 // These tests assert the WIRING, not the middleware.
@@ -42,6 +43,16 @@ func (f fakeKeycloak) ValidateToken(_ context.Context, token string) (keycloak.T
 	return keycloak.TokenClaims{Subject: "sub-" + token, Username: token, Roles: roles}, nil
 }
 
+// The grant half of the interface: this fake exists to exercise route WIRING, not logins,
+// so it answers enough to satisfy the interface and nothing more.
+func (f fakeKeycloak) PasswordGrant(context.Context, string, string) (keycloak.Tokens, error) {
+	return keycloak.Tokens{AccessToken: "fake"}, nil
+}
+
+func (f fakeKeycloak) RefreshGrant(context.Context, string) (keycloak.Tokens, error) {
+	return keycloak.Tokens{AccessToken: "fake"}, nil
+}
+
 // probeHandler stands in for a real api handler: it mounts one route that answers 200, so
 // any non-200 in these tests came from the group's middleware and not from the handler.
 type probeHandler struct{ path string }
@@ -67,7 +78,7 @@ func newTestApp() *fiber.App {
 		Push:   probeHandler{path: "/api/v1/agents/push"},
 		Admin:  []routeRegistrar{probeHandler{path: "/spokes"}},
 		Portal: []routeRegistrar{probeHandler{path: "/dashboard"}},
-	})
+	}, []byte("test-secret"))
 	return app
 }
 
@@ -75,7 +86,7 @@ func status(t *testing.T, app *fiber.App, path, token string) int {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: token})
 	}
 	resp, err := app.Test(req, -1)
 	if err != nil {

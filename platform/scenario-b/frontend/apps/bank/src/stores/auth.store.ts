@@ -6,6 +6,7 @@ import { cancelTokenRefresh, scheduleTokenRefresh } from "../services/api/token-
 import type { AsyncStatus, UserProfile } from "../types";
 import { BANK_UNAUTHORIZED_MESSAGE, hasBankAccess } from "../auth/authorization";
 import { useTrustStore } from "./trust.store";
+import { loginErrorMessage } from "@cbweb3/ui";
 
 type AuthState = {
   profile: UserProfile | null;
@@ -53,7 +54,9 @@ export const useAuthStore = create<AuthState>((set) => ({
         isAuthenticated: false,
         initialized: true,
         status: "error",
-        error: error instanceof Error ? error.message : "Unable to login",
+        // The gateway names the cause in the body; axios's own message is only "Request failed
+        // with status code N". Shared so the five portals cannot drift apart on this copy.
+        error: loginErrorMessage(error),
       });
     }
   },

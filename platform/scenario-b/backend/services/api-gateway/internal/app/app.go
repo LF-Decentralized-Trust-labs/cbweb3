@@ -6,6 +6,7 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"log"
@@ -214,7 +215,12 @@ func New(cfg config.Config) (*App, error) {
 		}
 	}
 	supervisorHandler := handlers.NewSupervisorHandler(complianceGRPC, zkVerifier)
-	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure)
+	csrfSecret := resolveCSRFSecret(cfg.CSRFSecret)
+	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure).
+		WithCSRFSecret(csrfSecret).
+		// Same address the payment proxy stamps onto every deposit this entity creates, so the
+		// portal shows the operator the wallet that will actually be credited.
+		WithEntityWallet(cfg.EntityBesuAddress)
 	complianceHandler := handlers.NewComplianceHandler(identityManager, complianceGRPC)
 
 	// --- Scenario B v2 service wiring (T020) ---
@@ -245,6 +251,7 @@ func New(cfg config.Config) (*App, error) {
 	}
 
 	deps := router.Dependencies{
+		CSRFSecret:        csrfSecret,
 		AuthHandler:       authHandler,
 		ComplianceHandler: complianceHandler,
 		GovernanceHandler: governanceHandler,
@@ -307,8 +314,12 @@ func New(cfg config.Config) (*App, error) {
 	// CORS middleware: only enable if explicitly configured to avoid security issues.
 	if corsOrigins := os.Getenv("CORS_ALLOW_ORIGINS"); corsOrigins != "" {
 		fiberApp.Use(cors.New(cors.Config{
-			AllowOrigins:     corsOrigins,
-			AllowHeaders:     "Authorization, Content-Type, X-Requested-With, Accept, X-Correlation-Id",
+			AllowOrigins: corsOrigins,
+			// X-XSRF-TOKEN is required, not optional: axios attaches it to every request once
+			// withXSRFToken is set, which turns even a simple GET into a preflighted one. A
+			// gateway that omits it here rejects the preflight and the portal fails with
+			// net::ERR_FAILED — no status, no body, and nothing a Go test can observe.
+			AllowHeaders:     "Authorization, Content-Type, X-Requested-With, Accept, X-Correlation-Id, X-XSRF-TOKEN",
 			AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
 			AllowCredentials: true,
 		}))
@@ -815,6 +826,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		// position, so the relayer queue has nothing to retry and the payer's unspent reserve
 		// would sit on the issuing CB's Hub address indefinitely.
 		startResidueRetryWorker(orchestrator, swapRepo)
+		startBridgeOutRetryWorker(orchestrator, swapRepo)
 
 		// 009-commercial-cross-currency-swap: Wire quote generator with 15s TTL (T030/T031).
 		var quoteReserve services.AMMReserveReader
@@ -1326,4 +1338,34 @@ func serverConfigWith(read, write, idle time.Duration) fiber.Config {
 		WriteTimeout: write,
 		IdleTimeout:  idle,
 	}
+}
+
+// resolveCSRFSecret returns the key that binds CSRF tokens to their session.
+//
+// A generated fallback rather than a fatal error, because refusing to boot would
+// take down every gateway on the first deploy that has not set the variable yet —
+// including read traffic, which CSRF has nothing to do with. The fallback is safe on
+// a single instance and it is LOUD, because it is not safe beyond one:
+//
+//   - across replicas, a token minted by one gateway fails on another;
+//   - across a restart, every open session's token stops validating.
+//
+// Both show up as 403 on some mutating requests and not others, which is among the
+// worst symptoms to diagnose from a bug report. The log line names the variable so
+// the fix is obvious the first time someone reads it.
+func resolveCSRFSecret(configured string) []byte {
+	if configured != "" {
+		return []byte(configured)
+	}
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		// Unreachable in practice; if the platform cannot produce randomness the
+		// gateway has larger problems than CSRF, and continuing with a predictable
+		// key would be worse than stopping.
+		log.Fatalf("FATAL: cannot generate a CSRF secret: %v", err)
+	}
+	log.Printf("WARNING: CSRF_SECRET is not set; generated a per-process key. " +
+		"Mutating requests will fail across replicas and after any restart. " +
+		"Set CSRF_SECRET to the same value on every instance of this gateway.")
+	return secret
 }

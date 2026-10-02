@@ -263,7 +263,7 @@ contract IdentityRegistryTest is Test {
     }
 
     /// @notice A zero institutionId is refused at registration.
-    /// @dev It is not merely missing data. The AMM resume quorum counts distinct institutions, and every
+    /// @dev It is not merely missing data. Institution attribution is read back off-chain, and every
     ///      unset id is the same id — so admitting bytes32(0) would let all such participants count as one
     ///      institution, while an unregistered address (which also reads zero) would look like a member of
     ///      it. Rejecting at the door is what keeps getInstitutionId's zero return unambiguous.
@@ -532,7 +532,7 @@ contract IdentityRegistryTest is Test {
     }
 
     /// @notice The institutionId a bank code hashes to, pinned to the same literals the Go side uses.
-    /// @dev The AMM resume quorum counts distinct institutions, which only works if every wallet of one
+    /// @dev Institution attribution only works if every wallet of one
     ///      institution resolves to the SAME id. Three independent implementations derive it —
     ///      `RegisterParticipants.s.sol` (`keccak256(abi.encodePacked(bankCode))`, exercised here), the
     ///      Go services (`registry.InstitutionIDFromString`) and the provisioning toolkit

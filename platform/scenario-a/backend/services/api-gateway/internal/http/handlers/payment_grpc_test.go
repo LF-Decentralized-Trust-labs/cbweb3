@@ -935,6 +935,9 @@ type fakePvPLedger struct {
 	credits  map[string][]services.PvPCreditRow
 	recErr   error
 	listErr  error
+	// gotBelongs captures the predicate the handler passed, so a test can assert the
+	// handler hands down the authorization rule bound to the right bank.
+	gotBelongs func(string) bool
 }
 
 func (f *fakePvPLedger) RecordLeg(_ context.Context, in services.SettledLegInput) error {
@@ -945,10 +948,11 @@ func (f *fakePvPLedger) RecordLeg(_ context.Context, in services.SettledLegInput
 	return nil
 }
 
-func (f *fakePvPLedger) ListCreditsForBank(_ context.Context, bankID string) ([]services.PvPCreditRow, error) {
+func (f *fakePvPLedger) ListCreditsForBank(_ context.Context, bankID string, belongs func(string) bool) ([]services.PvPCreditRow, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
+	f.gotBelongs = belongs
 	return f.credits[bankID], nil
 }
 
@@ -1000,11 +1004,35 @@ func TestRecordSettledPvPLeg(t *testing.T) {
 		t.Errorf("missing contract_id: status = %d, want 400", r2.StatusCode)
 	}
 
-	// Unparseable receiver → 400.
+	// An unparseable receiver identity must still be RECORDED, not refused.
+	//
+	// This assertion used to demand 400, which encoded the defect: the bank id is a
+	// query label (scoping tests the stored identity), the leg has already settled by
+	// the time it is reported, and the reporting orchestrator only logs a warning and
+	// never retries. A 400 here therefore erased a real movement from the ledger
+	// permanently. The label is dropped and the leg is kept.
+	before := len(ledger.recorded)
 	r3 := postJSONBody(`{"contract_id":"c2","receiver":"not-an-identity"}`)
 	defer r3.Body.Close()
-	if r3.StatusCode != http.StatusBadRequest {
-		t.Errorf("unparseable receiver: status = %d, want 400", r3.StatusCode)
+	if r3.StatusCode != http.StatusCreated {
+		t.Errorf("unparseable receiver: status = %d, want 201 — a settled leg must not be discarded", r3.StatusCode)
+	}
+	if len(ledger.recorded) != before+1 {
+		t.Fatalf("unparseable receiver: leg was not recorded (%d -> %d)", before, len(ledger.recorded))
+	}
+	rec := ledger.recorded[len(ledger.recorded)-1]
+	if rec.Receiver != "not-an-identity" {
+		t.Errorf("receiver identity must be stored verbatim, got %q", rec.Receiver)
+	}
+	if rec.ReceiverBankID != "" {
+		t.Errorf("bank label should be empty when it cannot be derived, got %q", rec.ReceiverBankID)
+	}
+
+	// A receiver is still required: without one there is nothing to scope the credit to.
+	r4 := postJSONBody(`{"contract_id":"c3"}`)
+	defer r4.Body.Close()
+	if r4.StatusCode != http.StatusBadRequest {
+		t.Errorf("missing receiver: status = %d, want 400", r4.StatusCode)
 	}
 }
 

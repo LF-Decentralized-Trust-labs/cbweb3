@@ -1,8 +1,27 @@
 # entity-infra template (TK-B4) — per-entity Postgres + Redis.
 # Derived from deploy/local/compose.yml. Parametrized; DB state in a named
 # volume; no secrets embedded (credentials come from ${...}).
+# Container log rotation, applied to every service in this file.
+#
+# Without it Docker's json-file driver has no size cap and no rotation: the
+# Scenario A Paladin containers reached 96 GB (~2.4 GB/day) and a full disk takes
+# the whole network down. 50m x 5 caps each service at 250 MB.
+#
+# Both options are load-bearing. max-size alone rotates into an unbounded number of
+# files; max-file alone caps the count of files that each grow forever.
+#
+# The anchor is not brevity: without it a new service is added with no logging block
+# and the ceiling silently fails to apply to that container. With it the omission is
+# visible in review, and toolkit/engine/composetemplate fails the build.
+x-logging: &cbweb3_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   postgres:
+    logging: *cbweb3_logging
     image: "postgres:${POSTGRES_IMAGE_TAG:-17-alpine}"
     container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-postgres"
     environment:
@@ -18,6 +37,7 @@ services:
     restart: always
 
   redis:
+    logging: *cbweb3_logging
     image: "redis:${REDIS_IMAGE_TAG:-7.2-alpine}"
     container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-redis"
     # This Redis is not a cache. It holds the relay-auth replay guard

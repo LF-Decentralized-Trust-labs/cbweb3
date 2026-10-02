@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import axios, { AxiosError, type AxiosInstance, type AxiosResponse, type InternalAxiosRequestConfig } from "axios";
-import { isTrustRejection } from "../trust-errors";
+import { isRelayConfigurationFault, isTrustRejection } from "../trust-errors";
 
 const REFRESH_PATH = "/auth/refresh";
 const API_VERSION_PATH_RE = /\/api\/v[0-9]+$/i;
@@ -49,9 +49,26 @@ async function onTrustRestored(response: AxiosResponse) {
   return response;
 }
 
-async function onTrustRejected(error: AxiosError) {
+async function onTrustRejected(error: AxiosError, client: AxiosInstance) {
   const { useTrustStore } = await import("../../../stores/trust.store");
-  void useTrustStore.getState().reportRejection(pathOf(error.config?.url));
+  const config = error.config;
+  // The probe replays this exact request through the SAME instance, so it inherits the baseURL,
+  // credentials and interceptors of the request that was refused; a request rebuilt by hand would
+  // drop them and prove nothing. Whether it may be replayed at all is the store's call, which is why
+  // the method goes with it: rejected paths include writes, and repeating one of those because an
+  // operator pressed "Recheck" would move value.
+  const probe = config ? () => client.request(config) : undefined;
+  void useTrustStore.getState().reportRejection(pathOf(config?.url), config?.method, probe);
+  return Promise.reject(error);
+}
+
+async function onRelayConfigurationFault(error: AxiosError, client: AxiosInstance) {
+  const { useTrustStore } = await import("../../../stores/trust.store");
+  const config = error.config;
+  // Same rule as onTrustRejected: the probe replays through this instance, and the method is what
+  // lets the store refuse to repeat a write.
+  const probe = config ? () => client.request(config) : undefined;
+  void useTrustStore.getState().reportConfigurationFault(pathOf(config?.url), config?.method, probe);
   return Promise.reject(error);
 }
 
@@ -64,7 +81,14 @@ export function attachAuthInterceptor(httpClient: AxiosInstance) {
       // branch below, ejecting the operator to the login screen over a failure that has nothing to do
       // with their session. Report it instead, so every screen can explain the real cause.
       if (isTrustRejection(error)) {
-        return onTrustRejected(error);
+        return onTrustRejected(error, httpClient);
+      }
+
+      // Nor is the relay credential being refused. The session is valid here too, so the refresh
+      // would succeed and the retry would fail identically — the same ejection, reached through a
+      // different door. It is checked before the status test because one of these is a 503.
+      if (isRelayConfigurationFault(error)) {
+        return onRelayConfigurationFault(error, httpClient);
       }
 
       if (!error.response || error.response.status !== 401) {

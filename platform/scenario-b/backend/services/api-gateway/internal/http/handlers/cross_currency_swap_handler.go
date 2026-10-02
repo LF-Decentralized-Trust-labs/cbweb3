@@ -352,6 +352,24 @@ func (h *CrossCurrencySwapHandler) handleCrossCurrencySwapError(c *fiber.Ctx, er
 		})
 	}
 
+	// Pre-flight refusal: the beneficiary's central bank said its member cannot receive, and we
+	// stopped before moving anything. It is checked BEFORE the bridge-in branch because it
+	// happens before Step 1, and it must not fall through to INTERNAL_ERROR — a caller told
+	// only "cross-currency swap failed" cannot tell "your beneficiary is not ready" apart from
+	// "something broke here", and those need opposite reactions. The first is fixed by the
+	// beneficiary finishing its onboarding; the second by an operator.
+	//
+	// The recommended action says nothing moved, on purpose. The same operation without this
+	// check debited the payer and swapped the pool before failing, so "no funds have moved" is
+	// the fact that stops someone hunting for stranded value.
+	if containsError(err, "refused before any value moved") {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error":              err.Error(),
+			"error_code":         "BENEFICIARY_NOT_ELIGIBLE",
+			"recommended_action": "The beneficiary bank cannot receive yet — it must complete onboarding with its central bank. No funds have moved; retry once it is active.",
+		})
+	}
+
 	// Check for bridge-in failure
 	if containsError(err, "bridge-in failed") {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{

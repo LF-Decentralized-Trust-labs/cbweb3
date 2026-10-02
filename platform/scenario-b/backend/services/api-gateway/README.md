@@ -19,7 +19,7 @@ Detailed architecture and runtime flows are documented in `architecture-and-flow
 ## Run locally
 
 1. Copy `.env.example` to `.env` and adjust variables as needed.
-2. Start the local dependencies in `deploy/local` when available (`identity` + optional Postgres).
+2. Have the entity's dependencies running (`identity` + optional Postgres) — stand a stack up with `cd samples && ./deploy-all.sh`, or point the gateway at an already-running entity.
 3. Run the gateway:
 
 ```bash

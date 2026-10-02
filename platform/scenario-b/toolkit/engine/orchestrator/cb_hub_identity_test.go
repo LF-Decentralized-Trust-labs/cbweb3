@@ -343,7 +343,7 @@ func TestDeriveCBTokenAdminKey_DeterministicAndPerSpoke(t *testing.T) {
 // The administration key must never reach a container: that is the whole point of separating it.
 // Compose env is the only channel the toolkit has, so its absence there is the invariant.
 func TestComposeEnvNeverCarriesTheTokenAdminKey(t *testing.T) {
-	c := SpokeConfig{SpokeID: "spoke-brl", Currency: "BRL", RPCPort: 33645, VolumePrefix: "cb"}
+	c := SpokeConfig{SpokeID: "spoke-brl", Currency: "BRL", RPCPort: 9145, VolumePrefix: "cb"}
 	adminKey, _ := deriveCBTokenAdminKey(c.SpokeID)
 
 	// ComposeEnv is a []string of "KEY=VALUE", so the check is on the whole entry: a substring
@@ -372,7 +372,7 @@ func TestComposeEnvNeverCarriesTheTokenAdminKey(t *testing.T) {
 // on bridge positions and into the reconciliation's self-exclusion.
 func TestComposeEnvCarriesAUniqueRelayKeyID(t *testing.T) {
 	c := SpokeConfig{
-		SpokeID: "spoke-brl", Currency: "BRL", RPCPort: 33645,
+		SpokeID: "spoke-brl", Currency: "BRL", RPCPort: 9145,
 		VolumePrefix: "cb", Entity: "central-bank", RelayKeyID: "central-bank-brazil",
 	}
 	env := map[string]string{}
@@ -394,8 +394,8 @@ func TestComposeEnvCarriesAUniqueRelayKeyID(t *testing.T) {
 
 // Two central banks must never derive the same relay id, or the receiver can pin only one key.
 func TestRelayKeyIDDiffersBetweenCentralBanks(t *testing.T) {
-	br := SpokeConfig{SpokeID: "spoke-brl", RPCPort: 33645, RelayKeyID: "central-bank-brazil"}
-	ar := SpokeConfig{SpokeID: "spoke-ars", RPCPort: 33745, RelayKeyID: "central-bank-argentina"}
+	br := SpokeConfig{SpokeID: "spoke-brl", RPCPort: 9145, RelayKeyID: "central-bank-brazil"}
+	ar := SpokeConfig{SpokeID: "spoke-ars", RPCPort: 9245, RelayKeyID: "central-bank-argentina"}
 	if br.relayKeyID() == ar.relayKeyID() {
 		t.Fatalf("both central banks resolved the relay id %q", br.relayKeyID())
 	}
@@ -404,7 +404,7 @@ func TestRelayKeyIDDiffersBetweenCentralBanks(t *testing.T) {
 // Without an explicit value the spoke id is the fallback: still unique per CB, and available
 // without threading the manifest name through every construction path.
 func TestRelayKeyIDFallsBackToTheSpokeID(t *testing.T) {
-	c := SpokeConfig{SpokeID: "spoke-brl", RPCPort: 33645}
+	c := SpokeConfig{SpokeID: "spoke-brl", RPCPort: 9145}
 	if got := c.relayKeyID(); got != "spoke-brl" {
 		t.Fatalf("fallback relay id = %q, want spoke-brl", got)
 	}
@@ -417,7 +417,7 @@ func TestRelayKeyIDFallsBackToTheSpokeID(t *testing.T) {
 // enabling enforcement for the central banks must not take every bank down with it.
 func TestJoinComposeEnvNeverInheritsEnforcement(t *testing.T) {
 	t.Setenv("RELAY_REQUIRE_SIGNATURE", "true")
-	c := JoinConfig{BankID: "bank-itau", SpokeID: "spoke-brl", RPCPort: 33646, VolumePrefix: "bank"}
+	c := JoinConfig{BankID: "bank-itau", SpokeID: "spoke-brl", RPCPort: 9146, VolumePrefix: "bank"}
 	for _, e := range c.ComposeEnv() {
 		if strings.HasPrefix(e, "RELAY_REQUIRE_SIGNATURE=") {
 			if e != "RELAY_REQUIRE_SIGNATURE=" {
@@ -436,15 +436,15 @@ func TestJoinComposeEnvNeverInheritsEnforcement(t *testing.T) {
 // same code they become one institution to the contract, the 2-of-N can never be met, and a
 // paused AMM stays paused. This is the same trap RELAY_KEY_ID exists to avoid, one layer down.
 func TestInstitutionCodeDiffersBetweenCentralBanks(t *testing.T) {
-	br := SpokeConfig{SpokeID: "spoke-brl", RPCPort: 33645, InstitutionCode: "central-bank-brazil"}
-	ar := SpokeConfig{SpokeID: "spoke-ars", RPCPort: 33745, InstitutionCode: "central-bank-argentina"}
+	br := SpokeConfig{SpokeID: "spoke-brl", RPCPort: 9145, InstitutionCode: "central-bank-brazil"}
+	ar := SpokeConfig{SpokeID: "spoke-ars", RPCPort: 9245, InstitutionCode: "central-bank-argentina"}
 	if br.institutionCode() == ar.institutionCode() {
 		t.Fatalf("both central banks resolved the institution code %q", br.institutionCode())
 	}
 }
 
 func TestInstitutionCodeFallsBackToTheSpokeID(t *testing.T) {
-	c := SpokeConfig{SpokeID: "spoke-brl", RPCPort: 33645}
+	c := SpokeConfig{SpokeID: "spoke-brl", RPCPort: 9145}
 	if got := c.institutionCode(); got != "spoke-brl" {
 		t.Fatalf("fallback institution code = %q, want spoke-brl", got)
 	}
@@ -454,7 +454,7 @@ func TestInstitutionCodeFallsBackToTheSpokeID(t *testing.T) {
 // topology role, identical on every central bank.
 func TestComposeEnvCarriesAnInstitutionCodeDistinctFromTheRole(t *testing.T) {
 	c := SpokeConfig{
-		SpokeID: "spoke-brl", RPCPort: 33645, Entity: "central-bank",
+		SpokeID: "spoke-brl", RPCPort: 9145, Entity: "central-bank",
 		InstitutionCode: "central-bank-brazil",
 	}
 	env := envMap(c.ComposeEnv())

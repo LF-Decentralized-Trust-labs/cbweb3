@@ -59,7 +59,7 @@ func TestInstitutionIDForParticipant_FallsBackToNameWhenCodeBlank(t *testing.T) 
 	}
 }
 
-// The property the AMM resume quorum rests on: two wallets of one institution, onboarded
+// The property institution attribution rests on: two wallets of one institution, onboarded
 // through different paths and under different display names, must still be one institution.
 func TestInstitutionIDForParticipant_TwoWalletsOneInstitution(t *testing.T) {
 	t.Parallel()
@@ -79,8 +79,8 @@ func TestInstitutionIDForParticipant_TwoWalletsOneInstitution(t *testing.T) {
 // test would let all three drift together without a failure.
 //
 // Pinning the VALUE ties them. If this list and the toolkit's disagree, one of the two
-// changed, and the AMM resume quorum would read two wallets of one institution as two
-// institutions — the failure the quorum exists to prevent, reached silently.
+// changed, and two wallets of one institution would read as two institutions — the failure
+// the derivation exists to prevent, reached silently.
 func TestInstitutionIDFromString_MatchesThePinnedValues(t *testing.T) {
 	t.Parallel()
 	for code, want := range map[string]string{

@@ -2,7 +2,6 @@
 
 export * from "./AccountsPage";
 export * from "./AuditPage";
-export * from "./CircuitBreakerPage";
 export * from "./DashboardPage";
 export * from "./LoginPage";
 export * from "./ParametersPage";

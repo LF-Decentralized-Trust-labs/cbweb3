@@ -95,7 +95,7 @@ func TestRunFound_GenesisAbsent_DoesNotAbort(t *testing.T) {
 	deps := testDeps()
 	var buf bytes.Buffer
 
-	err := runFoundWithSteps(context.Background(), m, deps, &buf, nil)
+	_, err := runFoundWithSteps(context.Background(), m, deps, &buf, nil)
 	if errors.Is(err, ErrGenesisCorrupt) {
 		t.Errorf("absent genesis must not be treated as corrupt, got: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestRunFound_GenesisCorrupt_Aborts(t *testing.T) {
 	deps := testDeps()
 	var buf bytes.Buffer
 
-	err := runFoundWithSteps(context.Background(), m, deps, &buf, nil)
+	_, err := runFoundWithSteps(context.Background(), m, deps, &buf, nil)
 	if !errors.Is(err, ErrGenesisCorrupt) {
 		t.Errorf("expected ErrGenesisCorrupt, got: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestRunFound_ErrProvisioningLocked(t *testing.T) {
 	defer unlock()
 
 	var buf bytes.Buffer
-	err = runFoundWithSteps(context.Background(), m, deps, &buf, nil)
+	_, err = runFoundWithSteps(context.Background(), m, deps, &buf, nil)
 	if !errors.Is(err, ErrProvisioningLocked) {
 		t.Errorf("expected ErrProvisioningLocked, got: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestRunFound_AllStepsMockSuccess(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runFoundWithSteps(context.Background(), m, deps, &buf, steps); err != nil {
+	if _, err := runFoundWithSteps(context.Background(), m, deps, &buf, steps); err != nil {
 		t.Fatalf("RunFound returned unexpected error: %v", err)
 	}
 
@@ -189,7 +189,7 @@ func TestRunFound_AllStepsMock_LogOutput(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runFoundWithSteps(context.Background(), m, deps, &buf, steps); err != nil {
+	if _, err := runFoundWithSteps(context.Background(), m, deps, &buf, steps); err != nil {
 		t.Fatalf("RunFound: %v", err)
 	}
 
@@ -239,7 +239,7 @@ func TestRunFound_Idempotent_AllStepsDone(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runFoundWithSteps(context.Background(), m, deps, &buf, steps); err != nil {
+	if _, err := runFoundWithSteps(context.Background(), m, deps, &buf, steps); err != nil {
 		t.Fatalf("RunFound: %v", err)
 	}
 
@@ -269,7 +269,7 @@ func TestRunFound_Idempotent_FirstStepDone(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runFoundWithSteps(context.Background(), m, deps, &buf, steps); err != nil {
+	if _, err := runFoundWithSteps(context.Background(), m, deps, &buf, steps); err != nil {
 		t.Fatalf("RunFound: %v", err)
 	}
 
@@ -309,7 +309,7 @@ func TestRunFound_Resume_PartialState(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runFoundWithSteps(context.Background(), m, deps, &buf, steps); err != nil {
+	if _, err := runFoundWithSteps(context.Background(), m, deps, &buf, steps); err != nil {
 		t.Fatalf("RunFound: %v", err)
 	}
 
@@ -351,7 +351,7 @@ func TestRunFound_FailedStep_IsRetried(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runFoundWithSteps(context.Background(), m, deps, &buf, steps); err != nil {
+	if _, err := runFoundWithSteps(context.Background(), m, deps, &buf, steps); err != nil {
 		t.Fatalf("RunFound: %v", err)
 	}
 
@@ -378,7 +378,7 @@ func TestRunFound_ContextCancelled(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runFoundWithSteps(ctx, m, deps, &buf, steps)
+	_, err := runFoundWithSteps(ctx, m, deps, &buf, steps)
 	if err == nil {
 		t.Fatal("expected error for cancelled context, got nil")
 	}
@@ -399,7 +399,7 @@ func TestRunFound_Log_StepSkipped_HasReason(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runFoundWithSteps(context.Background(), m, deps, &buf, steps); err != nil {
+	if _, err := runFoundWithSteps(context.Background(), m, deps, &buf, steps); err != nil {
 		t.Fatalf("RunFound: %v", err)
 	}
 
@@ -432,7 +432,7 @@ func TestRunFound_Log_StepFailed_HasError(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runFoundWithSteps(context.Background(), m, deps, &buf, steps)
+	_, err := runFoundWithSteps(context.Background(), m, deps, &buf, steps)
 	if err == nil {
 		t.Fatal("expected error from failing step")
 	}
