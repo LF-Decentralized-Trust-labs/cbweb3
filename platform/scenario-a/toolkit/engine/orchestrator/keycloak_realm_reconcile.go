@@ -221,9 +221,13 @@ type reconcileKeycloakRealmStep struct {
 	// kcAdminPass is deliberately still held after the scripts stopped carrying it: the
 	// exposure assertion in the tests can only prove the secret is not embedded if the step
 	// actually has one to embed. Same reasoning as reconcileAdminUsersStep.
-	kcAdminPass   string
-	realms        []KeycloakRealmPlan
-	dockerExecCmd func(ctx context.Context, container, script string) ([]byte, error)
+	kcAdminPass string
+	realms      []KeycloakRealmPlan
+	// Same seam and same signature as the admin-users step: `env` carries "NAME=value" pairs
+	// into the container's environment rather than its argv. These scripts need none — kcadm
+	// reads $KC_BOOTSTRAP_ADMIN_PASSWORD from the Keycloak container's own environment — but
+	// both steps share dockerExecScript, so they must agree on its shape.
+	dockerExecCmd func(ctx context.Context, container, script string, env []string) ([]byte, error)
 }
 
 func newReconcileKeycloakRealmStep(name, entityPrefix, kcAdminPass string, realms []KeycloakRealmPlan) Step {
@@ -242,7 +246,7 @@ func (s *reconcileKeycloakRealmStep) container() string { return s.entityPrefix 
 // containers down is ordinary, and skipping there is exactly when this must not skip.
 func (s *reconcileKeycloakRealmStep) Check(ctx context.Context) (bool, error) {
 	for _, plan := range s.realms {
-		out, err := s.dockerExecCmd(ctx, s.container(), realmStateScript(keycloakAdminCLI, plan))
+		out, err := s.dockerExecCmd(ctx, s.container(), realmStateScript(keycloakAdminCLI, plan), nil)
 		if err != nil {
 			return false, nil
 		}
@@ -259,7 +263,7 @@ func (s *reconcileKeycloakRealmStep) Run(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("build reconcile script for realm %s: %w", plan.Realm, err)
 		}
-		if _, err := s.dockerExecCmd(ctx, s.container(), script); err != nil {
+		if _, err := s.dockerExecCmd(ctx, s.container(), script, nil); err != nil {
 			return fmt.Errorf("reconcile realm %s: %w", plan.Realm, err)
 		}
 	}

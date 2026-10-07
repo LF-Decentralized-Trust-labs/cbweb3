@@ -45,7 +45,7 @@ type provisionKeycloakStep struct {
 	// composeUp, dockerExecCmd and writeFile are this step's three Docker seams, injected so the
 	// Run can be tested without a daemon. Nil means the real one.
 	composeUp     func(ctx context.Context) error
-	dockerExecCmd func(ctx context.Context, container, script string) ([]byte, error)
+	dockerExecCmd func(ctx context.Context, container, script string, env []string) ([]byte, error)
 	writeFile     func(ctx context.Context, volume, filePath string, content []byte, mode string) error
 }
 
@@ -281,7 +281,7 @@ func (s *provisionKeycloakStep) createMissingRealms(ctx context.Context) error {
 		if probe(ctx, s.realmURL(plan.Realm)) {
 			continue
 		}
-		out, err := run(ctx, s.container(), realmCreateScript(keycloakAdminCLI, plan.Realm))
+		out, err := run(ctx, s.container(), realmCreateScript(keycloakAdminCLI, plan.Realm), nil)
 		if err != nil {
 			return fmt.Errorf("create realm %s from %s: %w\noutput:\n%s",
 				plan.Realm, realmImportFile(plan.Realm), err, out)

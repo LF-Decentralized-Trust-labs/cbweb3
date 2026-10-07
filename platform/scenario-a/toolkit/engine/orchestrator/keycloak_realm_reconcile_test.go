@@ -59,7 +59,7 @@ func realmStep(out string, err error, recorded *[]string) *reconcileKeycloakReal
 	return &reconcileKeycloakRealmStep{
 		name: StepReconcileKeycloakRealm, entityPrefix: "cb",
 		realms: []KeycloakRealmPlan{probeRealm},
-		dockerExecCmd: func(_ context.Context, _, script string) ([]byte, error) {
+		dockerExecCmd: func(_ context.Context, _, script string, _ []string) ([]byte, error) {
 			if recorded != nil {
 				*recorded = append(*recorded, script)
 			}
