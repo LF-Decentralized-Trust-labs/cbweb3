@@ -76,7 +76,7 @@ func createStep(t *testing.T, kc *fakeKeycloak, plans []KeycloakRealmPlan, timeo
 			return nil
 		},
 	}
-	s.dockerExecCmd = func(_ context.Context, _, script string) ([]byte, error) {
+	s.dockerExecCmd = func(_ context.Context, _, script string, _ []string) ([]byte, error) {
 		kc.scripts = append(kc.scripts, script)
 		if kc.execErr != nil {
 			return []byte("kcadm: conflict"), kc.execErr
