@@ -3,7 +3,7 @@
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RelayStore } from "./relay-store";
 
@@ -168,12 +168,16 @@ describe("RelayStore block watermark (R2-H-11)", () => {
     expect(store.getEventsSince("settle", 0).length).toBe(1);
   });
 
-  it("writes atomically — no leftover .tmp file after a write", async () => {
+  it("writes atomically — no leftover temp file after a write", async () => {
     const store = new RelayStore(file, silentLog);
     await store.init();
     await store.setWatermark("spoke-a", 7);
     await expect(fs.stat(file)).resolves.toBeDefined();
-    await expect(fs.stat(`${file}.tmp`)).rejects.toThrow();
+    // Read the directory rather than stat one predicted name. This asserted `${file}.tmp`, which
+    // stopped being produced when temp names gained a per-instance suffix — so it passed no
+    // matter what was left behind, which is worse than no test at all.
+    const leftovers = (await fs.readdir(dir)).filter(f => f !== path.basename(file));
+    expect(leftovers).toEqual([]);
   });
 
   it("reads a legacy file that has no meta field", async () => {
@@ -267,5 +271,150 @@ describe("RelayStore event journal (R2-H-11 cursor composition)", () => {
     await store.init();
     const next = await store.appendEvent("settle", "spoke-a:0xnew:0", { contractId: "cN" });
     expect(next).toBe(8); // resumes at maxSeq+1, never reissuing 7
+  });
+});
+
+// ── concurrent persistence ────────────────────────────────────────────────────
+//
+// Every spoke runs its own pollSpoke loop against ONE store instance, so writes are concurrent
+// by design. persist() wrote to a fixed temp filename and renamed, with no serialisation: two
+// writes in flight meant one renamed first and the second's rename found no temp file. That
+// surfaces as
+//
+//   poll cycle error: ENOENT: no such file or directory,
+//     rename '/data/cacti-relay-store.json.tmp' -> '/data/cacti-relay-store.json'
+//
+// and — because it was thrown inside the poll cycle — it aborted the cycle exactly as a chain
+// failure did. That is the real damage: not corruption, but a store write that can stop the
+// relay's work.
+describe("RelayStore concurrent persistence", () => {
+  let dir: string;
+  let file: string;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), "relay-store-concurrent-"));
+    file = path.join(dir, "store.json");
+  });
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("survives many concurrent writes without a single failure", async () => {
+    const store = new RelayStore(file, silentLog);
+    await store.init();
+
+    const failures: string[] = [];
+    const N = 60;
+    await Promise.all(Array.from({ length: N }, (_, i) =>
+      store.setWatermark(`spoke-${i % 3}`, i).catch((e: Error) => failures.push(e.message)),
+    ));
+
+    expect(failures).toEqual([]);
+  });
+
+  // Interleaved writes of different shapes must all be present at the end: the last write to
+  // land has to carry every earlier one, not an older snapshot of the state.
+  it("loses no state when writes of different kinds interleave", async () => {
+    const store = new RelayStore(file, silentLog);
+    await store.init();
+
+    await Promise.all([
+      store.setWatermark("spoke-a", 111),
+      store.markDelivered("htlc-evt:spoke-a:0xtx:0"),
+      store.setMeta("spoke-a", "0xgenesis"),
+      store.setWatermark("spoke-b", 222),
+      store.appendEvent("settle", "spoke-a:0xtx:0", { contractId: "c1" }),
+    ]);
+
+    const reloaded = new RelayStore(file, silentLog);
+    await reloaded.init();
+    expect(reloaded.getWatermark("spoke-a")).toBe(111);
+    expect(reloaded.getWatermark("spoke-b")).toBe(222);
+    expect(reloaded.getMeta("spoke-a")).toBe("0xgenesis");
+    expect(reloaded.hasDelivered("htlc-evt:spoke-a:0xtx:0")).toBe(true);
+    expect(reloaded.getEventsSince("settle", 0)).toHaveLength(1);
+  });
+
+  // Discriminates the QUEUE specifically: without it, writes to the same path overlap. Both
+  // mechanisms happen to hide the ENOENT on their own, so assert the property each one is
+  // actually for — this one is "one write at a time".
+  it("never has two writes in flight at once", async () => {
+    const store = new RelayStore(file, silentLog);
+    await store.init();
+
+    let inFlight = 0;
+    let peak = 0;
+    const realWriteFile = fs.writeFile.bind(fs);
+    const spy = vi.spyOn(fs, "writeFile").mockImplementation(async (...args: unknown[]) => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      try {
+        await new Promise(r => setTimeout(r, 2)); // widen the window a real disk would give
+        return await (realWriteFile as (...a: unknown[]) => Promise<void>)(...args);
+      } finally {
+        inFlight--;
+      }
+    });
+
+    await Promise.all(Array.from({ length: 12 }, (_, i) => store.setWatermark("spoke-a", i)));
+    spy.mockRestore();
+
+    expect(peak).toBe(1);
+  });
+
+  // Discriminates the UNIQUE TEMP NAME specifically: the queue only orders writes made through
+  // ONE instance. Two instances on the same path — an old process still shutting down while a
+  // new one starts, sharing the relay volume — collide on a fixed temp name and one of them
+  // throws ENOENT into its poll cycle.
+  it("two store instances on the same file do not collide", async () => {
+    // Seed the file first, which is the production condition: the store lives on a volume that
+    // outlives the process. It also matters for what this test can see — when the file is
+    // absent, the FIRST instance's init() creates it and consumes a write, so the two
+    // instances' counters start one apart and never produce the same name. Seeded, both start
+    // level, which is when a shared-component name actually collides.
+    await fs.writeFile(file, JSON.stringify({
+      delivered: {}, retries: [], watermarks: {}, meta: {},
+      journal: { lock: [], settle: [] }, seq: 1,
+    }), "utf8");
+
+    const a = new RelayStore(file, silentLog);
+    const b = new RelayStore(file, silentLog);
+    await a.init();
+    await b.init();
+
+    // Hold each write open AFTER the bytes land and BEFORE the rename — that gap is where the
+    // collision lives, so widening it makes the test decide rather than flip a coin. (Delaying
+    // *before* writeFile does the opposite: the timers fire in order and the two instances end
+    // up serialised, which is how an earlier version of this test passed against the bug.)
+    const realWriteFile = fs.writeFile.bind(fs);
+    const spy = vi.spyOn(fs, "writeFile").mockImplementation(async (...args: unknown[]) => {
+      await (realWriteFile as (...a: unknown[]) => Promise<void>)(...args);
+      await new Promise(r => setTimeout(r, 3));
+    });
+
+    // ONE write each, deliberately. Both instances are then on their first write, so a temp
+    // name built from anything they share — a pid and a per-instance counter, say — is the same
+    // string for both. Ten writes each would let their counters drift apart and the collision
+    // would land only sometimes, which is how this bug behaves in production and exactly what a
+    // test must not reproduce.
+    const failures: string[] = [];
+    await Promise.all([
+      a.setWatermark("spoke-a", 1).catch((e: Error) => failures.push(e.message)),
+      b.setWatermark("spoke-b", 2).catch((e: Error) => failures.push(e.message)),
+    ]);
+    spy.mockRestore();
+
+    expect(failures).toEqual([]);
+  });
+
+  // The temp file is an implementation detail that must never be left behind, and never shared
+  // between two writes in flight.
+  it("leaves no temp file behind after concurrent writes", async () => {
+    const store = new RelayStore(file, silentLog);
+    await store.init();
+    await Promise.all(Array.from({ length: 20 }, (_, i) => store.setWatermark("spoke-a", i)));
+
+    const leftovers = (await fs.readdir(dir)).filter(f => f !== "store.json");
+    expect(leftovers).toEqual([]);
   });
 });
