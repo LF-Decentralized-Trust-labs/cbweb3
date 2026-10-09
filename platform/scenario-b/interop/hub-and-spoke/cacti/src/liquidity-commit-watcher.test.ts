@@ -279,3 +279,175 @@ test("resets the watermark when the chain genesis changes (chain reset)", async 
   assert.equal(reloaded.getMeta(CONTRACT), newGenesis, "new chain identity recorded");
   assert.ok(gw.hits() >= 1, "event on the reset chain must be delivered");
 });
+
+// ── adaptive scan window ──────────────────────────────────────────────────────────────────────
+//
+// A spoke can fall far behind the head after the hub Besu restarts under a longer-lived relay.
+// Each cycle then issued a getPastLogs over a fixed 5,000-block window; a node that cannot serve
+// a range that wide drops the socket, so the same request failed again on every cycle and the
+// watermark never moved. A request too big to succeed must not be repeated unchanged for ever.
+
+// A connector whose getPastLogs can reject wide ranges (a node's log-range limit) or fail
+// outright (an unreachable node), and whose head can move. Every requested width is recorded.
+function windowConnector(opts: {
+  head: () => number;
+  maxRange?: number;
+  failLogs?: () => boolean;
+  onReject?: () => void; // called when a range is rejected for being too wide
+  widths: number[];
+}): PluginLedgerConnectorBesu {
+  return {
+    async getBlock(req: { blockHashOrBlockNumber: string | number }) {
+      if (req.blockHashOrBlockNumber === 0) return { block: { number: 0, hash: GENESIS } };
+      return { block: { number: opts.head() } };
+    },
+    async getPastLogs(args: { fromBlock: string; toBlock: string }) {
+      const width = parseInt(args.toBlock, 16) - parseInt(args.fromBlock, 16) + 1;
+      opts.widths.push(width);
+      if (opts.failLogs?.()) throw new Error("connection not open on send()");
+      if (opts.maxRange !== undefined && width > opts.maxRange) {
+        opts.onReject?.();
+        throw new Error("range too large");
+      }
+      return { logs: [] };
+    },
+  } as unknown as PluginLedgerConnectorBesu;
+}
+
+// Runs a watcher for the duration of `body` and always stops it, so a failing assertion cannot
+// leave a poll loop running and hang the whole test process.
+async function withWatcher(
+  file: string,
+  connector: PluginLedgerConnectorBesu,
+  body: () => Promise<void>,
+): Promise<void> {
+  const gw = await gatewayServer();
+  const watcher = newWatcher(file, gw.url, connector);
+  const controller = new AbortController();
+  watcher.start(controller.signal);
+  try {
+    await body();
+  } finally {
+    controller.abort();
+    watcher.stop();
+    await gw.close();
+  }
+}
+
+test("catches up against a node that rejects wide log ranges", async () => {
+  const file = await tmpFile();
+  const widths: number[] = [];
+  let caughtUp = false;
+
+  await withWatcher(file, windowConnector({ head: () => 20_000, maxRange: 1_000, widths }), async () => {
+    const store = new BlockWatermarkStore(file);
+    caughtUp = await waitFor(async () => { await store.init(); return store.get(CONTRACT) === 20_000; }, 5_000);
+  });
+
+  assert.equal(caughtUp, true, "a fixed 5,000-block window against a 1,000-block limit never succeeds");
+  assert.ok(Math.min(...widths) <= 1_000, "the window narrowed to something the node accepts");
+});
+
+// Without a ceiling, doubling after every success re-tests the limit on every other cycle:
+// 512 ok, 1024 fail, 512 ok — half the cycles issue the request that drops the socket, and the
+// failure streak resets on each success so the reconnect threshold never trips.
+test("does not keep probing the rejected width once the node's limit is known", async () => {
+  const file = await tmpFile();
+  const widths: number[] = [];
+  let head = 10_000;
+
+  await withWatcher(file, windowConnector({ head: () => (head += 3_000), maxRange: 1_000, widths }), async () => {
+    await sleep(1_500);
+  });
+
+  assert.ok(widths.length > 40, `expected sustained scanning, saw ${widths.length} requests`);
+  // After the first few narrowing failures, almost every request must be one the node accepts: with
+  // the ceiling, one request in fifty re-probes the limit (about 0.4%); without it, one in ten.
+  const tail = widths.slice(Math.floor(widths.length / 2));
+  const tailOver = tail.filter(w => w > 1_000).length;
+  assert.ok(tailOver / tail.length < 0.03, `${tailOver} of ${tail.length} later requests were over the limit`);
+});
+
+// An absent node is not a range limit: every width fails when nothing answers, so the narrowest
+// one reached says nothing about what the node can serve. A spoke that was simply down must not
+// come back pinned at the floor and crawl through its catch-up.
+test("restores the full window after an outage rather than treating it as a range limit", async () => {
+  const file = await tmpFile();
+  const widths: number[] = [];
+  let down = true;
+  let head = 200_000;
+  let narrowedTo = Infinity;
+  let restored = false;
+
+  await withWatcher(file, windowConnector({
+    head: () => (down ? head : (head += 50_000)),
+    failLogs: () => down,
+    widths,
+  }), async () => {
+    await waitFor(() => widths.length >= 12, 3_000);
+    narrowedTo = Math.min(...widths);
+    const duringOutage = widths.length;
+    down = false; // the node comes back, with a lot to catch up
+    restored = await waitFor(() => widths.slice(duringOutage).some(w => w >= 5_000), 5_000);
+  });
+
+  assert.equal(narrowedTo, 128, "the window narrows to its floor while nothing answers");
+  assert.equal(restored, true, "the window must grow back to 5,000 instead of staying at the floor");
+});
+
+// A common failure mode: a request that is too wide drops the socket, and every
+// call after it fails until the connection is back. A run of failures follows each wide request,
+// so counting a streak of failures cannot tell this node from one that is absent. Only the log
+// request failing at EVERY width, the floor included, identifies an absent node.
+test("keeps the known ceiling when a wide request drops the socket", async () => {
+  const file = await tmpFile();
+  const widths: number[] = [];
+  let socketDown = 0;
+  let head = 10_000;
+  const LIMIT = 600;
+
+  await withWatcher(file, windowConnector({
+    // The head moves a little on every read, so each poll has work and polls stay short: with a
+    // head far away a single poll would walk the whole range and never reach the next one.
+    head: () => {
+      if (socketDown > 0) { socketDown--; throw new Error("connection not open on send()"); }
+      return (head += 3_000);
+    },
+    maxRange: LIMIT,
+    onReject: () => { socketDown = 3; },
+    widths,
+  }), async () => {
+    await sleep(1_500);
+  });
+
+  const tail = widths.slice(Math.floor(widths.length / 2));
+  const over = tail.filter(w => w > LIMIT).length;
+  assert.ok(tail.length > 20, `expected sustained scanning, saw ${tail.length} requests in the tail`);
+  // Count the over-limit requests rather than their share: each one drops the socket, and the
+  // good polls issue many narrow requests that would dilute a ratio into looking harmless. A
+  // re-probe now and then is by design; forgetting the ceiling after every drop is not.
+  assert.ok(over <= 3, `${over} requests in the second half of the run were over the node's limit`);
+});
+
+// A head read that fails never reaches the log request, so there is no width to blame. The first
+// request after the node is back must still be a full-width one.
+test("leaves the window alone while the head read is what fails", async () => {
+  const file = await tmpFile();
+  const widths: number[] = [];
+  let down = true;
+
+  await withWatcher(file, windowConnector({
+    head: () => {
+      if (down) throw new Error("connection not open on send()");
+      return 10_000_000;
+    },
+    widths,
+  }), async () => {
+    await sleep(200); // many failed polls
+    down = false;
+    await waitFor(() => widths.length > 0, 3_000);
+  });
+
+  assert.ok(widths.length > 0);
+  assert.equal(widths[0], 5_000, "failed head reads must not narrow the scan window");
+});

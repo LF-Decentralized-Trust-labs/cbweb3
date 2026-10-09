@@ -57,14 +57,25 @@ ok for three days.
 A `watermark` of `null` means that spoke has never been scanned, which is not the same as
 zero.
 
+`head` and `blocksBehind` are `null` while the relay cannot vouch for the head: the latest
+read of the chain failed, or the last successful one is more than a minute old. A head read
+before the connection broke says nothing about the chain now, and reporting it as current
+would show a spoke that had just caught up as `blocksBehind: 0` while it is not being
+scanned at all. Read `null` as "the chain connection is failing", and `secondsSinceAdvance`
+as how long that has lasted.
+
 The relay also reports its own stall, once, when the scan has stood still for ten minutes
 while the chain moved on:
 
 ```
-[spoke-x] chain scan has not advanced for 259200s while the chain moved on: watermark
-76018, head 81244 (5226 blocks behind). Nothing on this spoke is being observed, so no
-lock or claim reaches the journal and no PvP here can pair.
+[spoke-x] chain scan has not advanced for 259200s: watermark 76018, head 81244
+(5226 blocks behind). Nothing on this spoke is being observed, so no lock or claim reaches
+the journal and no PvP here can pair. FX agreement transport is unaffected.
 ```
+
+When the connection itself is what is failing, the head is reported as unknown rather than
+quoted: `head unknown — the chain connection is failing (last read 81244, 130s ago)`. The
+alarm is raised from outside the scan, so it still fires when the chain read is what throws.
 
 <details>
 <summary>On a relay too old to serve <code>scan</code> in its health response</summary>
@@ -237,6 +248,20 @@ a block shortly before the incident when you know one.
 rebuilds the connector after three consecutive failures on its own, so a stall here is
 usually the spoke, not the relay: check the Besu container on that VM, then the RPC URL
 the relay has registered for it.
+
+While the chain is unreachable the relay keeps forwarding FX agreements: that step is REST
+in and gRPC out and does not touch the chain, and it has its own error handling. A failure
+there is logged separately as `FX transport error`, or `FX REST poll failed` / `FX REST poll
+error`, and does not stop the chain scan. If FX agreements are not crossing spokes, look for
+those lines rather than assuming the chain is the cause.
+
+**The node rejects wide log queries.** `poll cycle error … Requested range exceeds maximum
+RPC range limit` followed by `narrowing the scan window to N blocks after a failed log
+request` means the node caps `getLogs`. The relay halves its scan window on each such
+failure, down to 128 blocks, and grows it back once requests succeed, so it recovers on its
+own and no restart is needed. Only a failed log request narrows the window; a failing head
+read does not. A node whose limit is below 128 blocks cannot be served: raise Besu's
+`--rpc-max-logs-range`.
 
 ```bash
 docker run --rm -v "$VOL":/data alpine:3.23 cat /data/cacti-spoke-registry.json \
