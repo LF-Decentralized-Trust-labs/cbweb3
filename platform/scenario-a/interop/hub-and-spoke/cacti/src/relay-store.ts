@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { promises as fs } from "fs";
+import { randomBytes } from "crypto";
 import path from "path";
 
 export type FXAction = "propose" | "accept" | "reject" | "cancel" | "settle";
@@ -79,6 +80,16 @@ export class RelayStore {
     // reachable in a test without writing MAX_JOURNAL entries.
     private readonly maxJournal: number = MAX_JOURNAL,
   ) {}
+
+  /** Tail of the write chain: each persist() waits for the previous one, in order. */
+  private writeQueue: Promise<void> = Promise.resolve();
+  private writeSeq = 0;
+  /**
+   * Per-INSTANCE temp-file suffix. Not the pid: two stores on the same path inside one process
+   * share a pid and each starts its counter at zero, so pid+counter collides — which is the
+   * same ENOENT this was meant to remove, just rarer and therefore worse to diagnose.
+   */
+  private readonly writeTag = randomBytes(6).toString("hex");
 
   async init(): Promise<void> {
     try {
@@ -274,12 +285,37 @@ export class RelayStore {
     return Math.min(max, base * 2 ** Math.max(0, attempt - 1));
   }
 
-  private async persist(): Promise<void> {
-    // Atomic write: a torn in-place write would send init() into the empty-state fallback,
-    // wiping the delivered map and retry queue. Write to a temp file then rename (finding R2-H-11).
-    const tmp = `${this.filePath}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(this.state), "utf8");
-    await fs.rename(tmp, this.filePath);
+  /**
+   * Serialise the state to disk, one write at a time.
+   *
+   * Every spoke runs its own poll loop against ONE store instance, so writes are concurrent by
+   * design. Two things used to go wrong with a shared temp filename and no queue: the second
+   * writer's rename found no temp file and threw `ENOENT … rename '<file>.tmp' -> '<file>'`,
+   * which — being raised inside the poll cycle — aborted the cycle exactly as a chain failure
+   * did; and an older snapshot could land after a newer one, since each write serialises the
+   * state as it was when that write began.
+   *
+   * The queue fixes both: writes run in order, and each one serialises the state at the moment
+   * it actually runs, so the last write to land is the newest. A unique temp name per write is
+   * kept as well, so a crash mid-write cannot leave a file that a later write mistakes for its
+   * own, and a stray temp file is removed rather than left behind.
+   */
+  private persist(): Promise<void> {
+    this.writeQueue = this.writeQueue.then(() => this.writeNow(), () => this.writeNow());
+    return this.writeQueue;
+  }
+
+  private async writeNow(): Promise<void> {
+    // Serialise here, not at enqueue time: the newest state wins because the last write runs last.
+    const payload = JSON.stringify(this.state);
+    const tmp = `${this.filePath}.tmp-${this.writeTag}-${++this.writeSeq}`;
+    try {
+      await fs.writeFile(tmp, payload, "utf8");
+      await fs.rename(tmp, this.filePath);
+    } catch (err) {
+      await fs.rm(tmp, { force: true }).catch(() => { /* best-effort */ });
+      throw err;
+    }
   }
 }
 

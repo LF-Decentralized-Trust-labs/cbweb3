@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { randomBytes } from "crypto";
 import { promises as fs } from "fs";
 import path from "path";
 
@@ -18,7 +19,9 @@ import path from "path";
  *                   instead of stalling the watcher silently.
  *
  * Writes are atomic (temp file + rename) so a torn write can never corrupt the file and send
- * init() into the empty-state fallback, wiping the delivered set. Self-contained to Scenario B
+ * init() into the empty-state fallback, wiping the delivered set. They are also serialised, one
+ * at a time, through a queue, and each uses a temp name no other writer can share, so two writes
+ * in flight cannot rename each other's temp file away. Self-contained to Scenario B
  * — it must not be shared with Scenario A per the project constitution (scenario isolation).
  */
 
@@ -32,6 +35,14 @@ const EMPTY: WatermarkState = { blocks: {}, delivered: {}, meta: {} };
 
 export class BlockWatermarkStore {
   private state: WatermarkState = { blocks: {}, delivered: {}, meta: {} };
+  /** Tail of the write chain: each persist() waits for the previous one, in order. */
+  private writeQueue: Promise<void> = Promise.resolve();
+  private writeSeq = 0;
+  /**
+   * Per-INSTANCE temp-file suffix. Not the pid: two stores on the same path inside one process
+   * share a pid and each starts its counter at zero, so pid + counter would still collide.
+   */
+  private readonly writeTag = randomBytes(6).toString("hex");
 
   constructor(
     private readonly filePath: string,
@@ -120,10 +131,25 @@ export class BlockWatermarkStore {
     await this.persist();
   }
 
-  private async persist(): Promise<void> {
-    const tmp = `${this.filePath}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(this.state), "utf8");
-    await fs.rename(tmp, this.filePath);
+  /**
+   * Serialise the whole state to disk, one write at a time. Every write carries the full state,
+   * so whichever lands last carries everything the earlier ones did. A failed write does not
+   * poison the queue: the next one still runs, and the caller of the failed one still sees it.
+   */
+  private persist(): Promise<void> {
+    const write = async (): Promise<void> => {
+      const tmp = `${this.filePath}.${this.writeTag}.${this.writeSeq++}.tmp`;
+      try {
+        await fs.writeFile(tmp, JSON.stringify(this.state), "utf8");
+        await fs.rename(tmp, this.filePath);
+      } catch (err) {
+        await fs.rm(tmp, { force: true }).catch(() => undefined);
+        throw err;
+      }
+    };
+    const result = this.writeQueue.then(write, write);
+    this.writeQueue = result.then(() => undefined, () => undefined);
+    return result;
   }
 }
 

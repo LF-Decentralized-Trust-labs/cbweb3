@@ -242,6 +242,25 @@ const MAX_EVENTS = 10_000;
  */
 const MAX_BLOCK_RANGE = 5_000;
 
+/**
+ * Narrowest scan window the relay will fall back to before it stops shrinking.
+ *
+ * A node that cannot serve 5,000 blocks of logs over its websocket does not become able to by
+ * being asked again: after a Besu restart a spoke can sit far behind the head, and if every cycle
+ * issues the same heavy getPastLogs it drops the freshly reconnected socket, reconnects, and
+ * fails again. The relay cannot leave that state on its own and an operator has to restart the
+ * container. Halving on failure and growing back on success turns a deadlock into a slow
+ * recovery.
+ */
+const MIN_BLOCK_RANGE = 128;
+
+/**
+ * A head read longer ago than this is not evidence about the chain now, whatever the poll
+ * interval: it is the ceiling on how long one healthy cycle (scan plus FX transport) can take
+ * before the connection is more likely wedged than slow.
+ */
+const HEAD_MAX_AGE_MS = 60_000;
+
 /** One spoke's chain-scan liveness, as served by GET /api/v1/health. */
 export interface ScanLiveness {
   spokeId: string;
@@ -294,6 +313,14 @@ export class HtlcRelay {
   // apart. Kept here so it can be served, and so the relay can notice its own stall.
   private readonly chainHeads = new Map<string, number>();
   private readonly watermarkAdvancedAt = new Map<string, number>();
+  // When each spoke's head was last read successfully. A head from before the connection broke
+  // is not evidence about the chain now, and reporting it as current would send an operator
+  // chasing a number that is no longer true.
+  private readonly chainHeadAt = new Map<string, number>();
+  // Spokes whose most recent head read failed. A head is unknown while the connection is failing —
+  // not merely because it was read a while ago, since a healthy cycle spends time in the scan and
+  // the FX transport between two reads.
+  private readonly chainHeadFailing = new Set<string>();
   // Spokes already reported as stalled. The condition persists until the scan moves, and an
   // error repeated every poll interval is an error nobody reads.
   private readonly stallReported = new Set<string>();
@@ -335,8 +362,12 @@ export class HtlcRelay {
     // more honest source: it is the set actually being scanned.
     return [...this.watching].sort().map((spokeId) => {
       const watermark = this.relayStore.getWatermark(spokeId);
-      const head = this.chainHeads.get(spokeId);
       const advancedAt = this.watermarkAdvancedAt.get(spokeId);
+      // Same freshness rule the stall log uses, for the same reason — and here it matters more,
+      // because this is what a dashboard alerts on. A head read before the connection broke is
+      // not evidence about the chain now: a spoke that had just caught up would report
+      // blocksBehind 0, reading as healthy, while the log says the head is unknown.
+      const head = this.freshHead(spokeId, now);
       return {
         spokeId,
         watermark: watermark ?? null,
@@ -490,32 +521,67 @@ export class HtlcRelay {
     // relay would sit forever with head below watermark, silently forwarding nothing (R2-H-11).
     fromBlock = await this.reconcileSpokeChain(connector, spoke, fromBlock);
 
+    // Current scan width, narrowed on failure and widened again on success.
+    let blockRange = MAX_BLOCK_RANGE;
+    // Narrowest width ever seen to fail. Doubling back after every success would re-test it on
+    // every other cycle — 512 ok, 1024 fail, 512 ok — so against a node with a fixed log-range
+    // limit half the cycles would issue the request that drops the socket, and `failures`
+    // resetting on each success means the reconnect threshold never trips. Grow back only to
+    // comfortably under what is known to fail.
+    let failedAtWidth = Number.POSITIVE_INFINITY;
+    let successesSinceFailure = 0;
+    // Only a failed getPastLogs says anything about the node's range limit. A getBlock that times
+    // out or a store write that fails must not narrow the window, and — the case that matters — a
+    // node that drops its socket on a wide request fails every call after it until it reconnects,
+    // so a run of failures is the normal aftermath of a range limit and says nothing about
+    // whether the node was absent.
+    let logsInFlight = false;
+    // What does identify an absent node: it fails at EVERY width, including the floor, which a
+    // real range limit never does. Seen once, it means the narrowest widths reached say nothing
+    // about what the node can serve, and the recorded ceiling is forgotten on recovery.
+    let failedAtFloor = false;
+
     while (!signal.aborted) {
       await sleep(this.pollIntervalMs);
       if (signal.aborted) break;
 
-      try {
+      // Labelled so the "nothing to scan" path can leave the SCAN without leaving the cycle.
+      // A `continue` here skipped the rest of the loop body — the stall alarm and FX transport —
+      // so a spoke whose head sits at or below the watermark (a node restored from an older data
+      // dir, a chain rewound under the same genesis, block production stopped with RPC still
+      // answering) stopped forwarding agreements. That is the same coupling this change removes,
+      // reached by a quieter path than a thrown error.
+      scan: try {
         // Get latest block number via Cacti connector.
-        const latestResp = await connector.getBlock({ blockHashOrBlockNumber: "latest" });
+        let latestResp: Awaited<ReturnType<typeof connector.getBlock>>;
+        try {
+          latestResp = await connector.getBlock({ blockHashOrBlockNumber: "latest" });
+        } catch (headErr) {
+          this.chainHeadFailing.add(spoke.id);
+          throw headErr;
+        }
+        this.chainHeadFailing.delete(spoke.id);
         const latestBlock = typeof latestResp.block === "object" && latestResp.block !== null
           ? Number((latestResp.block as Record<string, unknown>)["number"] ?? 0)
           : 0;
         this.chainHeads.set(spoke.id, latestBlock);
-        this.reportScanStallIfAny(spoke.id, latestBlock);
+        this.chainHeadAt.set(spoke.id, Date.now());
         if (latestBlock < fromBlock) {
           // Head is behind our resume point: either the chain has not produced new blocks yet, or
           // (after a reset the genesis guard did not catch) the watermark is ahead of the chain.
           // Never a silent no-op — warn so a stuck relay is visible (constitution: no silent failures).
           this.log.warn(
-            `[${spoke.id}] chain head ${latestBlock} is behind resume block ${fromBlock} — waiting (no events forwarded)`,
+            `[${spoke.id}] chain head ${latestBlock} is behind resume block ${fromBlock} — waiting (no chain events observed; FX transport continues)`,
           );
-          continue;
+          break scan;
         }
-        // Walk at most MAX_BLOCK_RANGE blocks this cycle so a long catch-up is chunked.
-        const toBlock = Math.min(fromBlock + MAX_BLOCK_RANGE - 1, latestBlock);
+        // Walk at most blockRange blocks this cycle so a long catch-up is chunked. The width is
+        // adaptive: see MIN_BLOCK_RANGE for why a fixed one could not recover.
+        const toBlock = Math.min(fromBlock + blockRange - 1, latestBlock);
 
         // Fetch logs via Cacti PluginLedgerConnectorBesu.getPastLogs — the
         // core integration point that replaces direct ethers.js provider usage.
+        logsInFlight = true;
         const [lockedResp, claimedResp] = await Promise.all([
           connector.getPastLogs({
             address: spoke.htlcAddress,
@@ -530,6 +596,7 @@ export class HtlcRelay {
             topics: [[topicClaimed]],
           }),
         ]);
+        logsInFlight = false;
 
         // Process LogHTLCLocked events — decode via ethers Interface.
         for (const raw of lockedResp.logs) {
@@ -604,18 +671,6 @@ export class HtlcRelay {
           }
         }
 
-        // ── FX Agreement polling (REST-based, no on-chain contract) ─────
-        this.pruneForwardedTradeIds();
-        await this.processDueRetriesForSpoke(spoke.id);
-        await this.pollFXAgreementsRest(spoke);
-
-        const stats = this.relayStore.getRetryStats();
-        if (stats.pending > 0) {
-          this.log.info(
-            `[relay] retry-stats pending=${stats.pending} max_lag_ms=${stats.maxLagMs}`,
-          );
-        }
-
         // Advance through everything scanned. Delivery is the journal append above, which is
         // local and idempotent, so there is no remote outcome left to wait on — and therefore
         // nothing that can hold this back. The hold that used to live here existed for the
@@ -633,9 +688,46 @@ export class HtlcRelay {
         }
         fromBlock = toBlock + 1;
         failures = 0;
+        // The node answered at the floor width and failed there before: it was absent, not
+        // choking on the width. Forget the recorded ceiling, or a spoke that was simply down
+        // comes back pinned near the floor and crawls through its catch-up.
+        if (failedAtFloor) {
+          failedAtFloor = false;
+          if (failedAtWidth !== Number.POSITIVE_INFINITY) {
+            failedAtWidth = Number.POSITIVE_INFINITY;
+            this.log.info(`[${spoke.id}] chain answered again after failing at the minimum scan width — restoring the full scan window`);
+          }
+        }
+        successesSinceFailure++;
+        // A node's limit can be lifted (more headroom, a lighter chain); re-probe occasionally
+        // so a spoke is not pinned below it for ever, but rarely enough that the cost is one
+        // cycle in fifty rather than every other one.
+        if (failedAtWidth !== Number.POSITIVE_INFINITY && successesSinceFailure % 50 === 0) {
+          failedAtWidth = Math.min(MAX_BLOCK_RANGE, Math.floor(failedAtWidth * 1.5));
+        }
+        const ceiling = failedAtWidth === Number.POSITIVE_INFINITY
+          ? MAX_BLOCK_RANGE
+          : Math.max(MIN_BLOCK_RANGE, Math.floor(failedAtWidth * 0.75));
+        if (blockRange < ceiling) {
+          blockRange = Math.min(ceiling, blockRange * 2);
+          this.log.info(`[${spoke.id}] scan window widened to ${blockRange} blocks`);
+        }
       } catch (err) {
         this.log.warn(`[${spoke.id}] poll cycle error: ${String(err)}`);
         failures++;
+        const logsFailed = logsInFlight;
+        logsInFlight = false;
+        if (logsFailed) {
+          if (blockRange <= MIN_BLOCK_RANGE) failedAtFloor = true;
+          failedAtWidth = Math.min(failedAtWidth, blockRange);
+          successesSinceFailure = 0;
+          if (blockRange > MIN_BLOCK_RANGE) {
+            blockRange = Math.max(MIN_BLOCK_RANGE, Math.floor(blockRange / 2));
+            this.log.warn(
+              `[${spoke.id}] narrowing the scan window to ${blockRange} blocks after a failed log request`,
+            );
+          }
+        }
         if (failures >= RECONNECT_AFTER && this.connectorFactory) {
           this.log.warn(`[${spoke.id}] reconnecting Besu connector after ${failures} consecutive failures`);
           try {
@@ -649,6 +741,35 @@ export class HtlcRelay {
             this.log.error(`[${spoke.id}] reconnect failed: ${String(reErr)}`);
           }
         }
+      }
+
+      // ── Progress alarm — outside the scan's try on purpose ──────────────────
+      //
+      // It reports that the scan has stopped, so it cannot live inside the block that the stop
+      // aborts. It used to sit after getBlock inside that try: when getBlock was what threw —
+      // the common case for a dropped connection — the alarm meant to catch the outage was
+      // skipped by the outage.
+      this.reportScanStallIfAny(spoke.id);
+
+      // ── FX agreement transport — REST in, gRPC out, no chain involved ───────
+      //
+      // Its own try. This step shared the scan's, so an unreachable Besu stopped agreement
+      // transport that never touched the chain: a proposal created on one spoke never reached
+      // another while the relay logged busily and named no cause. Independent responsibilities
+      // must not take each other down.
+      try {
+        this.pruneForwardedTradeIds();
+        await this.processDueRetriesForSpoke(spoke.id);
+        await this.pollFXAgreementsRest(spoke);
+
+        const stats = this.relayStore.getRetryStats();
+        if (stats.pending > 0) {
+          this.log.info(
+            `[relay] retry-stats pending=${stats.pending} max_lag_ms=${stats.maxLagMs}`,
+          );
+        }
+      } catch (err) {
+        this.log.warn(`[${spoke.id}] FX transport error: ${String(err)}`);
       }
     }
 
@@ -671,21 +792,51 @@ export class HtlcRelay {
    * advancing, and nothing said so. Reported once per stall — repeating it every poll interval
    * would bury it in the same noise that hid the original.
    */
-  private reportScanStallIfAny(spokeId: string, head: number): void {
+  /**
+   * The spoke's chain head if it still means something, else undefined. It does not while the
+   * latest read has failed — the connection is not working — nor once it is older than any
+   * healthy cycle can explain: the scan, the FX transport and the poll interval all sit between
+   * two reads, so age alone, measured in poll intervals, would call a slow but healthy cycle a
+   * failing connection.
+   */
+  private freshHead(spokeId: string, now = Date.now()): number | undefined {
+    if (this.chainHeadFailing.has(spokeId)) return undefined;
+    const at = this.chainHeadAt.get(spokeId);
+    if (at === undefined || now - at > Math.max(this.pollIntervalMs * 3, HEAD_MAX_AGE_MS)) {
+      return undefined;
+    }
+    return this.chainHeads.get(spokeId);
+  }
+
+  private reportScanStallIfAny(spokeId: string): void {
     if (this.stallReported.has(spokeId)) return;
     const advancedAt = this.watermarkAdvancedAt.get(spokeId);
     if (advancedAt === undefined) return; // never scanned yet — not a stall
     const stillMs = Date.now() - advancedAt;
     if (stillMs < SCAN_STALL_ERROR_AFTER_MS) return;
     const watermark = this.relayStore.getWatermark(spokeId);
-    if (watermark === undefined || head <= watermark) return; // nothing new to scan
+    if (watermark === undefined) return;
+
+    // A head read more than a few cycles ago is stale: the connection is failing, which is
+    // itself the stall. Say the head is unknown rather than quote a number that has moved on.
+    const headAt = this.chainHeadAt.get(spokeId);
+    const fresh = this.freshHead(spokeId);
+    if (fresh !== undefined && fresh <= watermark) return; // nothing new to scan
+
+    const lastKnown = this.chainHeads.get(spokeId);
+    const headText = fresh !== undefined
+      ? `head ${fresh} (${fresh - watermark} blocks behind)`
+      : lastKnown === undefined
+        ? "head unknown — the chain connection has never succeeded"
+        : `head unknown — the chain connection is failing (last read ${lastKnown}, ` +
+          `${Math.floor((Date.now() - (headAt ?? 0)) / 1000)}s ago)`;
 
     this.stallReported.add(spokeId);
     this.log.error(
-      `[${spokeId}] chain scan has not advanced for ${Math.floor(stillMs / 1000)}s while the ` +
-      `chain moved on: watermark ${watermark}, head ${head} (${head - watermark} blocks behind). ` +
-      `Nothing on this spoke is being observed, so no lock or claim reaches the journal and no ` +
-      `PvP here can pair. See docs/runbooks/relay-chain-scan-stalled.md`,
+      `[${spokeId}] chain scan has not advanced for ${Math.floor(stillMs / 1000)}s: ` +
+      `watermark ${watermark}, ${headText}. Nothing on this spoke is being observed, so no lock ` +
+      `or claim reaches the journal and no PvP here can pair. FX agreement transport is ` +
+      `unaffected. See docs/runbooks/relay-chain-scan-stalled.md`,
     );
   }
 

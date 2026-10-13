@@ -60,6 +60,8 @@ describe("chain-scan liveness is observable", () => {
 
     const relay = await relayWith(store);
     (relay as any).chainHeads.set("spoke-a", 1000);
+    (relay as any).chainHeadAt.set("spoke-a", Date.now()); // read just now — a head is only
+                                                          // reported while it still means something
 
     const report = relay.getScanLiveness();
     const a = report.find(r => r.spokeId === "spoke-a");
@@ -100,6 +102,41 @@ describe("chain-scan liveness is observable", () => {
     expect(report.map(r => r.spokeId)).toContain("spoke-late");
     expect(report.find(r => r.spokeId === "spoke-late")!.watermark).toBe(42);
   }, 15_000);
+
+  // /health must not contradict the log. Once the connection breaks, the last head read is no
+  // longer evidence about the chain: reporting it as current makes a spoke that caught up right
+  // before the break read as blocksBehind 0 — healthy — while the error log says the head is
+  // unknown. The endpoint is what a dashboard alerts on, so it is the one that must not lie.
+  it("reports a stale head as unknown, not as current", async () => {
+    const store = new RelayStore(file, { info: () => {}, warn: () => {}, error: () => {} });
+    await store.init();
+    await store.setWatermark("spoke-a", 900);
+
+    const relay = await relayWith(store);
+    (relay as any).chainHeads.set("spoke-a", 900);
+    // Read long ago — the connection has been failing since.
+    (relay as any).chainHeadAt.set("spoke-a", Date.now() - 600_000);
+
+    const a = relay.getScanLiveness().find(r => r.spokeId === "spoke-a")!;
+    expect(a.head).toBeNull();
+    expect(a.blocksBehind).toBeNull();
+    expect(a.watermark).toBe(900); // the watermark is ours and stays known
+  });
+
+  // A head read moments ago is current and must be reported as such.
+  it("reports a fresh head as current", async () => {
+    const store = new RelayStore(file, { info: () => {}, warn: () => {}, error: () => {} });
+    await store.init();
+    await store.setWatermark("spoke-a", 900);
+
+    const relay = await relayWith(store);
+    (relay as any).chainHeads.set("spoke-a", 1000);
+    (relay as any).chainHeadAt.set("spoke-a", Date.now());
+
+    const a = relay.getScanLiveness().find(r => r.spokeId === "spoke-a")!;
+    expect(a.head).toBe(1000);
+    expect(a.blocksBehind).toBe(100);
+  });
 
   // A spoke registered but never scanned is not "fine, at zero" — it is unknown, and saying
   // zero would read as healthy on a dashboard.

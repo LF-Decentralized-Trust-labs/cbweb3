@@ -101,6 +101,29 @@ export class LiquidityCommitWatcher {
   // is walked in bounded chunks so a single request cannot exceed node log-range limits or
   // stall the loop (finding R2-H-11: range chunking for long catch-ups).
   private static readonly MAX_BLOCK_RANGE = 5_000;
+  // Narrowest scan window the watcher falls back to before it stops shrinking. A node that cannot
+  // serve 5,000 blocks of logs does not become able to by being asked again: after a hub Besu
+  // restart every cycle would issue the same heavy request, drop the freshly reconnected socket
+  // and fail again, and only an operator restart got the watcher out. Halving on failure and
+  // growing back on success turns that deadlock into a slow recovery.
+  private static readonly MIN_BLOCK_RANGE = 128;
+  // Current scan width, narrowed on failure and widened again on success.
+  private blockRange = LiquidityCommitWatcher.MAX_BLOCK_RANGE;
+  // Narrowest width ever seen to fail. Doubling back after every success would re-test it on every
+  // other cycle — 512 ok, 1024 fail, 512 ok — so against a node with a fixed log-range limit half
+  // the cycles would issue the request that drops the socket. Grow back only to comfortably under
+  // what is known to fail.
+  private failedAtWidth = Number.POSITIVE_INFINITY;
+  private successesSinceFailure = 0;
+  // Only a failed log request says anything about the node's range limit. A head read that times
+  // out must not narrow the window, and — the case that matters — a node that drops its socket on
+  // a wide request fails every call after it until it reconnects, so a run of failures is the
+  // normal aftermath of a range limit and says nothing about whether the node was absent.
+  private logsInFlight = false;
+  // What does identify an absent node: it fails at EVERY width, including the floor, which a real
+  // range limit never does. Seen once, it means the narrowest widths reached say nothing about what
+  // the node can serve, and the recorded ceiling is forgotten on recovery.
+  private failedAtFloor = false;
 
   constructor(opts: {
     contractAddress: string;
@@ -231,7 +254,7 @@ export class LiquidityCommitWatcher {
           // node's log-range limit or block the loop (R2-H-11: range chunking).
           let from = this.lastProcessedBlock + 1;
           while (from <= toBlock && this.running && !this.abortSignal?.aborted) {
-            const chunkTo = Math.min(from + LiquidityCommitWatcher.MAX_BLOCK_RANGE - 1, toBlock);
+            const chunkTo = Math.min(from + this.blockRange - 1, toBlock);
             const advanced = await this.processRange(from, chunkTo, commitMatchedTopic);
             // processRange returns the highest fully-delivered block. If it is below chunkTo a
             // delivery failed: hold the watermark there and stop advancing so the failed block
@@ -243,9 +266,12 @@ export class LiquidityCommitWatcher {
         }
         // Successful poll — clear the failure streak.
         this.consecutiveFailures = 0;
+        this.widenScanWindow();
       } catch (err) {
         console.error("[LiquidityCommitWatcher] poll error:", err);
         this.consecutiveFailures++;
+        this.narrowScanWindow(this.logsInFlight);
+        this.logsInFlight = false;
         // Self-heal: a wedged connection (typically after the hub Besu restarts) keeps
         // failing. Rebuild the provider so the next poll uses a fresh socket instead of
         // hanging forever. lastProcessedBlock is preserved, so no events are skipped.
@@ -262,6 +288,59 @@ export class LiquidityCommitWatcher {
   }
 
   /**
+   * A poll failed. Only a failed log request narrows the window — remember the width that failed
+   * and halve it, down to the floor. Any other failure says nothing about the node's range limit.
+   */
+  private narrowScanWindow(logRequestFailed: boolean): void {
+    if (!logRequestFailed) return;
+    if (this.blockRange <= LiquidityCommitWatcher.MIN_BLOCK_RANGE) this.failedAtFloor = true;
+    this.failedAtWidth = Math.min(this.failedAtWidth, this.blockRange);
+    this.successesSinceFailure = 0;
+    if (this.blockRange > LiquidityCommitWatcher.MIN_BLOCK_RANGE) {
+      this.blockRange = Math.max(
+        LiquidityCommitWatcher.MIN_BLOCK_RANGE,
+        Math.floor(this.blockRange / 2),
+      );
+      console.warn(
+        `[LiquidityCommitWatcher] narrowing the scan window to ${this.blockRange} blocks after a failed log request`,
+      );
+    }
+  }
+
+  /** A poll succeeded: grow the window back, but not past what is known to fail. */
+  private widenScanWindow(): void {
+    // The node answered after failing even at the floor width: it was absent, not choking on the
+    // width. Forget the recorded ceiling, or a node that was simply down comes back pinned near
+    // the floor and crawls through its catch-up.
+    if (this.failedAtFloor) {
+      this.failedAtFloor = false;
+      if (this.failedAtWidth !== Number.POSITIVE_INFINITY) {
+        this.failedAtWidth = Number.POSITIVE_INFINITY;
+        console.info(
+          "[LiquidityCommitWatcher] chain answered again after failing at the minimum scan width — " +
+          "restoring the full scan window",
+        );
+      }
+    }
+    this.successesSinceFailure++;
+    // A node's limit can be lifted; re-probe occasionally so the watcher is not pinned below it
+    // for ever, but rarely enough that the cost is one poll in fifty rather than every other one.
+    if (this.failedAtWidth !== Number.POSITIVE_INFINITY && this.successesSinceFailure % 50 === 0) {
+      this.failedAtWidth = Math.min(
+        LiquidityCommitWatcher.MAX_BLOCK_RANGE,
+        Math.floor(this.failedAtWidth * 1.5),
+      );
+    }
+    const ceiling = this.failedAtWidth === Number.POSITIVE_INFINITY
+      ? LiquidityCommitWatcher.MAX_BLOCK_RANGE
+      : Math.max(LiquidityCommitWatcher.MIN_BLOCK_RANGE, Math.floor(this.failedAtWidth * 0.75));
+    if (this.blockRange < ceiling) {
+      this.blockRange = Math.min(ceiling, this.blockRange * 2);
+      console.info(`[LiquidityCommitWatcher] scan window widened to ${this.blockRange} blocks`);
+    }
+  }
+
+  /**
    * Process the [fromBlock, toBlock] range: forward each not-yet-delivered CommitMatched to the
    * gateways and mark it delivered only once forwarding succeeds. Returns the highest block for
    * which every event was delivered — the caller advances the watermark to exactly that block.
@@ -273,7 +352,9 @@ export class LiquidityCommitWatcher {
     toBlock: number,
     topicHash: string,
   ): Promise<number> {
+    this.logsInFlight = true;
     const logs = await this.getLogs(fromBlock, toBlock, topicHash);
+    this.logsInFlight = false;
     // getPastLogs ordering is not guaranteed; sort so "highest fully-delivered block" is well
     // defined and a failure stops at the correct point.
     logs.sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex);
