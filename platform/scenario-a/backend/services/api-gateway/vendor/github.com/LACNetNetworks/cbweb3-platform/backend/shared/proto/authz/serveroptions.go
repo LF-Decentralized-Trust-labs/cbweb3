@@ -171,3 +171,18 @@ func boolEnv(v string) bool {
 		return false
 	}
 }
+
+// DefaultPolicyFromEnv returns the baseline policy a server should apply to methods
+// that carry no per-method restriction: the operator's GRPC_AUTHZ_ALLOWED_CALLERS
+// allow-list when one is configured, otherwise "any authenticated caller".
+//
+// It exists so a service can pass an explicit MethodPolicy without discarding that
+// operator setting. ServerOptionsFromEnv only consults the environment when the
+// policy argument is nil, so a service that hardens its write methods would
+// otherwise silently widen its read methods back to every authenticated peer.
+func DefaultPolicyFromEnv() Policy {
+	if subjects := parseAllowedCallers(os.Getenv(EnvAllowedCallers)); len(subjects) > 0 {
+		return AllowList{Subjects: subjects}
+	}
+	return AllowAuthenticated{}
+}
