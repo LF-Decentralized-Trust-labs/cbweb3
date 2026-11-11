@@ -1,12 +1,25 @@
-# Knowledge Product 1 — Draft v0.2
+# Knowledge Product 1 — Draft v0.3
 ## Tokenized Central Bank Money in LAC: From Issuance to Cross-Border Integration
 ## Dinero Digital de Banco Central en ALC: De la Emisión a la Integración Transfronteriza
 
 **Status:** Draft for working group review
-**Version:** v0.2 — 2026-07-10
+**Version:** v0.3 — 2026-11-06
 **Author:** CBWeb3 Working Group / LNET
 **GitHub issue:** [#46 — Knowledge Product 1 Proposed Structure](https://github.com/LF-Decentralized-Trust-labs/cbweb3/issues/46)
 **Audience:** Central bankers, policymakers, and broad financial sector stakeholders
+
+---
+
+> **Changelog v0.2 → v0.3 (2026-11-06)**
+>
+> Incorporating evidence and participant feedback from the 2026 CBWeb3 sandbox/UAT:
+>
+> - **§6** — Replaced generic completion criteria with evidence-based sandbox exit criteria; separated technical atomicity from legal finality; removed the unsupported six-to-twelve-month commitment
+> - **§8** — Corrected Scenario A and Scenario B maturity; Scenario B is an experimental prototype, not a production-ready regional platform; made the CSD/Nuam model a candidate for evaluation rather than an adopted corridor
+> - **§11** — Reworked the roadmap around evidence gates, institutional readiness, failure testing, production controls, economic viability and explicit go/conditional-go/no-go decisions
+> - **§12** — Added observed operational risks from the 2026 sandbox, including silent pending states, false-positive health signals, reconciliation risk, onboarding friction and missing production controls
+> - **NEW §13** — Added “Evidence and lessons from the 2026 sandbox/UAT”, clearly separating observed results, limitations and unresolved policy/design questions
+> - **Throughout** — Distinguished sandbox evidence, technical ledger behavior, legal settlement finality, UAT participation and production readiness
 
 ---
 
@@ -53,7 +66,7 @@ This document is addressed to the decision-makers who must determine whether and
 
 The decision framework this document proposes has four dimensions. First, the **settlement asset question**: whether to issue tokenized central bank money (tCeBM) at the wholesale level, the retail level, or both, and how to position it relative to tokenized commercial bank deposits and private digital instruments. Second, the **operating model question**: whether the central bank leads the infrastructure, delegates to intermediaries, or adopts a hybrid arrangement, and what each choice implies for governance, costs, and systemic risk. Third, the **cross-border integration question**: whether to pursue bilateral corridors, join a shared regional platform, or modernize correspondent banking relationships — and how to sequence these choices over time. Fourth, the **settlement infrastructure question**: whether tCeBM will be operated exclusively by the central bank, by commercial banks, or through authorized financial market infrastructures (FMIs) such as central securities depositories (CSDs), clearinghouses, or settlement system operators. This fourth dimension determines who builds and runs the operational layer, who is accountable for settlement failures, and how tCeBM connects to existing market processes such as securities clearing, reconciliation, and custody.
 
-The practical conclusion of this document is that the conditions for action are already in place. Countries do not need to wait for perfect legal certainty, fully tested technology, or regional consensus before beginning. A deliberate, gradual approach — starting with a closed group of regulated participants in a controlled domestic use case — allows institutions to learn, build capacity, and reduce risks before expanding scope. The CBWeb3 regional testnet exists precisely to support this experimentation phase, providing shared infrastructure, interoperability tooling, and a community of practice across central banks and financial institutions in LAC.
+The practical conclusion is that authorities can use controlled, no-value experimentation to determine whether tokenization adds value in a defined use case. Experimentation does not substitute for legal authority, production controls or comparison with non-tokenized alternatives. The CBWeb3 regional testnet provides reference infrastructure and interoperability tooling for that learning phase; any expansion beyond it remains conditional on the evidence gates in Sections 6 and 11.
 
 ---
 
@@ -61,7 +74,7 @@ The practical conclusion of this document is that the conditions for action are 
 
 The case for tCeBM in Latin America and the Caribbean is not built on technology enthusiasm. It is built on a specific set of structural pressures that are already reshaping the regional financial landscape, and that demand a policy response.
 
-**The correspondent banking problem.** The number of active correspondent banking relationships in LAC has declined steadily over the past decade, driven by de-risking strategies among global banks [Source: TBD — BIS correspondent banking surveys]. For smaller economies and for specific transaction categories — particularly remittances and trade finance — this contraction has raised costs, lengthened settlement times, and in some corridors, effectively eliminated access to affordable international payment infrastructure. Tokenized central bank money, used as a settlement asset in a direct or semi-direct model, can reduce dependence on correspondent intermediaries by enabling payment-versus-payment (PvP) settlement with cryptographic finality.
+**The correspondent banking problem.** The number of active correspondent banking relationships in LAC has declined steadily over the past decade, driven by de-risking strategies among global banks [Source: TBD — BIS correspondent banking surveys]. For smaller economies and for specific transaction categories — particularly remittances and trade finance — this contraction has raised costs, lengthened settlement times, and in some corridors, effectively eliminated access to affordable international payment infrastructure. Tokenized central bank money may reduce dependence on some correspondent intermediaries by enabling coordinated PvP state transitions; whether this produces final legal discharge and net economic benefit must be established for each corridor.
 
 **The stablecoin and dollarization pressure.** Across the region, stablecoin adoption is growing — particularly in economies with histories of currency instability or restricted access to US dollar accounts. While this adoption reflects genuine demand for more stable and accessible digital value, it also represents a potential transfer of monetary sovereignty. If a significant share of domestic transactions migrates to instruments denominated in foreign currencies and issued by private entities outside regulatory reach, the ability of central banks to implement monetary policy, observe systemic risk, and enforce anti-money laundering and counter-terrorist financing (AML/CFT) rules is materially diminished. Tokenized central bank money offers a sovereign alternative: digital, programmable, interoperable — but issued and governed by the monetary authority.
 
@@ -195,9 +208,9 @@ The first is **domestic interbank settlement**: interbank settlement in domestic
 
 The second, particularly suited for jurisdictions with active capital markets infrastructure, is **institutional settlement via authorized FMI**: settlement of tokenized cash in an institutional process administered by an authorized FMI such as a CSD. The goal is not to extend access to retail users but to validate whether a tokenized representation of central bank account balances can be operationally managed by an authorized infrastructure with defined controls for access, reconciliation, traceability, and settlement finality. This use case is directly relevant to the operational needs of institutions such as Nuam, whose use case involves receiving cash from one jurisdiction to settle securities transactions in another.
 
-**Success criteria.** The closed group phase should be considered complete when: (a) at least two institutions have completed end-to-end settlement of a defined set of test transactions with cryptographic finality; (b) the central bank has validated that the settlement ledger correctly reflects all transactions; and (c) a post-pilot assessment has been completed and shared with all participants.
+**Sandbox exit criteria.** A closed-group sandbox should not be considered complete merely because its happy path succeeds. Exit requires: (a) at least two institutions completing the defined end-to-end technical flow in both intended directions; (b) reconciliation of reserve debits, token issuance, pending operations and final balances; (c) exercised timeout, refund, participant-disconnection and recovery paths; (d) evidence that functional health checks detect loss of peer communication and stuck confirmations; (e) resolution or explicit acceptance of material defects; and (f) a joint assessment documenting participant feedback, residual risks and the next decision gate. Atomic execution in the sandbox is technical evidence; it does not establish legal settlement finality.
 
-**Timeline.** A realistic timeline from decision to successful completion of the closed group phase is six to twelve months, depending on legal preparation time and technology integration complexity. Central banks that are already operating on the CBWeb3 testnet can compress this timeline significantly, as the core infrastructure, API specifications, and test vectors are already available.
+**Timing and institutional effort.** The 2026 testing showed that elapsed time depends not only on software readiness but also on security review, VPN and virtual-machine provisioning, permissions, credentials, internal coordination and availability of counterpart institutions. This document therefore does not prescribe a generic six-to-twelve-month schedule. Each authority should estimate its timeline only after completing the readiness assessment and naming accountable legal, technology, cybersecurity, treasury and operations owners.
 
 ---
 
@@ -215,13 +228,13 @@ The following two sections address the specific design choices involved in cross
 
 ## 8. Cross-Border Settlement Models for LAC
 
-> **Note on CBWeb3 testnet scenarios:** Throughout this section, "Scenario A" refers to the HTLC-based PvP settlement model implemented on the CBWeb3 testnet, enabling atomic bilateral settlement between two participants. "Scenario B" refers to the AMM-based pooled liquidity model, enabling multilateral settlement without pre-established bilateral arrangements. Both are live on the CBWeb3 testnet and available for technical validation by participating institutions.
+> **Maturity note on CBWeb3 testnet scenarios:** “Scenario A” is the HTLC-based PvP model implemented and exercised end to end in the sandbox, including a Costa Rica–Peru participant-operated flow. This demonstrates the technical workflow under test conditions, not legal finality or production readiness. “Scenario B” is an experimental AMM/liquidity-pool prototype whose happy path has been executed on a dedicated hub chain. It is not production-ready: privacy on the hub, signer concurrency, multi-validator operation, performance under stressed swaps, resilience and operational hardening remain open. The two scenarios must not be described as having the same maturity.
 
 Four practical models exist for cross-border tokenized settlement, each with different implications for complexity, scalability, and the degree of regional coordination required.
 
 **Model 1 — Tokenized Correspondent Banking (Enhanced PvP)**
 
-In this model, the bilateral relationship between a domestic bank in Country A and its correspondent bank in Country B is replicated on tokenized infrastructure. Each leg of the payment — the debit in Country A's currency and the credit in Country B's currency — is settled atomically using an HTLC. Settlement finality in both legs is conditional: neither leg settles unless both settle simultaneously, eliminating the principal risk that exists in traditional correspondent banking. Scenario A of the CBWeb3 platform implements exactly this model and has been tested end-to-end.
+In this model, the bilateral relationship between a domestic bank in Country A and its correspondent bank in Country B is replicated on tokenized infrastructure. Each tokenized leg is coordinated through an HTLC so that, within the tested technical model, both state transitions complete or the timeout/refund path applies. Scenario A implements and has exercised this workflow in the sandbox. Whether those ledger transitions discharge the underlying legal obligations with finality must be established separately in each jurisdiction and participation agreement.
 
 *Advantages:* Builds on existing correspondent relationships and legal frameworks. No requirement for a shared regional infrastructure or centralized liquidity. Can be deployed bilaterally, one corridor at a time, without requiring multilateral coordination.
 
@@ -241,9 +254,9 @@ In this model, two central banks establish a direct, bilateral settlement arrang
 
 **Model 3 — Shared Regional Platform**
 
-In this model, participating countries connect to a single, multilateral settlement hub that supports multi-currency settlement without requiring pre-established bilateral arrangements between every pair of participants. The hub provides liquidity pooling, automated market-making for FX conversion, and a single legal and governance framework for all participants. Scenario B of the CBWeb3 platform implements this model using an AMM algorithm.
+In this model, participating countries would connect to a multilateral settlement hub supporting pooled liquidity and automated market-making for foreign-exchange conversion. CBWeb3 Scenario B provides an experimental technical prototype of this model; it does not yet provide an approved multilateral legal framework, production liquidity arrangement or production-grade operating service.
 
-*Advantages:* Maximum scalability — N participants can settle with each other without N×(N-1)/2 bilateral agreements. Most efficient use of liquidity — pooled liquidity reduces pre-funding requirements significantly. Enables new participants to join incrementally, with immediate connectivity to all existing members.
+*Potential advantages to validate:* A multilateral topology could avoid N×(N-1)/2 bilateral technical integrations. Pooled liquidity may reduce pre-funding for some corridors if sufficient, appropriately priced liquidity is actually committed. Connectivity and liquidity access for a new participant would remain subject to onboarding, legal agreements, capacity and governance. These are hypotheses for measurement, not demonstrated production outcomes.
 
 *Disadvantages:* Highest coordination requirement — establishing a multilateral governance framework, allocating costs, and defining liability arrangements across multiple sovereign jurisdictions is complex. Requires a trusted, neutral operator for the hub infrastructure. Systemic risk is concentrated at the hub; robust technical and governance resilience is essential. AMM-based exchange rates may deviate from market rates for illiquid currency pairs.
 
@@ -259,7 +272,7 @@ In this model, the CSDs of participating countries act as authorized intermediar
 
 *Requirements:* Central bank authorization for each CSD to operate tCeBM-related functions; formal agreement on liability allocation between central banks and CSDs; common connectivity and messaging standards between CSDs; coordinated supervisory oversight between central bank and securities regulator.
 
-*Best suited for:* Jurisdictions where CSDs are already involved in regional integration processes and have established relationships with central banks and banking supervisors. The Colombia-Chile-Peru corridor, given the Nuam integration across exchanges, CCPs, and CSDs in these three markets, is the most immediate candidate for this model.
+*Candidate for evaluation:* Jurisdictions where CSDs are already involved in regional integration and have established relationships with central banks and securities supervisors. Nuam's Colombia–Chile–Peru integration offers a relevant institutional context to study, but the 2026 CBWeb3 evidence establishes connectivity and testing participation only. It does not establish central-bank authorization, access to settlement accounts, a cross-border cash-finality model or selection of this corridor for a real-value pilot.
 
 **Coexistence in practice.** These four models are not mutually exclusive. A realistic regional architecture will likely see multiple models in use simultaneously: enhanced bilateral correspondent banking for corridors with existing commercial relationships, direct central bank bilateral corridors for the highest-volume pairs, a shared regional platform as the backbone for multilateral connectivity, and CSD interconnection for institutional capital markets flows. The CBWeb3 platform is designed to support Models 1 through 3 directly, with Model 4 representing a natural extension as FMI participation expands.
 
@@ -289,9 +302,9 @@ Participants contribute liquidity to a shared pool denominated in multiple curre
 
 *Trade-offs:* Most capital-efficient for a system with many active participants and corridors — liquidity is pooled rather than fragmented across bilateral pre-funding accounts. Exchange rates are determined algorithmically, which is transparent but may deviate from market rates for illiquid currency pairs, creating basis risk. The central bank cedes some control over the exchange rate at which its currency is converted — a politically sensitive consideration for some jurisdictions. Governance of the pool — who sets parameters, who manages the AMM algorithm, who bears residual risk — requires careful institutional design.
 
-**An additional approach for reducing pre-funding requirements** is to leverage existing regional FMIs — including interconnected CSDs — as liquidity coordination mechanisms for authorized participants. Under this arrangement, CSDs can provide consolidated visibility of positions across participants in different jurisdictions, facilitate intraday reconciliation processes, and act as operational connection points between participants. This approach can improve the efficiency of cross-border liquidity use and reduce the need for multiple idle balances held across different markets simultaneously, building on the CSD's existing role as a hub for institutional participant connectivity.
+**A candidate FMI coordination approach** is to evaluate whether existing regional FMIs — including interconnected CSDs — can provide consolidated position visibility, intraday reconciliation and operational connectivity for authorized participants. These capabilities do not themselves supply credit, collateral or liquidity and therefore do not, by themselves, reduce pre-funding. Any liquidity benefit must be demonstrated through the funding arrangement and measured against the existing baseline.
 
-**Recommended approach.** For the initial phase of regional deployment, pre-funded bilateral balances (Mechanism 1) are recommended: they are operationally simple, eliminate settlement risk, and require no multilateral governance. As the network grows and liquidity management costs become significant, a transition to pooled liquidity with AMM (Mechanism 3) becomes attractive — but only after the AMM governance framework has been established and the algorithm has been validated in production-equivalent conditions. Intraday credit facilities (Mechanism 2) may be appropriate for specific high-volume bilateral corridors between jurisdictions with strong bilateral institutional relationships.
+**Candidate sequencing for evaluation.** Pre-funded bilateral balances (Mechanism 1) may be the simplest sandbox starting point and reduce the risk of insufficient funds, but they do not eliminate legal, operational, counterparty or reconciliation risk. Pooled AMM liquidity (Mechanism 3) should be considered only after governance is established and realistic stress, pricing, liquidity, privacy and recovery evidence meets approved criteria. Intraday credit facilities (Mechanism 2) require explicit credit authority, limits, collateral and loss-allocation rules.
 
 ---
 
@@ -313,13 +326,11 @@ Tokenized central bank money raises a set of policy questions that do not have u
 
 ## 11. Final Remarks: A Gradual and Coordinated Path Forward
 
-The analysis presented in this document leads to a clear conclusion: LAC central banks and financial authorities have both the motivation and the means to act on tokenized central bank money. The motivation is structural — the pressures of correspondent banking decline, stablecoin expansion, and cross-border payment inefficiency are not going away, and they will intensify as digital financial infrastructure becomes more central to global commerce. The means are available — the CBWeb3 regional testnet provides tested infrastructure, proven interoperability protocols, and a governance framework designed for the institutional context of LAC.
-
-The path forward does not require all countries to move at the same pace, nor does it require full legal certainty before taking the first step. What it requires is clarity of intention, institutional commitment, and a willingness to learn from controlled experimentation.
+The 2026 evidence supports continued controlled experimentation, not a universal decision to deploy. CBWeb3 provides a reference implementation and interoperability workflow tested under bounded sandbox conditions. It does not yet establish a production service, legal settlement finality, integration with live RTGS systems, an approved multi-country liability framework or a sustainable operating model. Each authority should proceed only when its measured problem, available alternatives and risk appetite justify the next gate.
 
 **Summary Action Roadmap**
 
-The following roadmap organizes the key actions by phase, providing a structured path from initial assessment to regional integration. Phase transitions are conditioned on explicit go/no-go decisions to ensure that scaling happens on the basis of evidence, not momentum.
+The following roadmap organizes the key actions by phase. The month ranges are indicative planning bands, not commitments. Phase transitions require an accountable `go`, `conditional go`, or `no-go` decision supported by evidence.
 
 *Phase 1 — Legal and Institutional Readiness (Months 1–3)*
 
@@ -334,30 +345,34 @@ The following roadmap organizes the key actions by phase, providing a structured
 
 - Complete technical integration with the CBWeb3 testnet using the standardized API specifications and test vectors available in the public repository
 - Execute the 15-minute PvP quickstart tutorial and validate technical connectivity
-- Participate in at least one bi-weekly community call to engage with the technical working group
 - Define the initial closed user group according to the eligibility criteria in Section 6
 - Commission legal validation of participation agreements, liability allocation, and smart contract enforceability under applicable law
 - Begin design of the economic model: how will liquidity costs be allocated among participants? What incentive structures support active participation?
 - Establish the benefit measurement framework: what metrics will be used to assess value creation relative to existing alternatives (RTGS, correspondent banking, ISO 20022 modernization)?
+- Document the operating model: 24/7 operations and support cost, infrastructure capacity, refresh cycle, pricing or fee policy, expected volume and break-even assumptions
+- Compare CBWeb3 with non-tokenized RTGS/API modernization, SWIFT-based approaches and private rails before attributing incremental benefit to tokenization
 
 *Phase 3 — Closed Group Pilot (Months 6–12)*
 
 - Execute the first set of domestic interbank settlement transactions (or institutional FMI-based settlement, as applicable) in the closed group environment
 - Conduct operational resilience and cybersecurity testing against defined stress scenarios, including participant disconnection and hub failure
+- Exercise negative paths: timeouts, refunds, stuck confirmations, unavailable peers, pending issuance reconciliation and recovery without duplicate issuance
 - Complete post-pilot assessment and share findings with the CBWeb3 Working Group
 - Measure outcomes against the benefit measurement framework established in Phase 2
 - Establish a pilot governance framework: who decides on protocol upgrades? How are disputes resolved? What is the process for participant removal?
 - Begin legal preparation for cross-border use: identify counterpart jurisdictions, initiate bilateral legal review, define participation agreement terms
 - Formal go/no-go decision for Phase 4, based on documented evidence from pilot results and operational testing
+- Treat the observed three-central-bank batch limit as a capacity constraint of the 2026 test environment; produce a measured capacity and scaling plan before expanding participation
 
 *Phase 4 — Cross-Border Connectivity (Months 12–24)*
 
 - Select the cross-border settlement model appropriate to your jurisdiction's context (Section 8)
-- Establish bilateral or multilateral connectivity through the CBWeb3 hub
+- Establish bilateral or multilateral sandbox connectivity using the selected model; hub participation is conditional on Scenario B closing its maturity gaps
 - Implement the sandbox-to-real-value transition plan, including independent audit of pilot results, governing law determination for multi-country disputes, and contingency plan for hub failure or CB disconnection during active obligations
+- Before any real-value test, approve key custody, high availability, backup and recovery, functional monitoring, incident runbooks, RTGS/off-ledger reconciliation, participant notification and allocation of liability and losses
 - Participate in the regional governance framework and contribute to the evolution of the CBWeb3 Digital Public Good infrastructure
 
-Central banks that begin this process now — even at a modest scale — will be better positioned to shape the regional architecture than those that wait for a consensus that may never fully arrive. The CBWeb3 initiative is an invitation to participate in building shared infrastructure for a regional financial future that serves the priorities of Latin America and the Caribbean.
+The appropriate next step may be further sandbox work, a narrower use case, modernization of existing infrastructure, or a decision not to proceed. CBWeb3 offers reusable evidence and components for that decision; it should not predetermine the result.
 
 ---
 
@@ -378,9 +393,32 @@ The following register identifies the primary risk categories associated with tC
 | **Reputational risk from pilot failure** | Public perception damage if pilot fails, produces adverse outcomes, or is mischaracterized in media or political discourse | Medium — could set back CBDC adoption broadly across LAC | Controlled rollout with clear communication strategy; pre-defined success criteria and exit conditions; independent evaluation of pilot results before public disclosure |
 | **Digital dollarization acceleration** | If tCeBM design is uncompetitive with USD-denominated stablecoins on programmability, cost, or accessibility, stablecoin adoption may accelerate rather than decrease | Medium-High — undermines the primary sovereignty motivation for tCeBM deployment | Competitive design analysis against USD stablecoins before deployment; pricing model that does not disadvantage local currency instruments; programmability features matching or exceeding private alternatives |
 | **Cybersecurity incidents** | Attacks on node infrastructure, key management systems, communication channels, or smart contracts | High — could cause financial losses, data breaches, or extended settlement outages | Security standards compliance (e.g., ISO 27001 or equivalent); regular third-party security audits; defined incident response and recovery protocols; key management hardware security module requirements |
-| **CB disconnection mid-obligation** | A central bank disconnecting from the hub while settlement obligations are pending, leaving counterparts with unresolved positions | High — counterparts bear principal risk if disconnection is not handled in a defined protocol | Legal framework for orderly disconnection; pre-funded collateral requirements; automatic settlement finalization protocol triggered by disconnection event; defined priority rules for pending obligations |
+| **CB disconnection mid-obligation** | A central bank disconnecting from the hub while settlement obligations are pending, leaving counterparts with unresolved positions | High — counterparts bear principal risk if disconnection is not handled in a defined protocol | Legal framework for orderly disconnection; pre-funded collateral requirements; tested timeout/unwind process; define and approve treatment and priority of pending obligations before real-value use |
+| **Silent pending operations and reconciliation** | Reserve balances may change while token issuance or privacy-layer confirmation remains pending for an extended period | High — apparent loss of value, duplicate-issuance risk and loss of participant trust | Explicit pending state; queue-age limits and alerts; transaction-level reconciliation; safe no-reissue runbook; participant notification and acknowledgment |
+| **False-positive infrastructure health** | Ports or containers appear available while peer identity, privacy or confirmation services cannot complete cross-institution flows | High — outages remain undetected while operations accumulate | Functional readiness probes; peer-to-peer checks; synthetic end-to-end transactions; alerts for connection exhaustion, process/container disagreement and stuck confirmations |
+| **Access and role mismatch** | Settlement-agent, custodian, correspondent or non-resident holding rules are ambiguous or not technically enforced | High — unauthorized holdings, inconsistent operations and unclear accountability | Approved role and access matrix; enforce non-resident rules in code and conformance tests; reconcile implementation with participation agreements |
+| **FX source and parameter governance** | Manual or ungoverned exchange-rate inputs can produce inconsistent or manipulable settlement terms | Medium-High — mispricing, disputes and liquidity losses | Approved external source or controlled oracle process; freshness and deviation checks; fallback and dispute procedures; governed parameter changes |
+| **RTGS and off-ledger integration** | Sandbox token balances are not reconciled with live reserve accounts or productive RTGS/LBTR systems | High — token settlement may not correspond to the legally authoritative cash record | Define authoritative ledger; adapter and reconciliation design; failure and rollback rules; joint testing with the relevant central-bank operations teams |
+| **Performance and capacity shortfall** | Test throughput, participant slots or privacy operations may not meet production volumes or service levels | High — congestion, failed settlements and exclusion of participants | Versioned performance evidence; realistic stress tests; capacity model; scaling plan; production SLOs and admission limits |
+| **Evidence and UAT governance gap** | Technical delivery or a successful demonstration may be misread as institutional acceptance or production authorization | Medium-High — premature deployment and inaccurate public claims | Versioned evidence bundle; participant-approved UAT scope and sign-off; explicit maturity labels; independent readiness decision by accountable authorities |
 
 ---
+
+## 13. Evidence and lessons from the 2026 sandbox/UAT
+
+The evidence available from the 2026 participant testing changes the basis on which CBWeb3 should be discussed. It moves Scenario A beyond a purely conceptual design, while also showing why a successful technical flow is only one part of institutional readiness.
+
+> **Evidence note.** This section synthesizes participant feedback from BCRP dated 7 October 2026, BCCR feedback dated 30 September 2026, an internal record of the Costa Rica–Peru joint test, the 2 October 2026 DPGWG coordination notes, platform-delivery reviews, and the 6 November 2026 support incident review. Several of these are internal project records rather than public or independently audited sources; publication requires confirmation by the responsible institutions and removal of any restricted operational detail.
+
+**What was observed.** During the first participant testing batch, the Banco Central de Reserva del Perú reported completing the Scenario A cross-border PvP flow in the sandbox, including onboarding, issuance, reserve tokenization, the FX agreement, HTLC locking, settlement and interoperability between participant networks. Banco Central de Costa Rica reported that the exercise made the roles and cross-border flow more concrete and valuable than a conceptual presentation alone. A Costa Rica–Peru participant-operated PvP was recorded as successful. These results are evidence that the Scenario A workflow can be operated end to end under the tested configuration.
+
+**What participants learned.** The largest adoption frictions included internal security review, VPN and virtual-machine provisioning, permissions, credentials, environment preparation and coordination between institutions. Participants requested clearer definitions of settlement agent, custodian and correspondent roles; rules for non-resident tCeBM holdings; balance limits, remuneration, convertibility and redemption; foreign-exchange data governance; KYC guidance; RTGS/LBTR funding and integration; and a concrete scope and resource plan for a next phase. BCCR also asked for failure and exception scenarios, stronger participant interaction and a clearer distinction between laboratory capabilities and production requirements.
+
+**Operational evidence from failure.** A later incident in the Chile Scenario A homologation environment showed that technical reachability is not equivalent to functional readiness. Five tokenization attempts totaling CLP 1,840,000 remained pending while reserve balances had already changed. After the affected nodes were restored, the queued issuances completed without reissuance and with no reported loss. The incident nevertheless exposed prolonged silent pending states, insufficient functional monitoring, missing queue-age escalation and a serious reconciliation problem. A successful post-recovery PvP retest was not included in the available incident evidence.
+
+**Limits of the evidence.** The available record is participant feedback and technical evidence from a sandbox. It is not a jointly signed institutional UAT acceptance, production authorization, proof of legal settlement finality, connection to live RTGS/LBTR systems or evidence that every corridor and failure path works. The `platform-v1.0.0` tag records a software handoff baseline; it does not change those maturity boundaries. Scenario B remains an experimental prototype, as described in Section 8.
+
+**Implications for the next phase.** Future testing should be organized around evidence, not demonstrations alone. At minimum it should include bidirectional and negative-path flows; transaction-level reconciliation; functional health and synthetic end-to-end monitoring; safe handling of pending issuance without duplicate reissuance; participant-wide impact analysis and notification; performance and capacity measurement; and formal participant review of results. Any transition to real value remains conditional on legal finality, RTGS integration, key custody, high availability, backup and recovery, independent security review, operating economics and an approved allocation of responsibility and losses.
 
 ---
 
@@ -396,7 +434,7 @@ Este documento está dirigido a los tomadores de decisiones que deben determinar
 
 El marco de decisión que propone este documento tiene cuatro dimensiones. Primero, **la pregunta sobre el activo de liquidación**: si emitir tCeBM a nivel mayorista, minorista o ambos, y cómo posicionarlo respecto a los depósitos bancarios comerciales tokenizados y los instrumentos digitales privados. Segundo, **la pregunta sobre el modelo operativo**: si el banco central lidera la infraestructura, delega en intermediarios o adopta un esquema híbrido. Tercero, **la pregunta sobre la integración transfronteriza**: si perseguir corredores bilaterales, unirse a una plataforma regional compartida o modernizar las relaciones de corresponsalía bancaria. Cuarto, **la pregunta sobre la infraestructura de liquidación**: si el tCeBM será operado exclusivamente por el banco central, por bancos comerciales, o a través de infraestructuras del mercado financiero (IMF) autorizadas —como depósitos centrales de valores (DCV), cámaras de compensación u operadores de sistemas de liquidación—. Esta cuarta dimensión determina quién construye y opera la capa operacional, quién es responsable por fallas de liquidación y cómo el tCeBM se conecta con procesos de mercado existentes como la compensación de valores, la reconciliación y la custodia.
 
-La conclusión práctica de este documento es que las condiciones para actuar ya están dadas. Los países no necesitan esperar certeza jurídica perfecta, tecnología completamente probada ni consenso regional antes de comenzar. Un enfoque deliberado y gradual —comenzando con un grupo cerrado de participantes regulados en un caso de uso doméstico controlado— permite a las instituciones aprender, desarrollar capacidades y reducir riesgos antes de ampliar el alcance. La red de pruebas regional CBWeb3 existe precisamente para apoyar esta fase de experimentación, brindando infraestructura compartida, herramientas de interoperabilidad y una comunidad de práctica entre bancos centrales e instituciones financieras de ALC.
+La conclusión práctica es que las autoridades pueden usar experimentación controlada y sin valor real para determinar si la tokenización agrega valor en un caso de uso definido. La experimentación no sustituye autoridad legal, controles productivos ni comparación con alternativas no tokenizadas. El testnet regional CBWeb3 proporciona infraestructura de referencia y herramientas de interoperabilidad para esa fase de aprendizaje; cualquier expansión queda condicionada a los gates de evidencia de las Secciones 6 y 11.
 
 ---
 
@@ -404,7 +442,7 @@ La conclusión práctica de este documento es que las condiciones para actuar ya
 
 El caso a favor del tCeBM en América Latina y el Caribe no se construye sobre el entusiasmo tecnológico. Se construye sobre un conjunto específico de presiones estructurales que ya están redefiniendo el panorama financiero regional y que exigen una respuesta de política.
 
-**El problema de la corresponsalía bancaria.** El número de relaciones de corresponsalía bancaria activas en ALC ha disminuido sostenidamente durante la última década, impulsado por estrategias de reducción de riesgo de los bancos globales [Fuente: por confirmar — encuestas BIS sobre corresponsalía bancaria]. Para las economías más pequeñas y para ciertas categorías de transacciones —particularmente remesas y financiamiento de comercio exterior— esta contracción ha elevado los costos, alargado los tiempos de liquidación y, en algunos corredores, ha eliminado efectivamente el acceso a infraestructura de pagos internacionales asequible. El tCeBM, utilizado como activo de liquidación en un modelo directo o semi-directo, puede reducir la dependencia de intermediarios de corresponsalía al habilitar la liquidación pago-contra-pago (PvP) con finalidad criptográfica.
+**El problema de la corresponsalía bancaria.** El número de relaciones de corresponsalía bancaria activas en ALC ha disminuido sostenidamente durante la última década, impulsado por estrategias de reducción de riesgo de los bancos globales [Fuente: por confirmar — encuestas BIS sobre corresponsalía bancaria]. Para las economías más pequeñas y para ciertas categorías de transacciones —particularmente remesas y financiamiento de comercio exterior— esta contracción ha elevado los costos, alargado los tiempos de liquidación y, en algunos corredores, ha eliminado efectivamente el acceso a infraestructura de pagos internacionales asequible. El tCeBM podría reducir la dependencia de algunos intermediarios al coordinar transiciones PvP; la descarga jurídica definitiva y el beneficio económico neto deben establecerse para cada corredor.
 
 **La presión de las stablecoins y la dolarización.** En toda la región, la adopción de stablecoins crece, particularmente en economías con historias de inestabilidad cambiaria o acceso restringido a cuentas en dólares. Esta adopción representa una potencial transferencia de soberanía monetaria: si una parte significativa de las transacciones domésticas migra hacia instrumentos denominados en monedas extranjeras emitidos por entidades privadas fuera del alcance regulatorio, la capacidad de los bancos centrales para implementar política monetaria, observar el riesgo sistémico y hacer cumplir las normas de prevención de lavado de dinero y financiamiento del terrorismo (PLD/FT) se ve materialmente afectada. El tCeBM ofrece una alternativa soberana: digital, programable, interoperable, pero emitida y gobernada por la autoridad monetaria.
 
@@ -530,9 +568,9 @@ El primero es la **liquidación interbancaria doméstica**: liquidación en mone
 
 El segundo, particularmente adecuado para jurisdicciones con infraestructura activa de mercados de capitales, es la **liquidación institucional a través de IMF autorizada**: liquidación de efectivo tokenizado en un proceso institucional administrado por una IMF autorizada como un DCV. El objetivo no es extender el acceso a usuarios retail sino validar si una representación tokenizada de saldos de cuentas del banco central puede ser operada por una infraestructura autorizada con controles definidos. Este caso de uso es directamente relevante para las necesidades operativas de instituciones como Nuam, cuyo caso de uso implica recibir efectivo de una jurisdicción para liquidar transacciones de valores en otra.
 
-**Criterios de éxito.** La fase del grupo cerrado debe considerarse completa cuando: (a) al menos dos instituciones hayan completado la liquidación extremo a extremo con finalidad criptográfica; (b) el banco central haya validado el libro mayor de liquidación; y (c) se haya completado una evaluación post-piloto compartida con todos los participantes.
+**Criterios de salida del sandbox.** La fase del grupo cerrado no debe considerarse completa únicamente porque funcione el flujo exitoso. La salida requiere: (a) al menos dos instituciones completando el flujo técnico extremo a extremo en ambas direcciones previstas; (b) reconciliación de débitos de reservas, emisión de tokens, operaciones pendientes y saldos finales; (c) pruebas de expiración, reversión, desconexión de participantes y recuperación; (d) evidencia de que los controles de salud funcional detectan pérdida de comunicación entre pares y confirmaciones atascadas; (e) resolución o aceptación explícita de defectos materiales; y (f) una evaluación conjunta que documente retroalimentación, riesgos residuales y la siguiente decisión. La ejecución atómica en el sandbox es evidencia técnica; no establece finalidad jurídica de liquidación.
 
-**Cronograma.** Un cronograma realista es de seis a doce meses desde la decisión hasta la finalización exitosa de la fase del grupo cerrado.
+**Plazo y esfuerzo institucional.** Las pruebas de 2026 mostraron que el tiempo depende no solo del software, sino también de revisión de seguridad, aprovisionamiento de VPN y máquinas virtuales, permisos, credenciales, coordinación interna y disponibilidad de contrapartes. Este documento no prescribe por tanto un plazo genérico de seis a doce meses. Cada autoridad debe estimarlo después de evaluar su preparación y designar responsables jurídicos, tecnológicos, de ciberseguridad, tesorería y operaciones.
 
 ---
 
@@ -546,13 +584,13 @@ La plataforma CBWeb3 está diseñada para apoyar precisamente esta transición. 
 
 ## 8. Modelos de Liquidación Transfronteriza para ALC
 
-> **Nota sobre los escenarios del testnet CBWeb3:** A lo largo de esta sección, "Escenario A" hace referencia al modelo de liquidación PvP basado en HTLC implementado en el testnet CBWeb3, que habilita la liquidación bilateral atómica entre dos participantes. "Escenario B" hace referencia al modelo de liquidez agrupada basado en AMM, que habilita la liquidación multilateral sin acuerdos bilaterales preestablecidos. Ambos están disponibles en el testnet CBWeb3 para validación técnica por parte de las instituciones participantes.
+> **Nota de madurez sobre los escenarios del testnet CBWeb3:** El “Escenario A” es el modelo PvP basado en HTLC implementado y ejercitado de extremo a extremo en el sandbox, incluido un flujo Costa Rica–Perú operado por participantes. Esto demuestra el flujo técnico bajo condiciones de prueba, no finalidad jurídica ni preparación productiva. El “Escenario B” es un prototipo experimental de AMM/pool de liquidez cuyo flujo exitoso fue ejecutado en una cadena hub dedicada. No está listo para producción: siguen abiertos la privacidad en el hub, concurrencia de firmantes, operación multi-validador, rendimiento bajo swaps exigentes, resiliencia y hardening operativo. Los dos escenarios no deben presentarse con la misma madurez.
 
 Existen cuatro modelos prácticos para la liquidación transfronteriza tokenizada.
 
 **Modelo 1 — Corresponsalía Bancaria Tokenizada (PvP Mejorado)**
 
-La relación bilateral entre un banco doméstico y su banco corresponsal se replica en infraestructura tokenizada, con liquidación atómica mediante HTLC. El Escenario A de CBWeb3 implementa este modelo y ha sido probado de extremo a extremo.
+La relación bilateral entre un banco doméstico y su banco corresponsal se replica en infraestructura tokenizada. Mediante HTLC, dentro del modelo técnico probado, ambas transiciones de estado se completan o se aplica la expiración/reversión. El Escenario A implementa y ejercitó este flujo en el sandbox. La descarga definitiva de las obligaciones jurídicas debe establecerse separadamente en cada jurisdicción y acuerdo de participación.
 
 *Ventajas:* Construye sobre relaciones existentes. Sin necesidad de infraestructura regional compartida. Despliegue bilateral, corredor por corredor.
 
@@ -572,9 +610,9 @@ Dos bancos centrales establecen un acuerdo de liquidación bilateral directo, om
 
 **Modelo 3 — Plataforma Regional Compartida**
 
-Los países participantes se conectan a un único hub de liquidación multilateral con creación de mercado automatizada. El Escenario B de CBWeb3 implementa este modelo mediante un algoritmo AMM.
+En este modelo, los países participantes se conectarían a un hub multilateral con liquidez agrupada y creación de mercado automatizada. El Escenario B proporciona un prototipo técnico experimental; todavía no proporciona un marco jurídico multilateral aprobado, un acuerdo productivo de liquidez ni un servicio operativo listo para producción.
 
-*Ventajas:* Máxima escalabilidad. Uso más eficiente de la liquidez. Nuevos participantes se incorporan con conectividad inmediata con todos los miembros.
+*Ventajas potenciales por validar:* Una topología multilateral podría evitar N×(N-1)/2 integraciones técnicas bilaterales. La liquidez agrupada podría reducir el prefondeo en algunos corredores si se aporta liquidez suficiente y con precio adecuado. La conectividad y el acceso a liquidez de nuevos participantes seguirían sujetos a onboarding, acuerdos legales, capacidad y gobernanza. Son hipótesis a medir, no resultados productivos demostrados.
 
 *Desventajas:* Mayor requerimiento de coordinación multilateral. Riesgo sistémico concentrado en el hub. Los tipos de cambio AMM pueden desviarse de los precios de mercado para pares de divisas poco líquidos.
 
@@ -590,7 +628,7 @@ En este modelo, los DCV de los países participantes actúan como infraestructur
 
 *Requerimientos:* Autorización del banco central para cada DCV; acuerdo formal sobre asignación de responsabilidades; estándares de conectividad y mensajería comunes entre DCV; supervisión coordinada entre el banco central y el regulador de valores.
 
-*Más adecuado para:* El corredor Colombia-Chile-Perú, dada la integración Nuam entre bolsas, CCP y DCV en estos tres mercados, es el candidato más inmediato para este modelo.
+*Candidato para evaluación:* Las jurisdicciones donde los DCV ya participan en procesos de integración regional. La integración Colombia–Chile–Perú de Nuam ofrece un contexto institucional relevante para estudiar, pero la evidencia CBWeb3 de 2026 demuestra conectividad y participación en pruebas, no autorización de bancos centrales, acceso a cuentas de liquidación, un modelo de finalidad transfronteriza ni la selección del corredor para un piloto con valor real.
 
 **Coexistencia en la práctica.** Estos cuatro modelos no son mutuamente excluyentes y la arquitectura regional probablemente verá los cuatro en uso simultáneo: corresponsalía mejorada para corredores con relaciones comerciales existentes, corredores bilaterales directos para los pares de mayor volumen, una plataforma regional compartida como columna vertebral multilateral, e interconexión de DCV para flujos institucionales de mercados de capitales.
 
@@ -606,9 +644,9 @@ El desafío de gestión de liquidez en un sistema de liquidación tokenizado mul
 
 **Mecanismo 3 — Liquidez Agrupada con AMM** (Escenario B): Más eficiente en capital, pero los tipos de cambio algorítmicos pueden desviarse de precios de mercado para pares poco líquidos. La gobernanza del pool requiere un diseño institucional cuidadoso.
 
-**Un enfoque adicional para reducir los requerimientos de pre-fondeo** es aprovechar las IMF regionales existentes —incluyendo DCV interconectados— como mecanismos de coordinación de liquidez para los participantes autorizados. Bajo este esquema, los DCV pueden proporcionar visibilidad consolidada de posiciones entre participantes de distintas jurisdicciones, facilitar procesos de reconciliación intradía y actuar como puntos de conexión operativa. Este enfoque puede mejorar la eficiencia en el uso de la liquidez transfronteriza y reducir la necesidad de mantener múltiples saldos ociosos en distintos mercados simultáneamente.
+**Un enfoque candidato de coordinación mediante IMF** consiste en evaluar si las IMF regionales —incluyendo DCV interconectados— pueden proporcionar visibilidad consolidada, reconciliación intradía y conectividad operacional. Estas capacidades no aportan por sí mismas crédito, colateral o liquidez y, por tanto, no reducen automáticamente el prefondeo. Cualquier beneficio debe demostrarse a través del acuerdo de fondeo y medirse contra la línea base existente.
 
-**Enfoque recomendado.** Para la fase inicial, se recomiendan los saldos bilaterales pre-fondados. La transición al AMM resulta atractiva a medida que la red crece, pero solo después de que el marco de gobernanza esté establecido y el algoritmo validado en condiciones equivalentes a producción.
+**Secuencia candidata para evaluación.** Los saldos bilaterales pre-fondados pueden ser el punto de partida más simple en sandbox y reducen el riesgo de fondos insuficientes, pero no eliminan riesgos jurídicos, operativos, de contraparte o reconciliación. La liquidez AMM debe considerarse solo después de establecer gobernanza y obtener evidencia satisfactoria de estrés, precios, liquidez, privacidad y recuperación. Las líneas de crédito intradía requieren autoridad crediticia, límites, colateral y reglas de asignación de pérdidas.
 
 ---
 
@@ -628,15 +666,16 @@ El desafío de gestión de liquidez en un sistema de liquidación tokenizado mul
 
 ## 11. Reflexiones Finales: Un Camino Gradual y Coordinado hacia Adelante
 
-Los bancos centrales y las autoridades financieras de ALC tienen tanto la motivación como los medios para actuar sobre el tCeBM. El camino hacia adelante no requiere que todos los países avancen al mismo ritmo ni plena certeza legal antes de dar el primer paso.
+La evidencia de 2026 respalda continuar con experimentación controlada, no una decisión universal de desplegar. CBWeb3 ofrece una implementación de referencia y un flujo de interoperabilidad probado bajo condiciones acotadas de sandbox. Todavía no constituye un servicio productivo, no establece finalidad jurídica, no está integrado con LBTR productivos y no cuenta con un marco multinacional aprobado de responsabilidad ni con un modelo operativo sostenible. Cada autoridad debe avanzar solo cuando el problema medido, las alternativas disponibles y su tolerancia al riesgo justifiquen la siguiente etapa.
 
 **Hoja de Ruta de Acción Resumida**
 
-Las transiciones de fase están condicionadas a decisiones explícitas de avance o pausa (go/no-go) para asegurar que el escalamiento ocurra sobre la base de evidencia, no de inercia.
+Los rangos de meses son bandas indicativas de planificación, no compromisos. Cada transición exige una decisión responsable de `avance`, `avance condicionado` o `no avance`, sustentada en evidencia.
 
 *Fase 1 — Preparación Legal e Institucional (Meses 1–3)*
 
 - Realizar evaluación legal interna con la lista de verificación de cinco dominios (Sección 4)
+- Identificar brechas y determinar si requieren opiniones legales, guía regulatoria o cambios legislativos
 - Designar un líder de proyecto interno y establecer un grupo de trabajo multifuncional (legal, tecnología, política monetaria)
 - Iniciar contacto con el Grupo de Trabajo CBWeb3
 - Realizar modelado de amenazas y revisión inicial de arquitectura de seguridad
@@ -650,25 +689,30 @@ Las transiciones de fase están condicionadas a decisiones explícitas de avance
 - Encargar validación legal de acuerdos de participación, asignación de responsabilidades y ejecutabilidad de contratos inteligentes bajo la ley aplicable
 - Comenzar diseño del modelo económico: ¿cómo se asignarán los costos de liquidez entre participantes? ¿Qué estructuras de incentivos apoyan la participación activa?
 - Establecer el marco de medición de beneficios respecto a alternativas existentes (LBTR, corresponsalía bancaria, modernización ISO 20022)
+- Documentar el modelo operativo: costos de operación y soporte 24/7, capacidad, renovación de infraestructura, política de tarifas, volumen esperado y punto de equilibrio
+- Comparar CBWeb3 con modernización no tokenizada de LBTR/APIs, enfoques basados en SWIFT y rails privados antes de atribuir beneficios incrementales a la tokenización
 
 *Fase 3 — Piloto de Grupo Cerrado (Meses 6–12)*
 
 - Ejecutar el primer conjunto de transacciones de liquidación (interbancaria doméstica o a través de IMF, según corresponda) en el entorno del grupo cerrado
 - Realizar pruebas de resiliencia operacional y ciberseguridad ante escenarios de estrés definidos
+- Ejercitar rutas negativas: expiraciones, reversión, confirmaciones atascadas, pares no disponibles, reconciliación de emisiones pendientes y recuperación sin emisión duplicada
 - Completar la evaluación post-piloto y compartir hallazgos con el Grupo de Trabajo CBWeb3
 - Medir resultados contra el marco de medición de beneficios establecido en la Fase 2
 - Establecer el marco de gobernanza del piloto: ¿quién decide las actualizaciones de protocolo? ¿Cómo se resuelven las disputas?
 - Iniciar preparación legal para uso transfronterizo
 - Decisión formal de avance o pausa para la Fase 4, basada en evidencia documentada de los resultados del piloto
+- Tratar el límite observado de tres bancos centrales por lote como restricción del entorno de pruebas de 2026 y producir un plan medido de capacidad y escalamiento
 
 *Fase 4 — Conectividad Transfronteriza (Meses 12–24)*
 
 - Seleccionar el modelo de liquidación transfronteriza apropiado (Sección 8)
-- Establecer conectividad a través del hub CBWeb3
+- Establecer conectividad bilateral o multilateral en sandbox según el modelo seleccionado; la participación mediante hub queda condicionada al cierre de las brechas de madurez del Escenario B
 - Implementar el plan de transición de sandbox a valor real, incluyendo auditoría independiente de resultados del piloto, determinación de la ley aplicable para disputas multi-país, y plan de contingencia ante falla del hub o desconexión de un banco central con obligaciones activas pendientes
+- Antes de cualquier prueba con valor real, aprobar custodia de llaves, alta disponibilidad, respaldo y recuperación, monitoreo funcional, runbooks de incidentes, reconciliación con LBTR/sistemas externos, notificación a participantes y asignación de responsabilidades y pérdidas
 - Participar en el marco de gobernanza regional y contribuir a la evolución de la infraestructura CBWeb3 como Bien Público Digital (BPD)
 
-Los bancos centrales que comiencen este proceso ahora estarán mejor posicionados para dar forma a la arquitectura regional. La iniciativa CBWeb3 es una invitación a participar en la construcción de infraestructura compartida para un futuro financiero regional que sirva a las prioridades de América Latina y el Caribe.
+El siguiente paso apropiado puede ser más trabajo de sandbox, un caso de uso más acotado, modernizar infraestructura existente o decidir no avanzar. CBWeb3 ofrece evidencia y componentes reutilizables para esa decisión; no debe predeterminar su resultado.
 
 ---
 
@@ -689,9 +733,32 @@ El siguiente registro identifica las principales categorías de riesgo asociadas
 | **Riesgo reputacional** | Daño a la percepción pública si el piloto falla o produce resultados adversos | Medio | Despliegue controlado; estrategia de comunicación clara; criterios de salida predefinidos |
 | **Aceleración de la dolarización digital** | Si el diseño del tCeBM no es competitivo, la adopción de stablecoins puede acelerarse en lugar de reducirse | Medio-Alto | Análisis comparativo de diseño frente a stablecoins en USD; modelo de precios que no perjudique instrumentos en moneda local |
 | **Incidentes de ciberseguridad** | Ataques a infraestructura de nodos, sistemas de gestión de claves o canales de comunicación | Alto | Cumplimiento de estándares de seguridad (ISO 27001 o equivalente); auditorías de seguridad periódicas; protocolos de respuesta a incidentes |
-| **Desconexión del BC con obligaciones pendientes** | Un banco central desconectándose del hub mientras hay obligaciones de liquidación pendientes | Alto | Marco legal para desconexión ordenada; requisitos de colateral pre-fondado; protocolo de finalización automática de liquidación |
+| **Desconexión del BC con obligaciones pendientes** | Un banco central desconectándose del hub mientras hay obligaciones de liquidación pendientes | Alto | Marco legal para desconexión ordenada; colateral pre-fondado; proceso probado de expiración/reversión; definir y aprobar el tratamiento y prioridad de obligaciones pendientes antes del uso con valor real |
+| **Operaciones pendientes silenciosas y reconciliación** | Los saldos de reservas pueden cambiar mientras la emisión o confirmación de privacidad permanece pendiente por un periodo prolongado | Alto | Estado pendiente explícito; límites y alertas por antigüedad de cola; reconciliación por transacción; runbook seguro de no reemisión; notificación y confirmación de participantes |
+| **Señales de salud falsamente positivas** | Puertos o contenedores aparecen disponibles aunque identidad, privacidad o confirmación entre instituciones no funcionen | Alto | Pruebas funcionales de preparación; controles entre pares; transacciones sintéticas extremo a extremo; alertas por agotamiento de conexiones y confirmaciones atascadas |
+| **Desalineación de acceso y roles** | Las reglas de agente de liquidación, custodio, corresponsal o tenencia por no residentes son ambiguas o no se aplican técnicamente | Alto | Matriz aprobada de roles y acceso; aplicar reglas de no residentes en código y pruebas de conformidad; alinear implementación y acuerdos de participación |
+| **Gobernanza de fuente FX y parámetros** | Fuentes manuales o no gobernadas de tipo de cambio pueden producir términos inconsistentes o manipulables | Medio-Alto | Fuente externa aprobada o proceso de oráculo controlado; controles de vigencia y desviación; procedimientos de contingencia y disputa; cambios de parámetros gobernados |
+| **Integración con LBTR y registros externos** | Los saldos tokenizados del sandbox no están reconciliados con cuentas de reservas o LBTR productivos | Alto | Definir el registro autoritativo; diseño de adaptadores y reconciliación; reglas de falla y reversión; pruebas conjuntas con operaciones del banco central |
+| **Brecha de rendimiento y capacidad** | El throughput, cupos de participantes u operaciones de privacidad de prueba pueden no cumplir volúmenes o niveles de servicio productivos | Alto | Evidencia de rendimiento versionada; estrés realista; modelo de capacidad; plan de escalamiento; SLO productivos y límites de admisión |
+| **Brecha de gobernanza de evidencia y UAT** | Una entrega técnica o demostración exitosa puede confundirse con aceptación institucional o autorización productiva | Medio-Alto | Paquete de evidencia versionado; alcance y aprobación UAT por participantes; etiquetas explícitas de madurez; decisión independiente de autoridades responsables |
 
 ---
+
+## 13. Evidencia y lecciones del sandbox/UAT 2026
+
+La evidencia disponible de las pruebas con participantes en 2026 cambia la base sobre la cual debe discutirse CBWeb3. Lleva al Escenario A más allá de un diseño puramente conceptual y, al mismo tiempo, demuestra por qué un flujo técnico exitoso es solo una parte de la preparación institucional.
+
+> **Nota de evidencia.** Esta sección sintetiza retroalimentación del BCRP del 7 de octubre de 2026, retroalimentación del BCCR del 30 de septiembre de 2026, un registro interno de la prueba conjunta Costa Rica–Perú, notas de coordinación DPGWG del 2 de octubre de 2026, revisiones de entregables de plataforma y la revisión del incidente de soporte del 6 de noviembre de 2026. Varias son fuentes internas del proyecto y no fuentes públicas ni auditadas independientemente; su publicación exige confirmación de las instituciones responsables y eliminación de cualquier detalle operativo restringido.
+
+**Qué se observó.** Durante el primer lote de pruebas, el Banco Central de Reserva del Perú reportó haber completado en el sandbox el flujo PvP transfronterizo del Escenario A, incluyendo onboarding, emisión, tokenización de reservas, acuerdo FX, bloqueo HTLC, liquidación e interoperabilidad entre redes participantes. El Banco Central de Costa Rica indicó que el ejercicio permitió comprender de forma práctica los roles y el flujo transfronterizo. Se registró como exitoso un PvP Costa Rica–Perú operado por participantes. Estos resultados evidencian que el flujo del Escenario A puede operarse de extremo a extremo bajo la configuración probada.
+
+**Qué aprendieron los participantes.** Las mayores fricciones de adopción incluyeron revisión interna de seguridad, aprovisionamiento de VPN y máquinas virtuales, permisos, credenciales, preparación del entorno y coordinación entre instituciones. Se solicitó aclarar los roles de agente de liquidación, custodio y corresponsal; las reglas para tenencia de tCeBM por no residentes; límites de saldo, remuneración, convertibilidad y redención; gobernanza de datos cambiarios; lineamientos KYC; fondeo e integración con LBTR; y alcance y recursos de una siguiente fase. BCCR también pidió escenarios de falla y excepción, mayor interacción entre participantes y una distinción clara entre capacidades de laboratorio y requisitos productivos.
+
+**Evidencia operacional derivada de una falla.** Un incidente posterior en el entorno de homologación de Chile para el Escenario A mostró que la conectividad técnica no equivale a preparación funcional. Cinco intentos de tokenización por CLP 1.840.000 quedaron pendientes mientras los saldos de reservas ya habían cambiado. Tras recuperar los nodos afectados, las emisiones en cola se completaron sin reemisión y sin pérdida reportada. Sin embargo, el incidente reveló estados pendientes silenciosos prolongados, monitoreo funcional insuficiente, ausencia de escalamiento por antigüedad de cola y un problema serio de reconciliación. La evidencia disponible del incidente no incluyó un nuevo PvP exitoso posterior a la recuperación.
+
+**Límites de la evidencia.** El registro disponible corresponde a retroalimentación de participantes y evidencia técnica de sandbox. No constituye una aceptación UAT institucional firmada, autorización productiva, prueba de finalidad jurídica, conexión con LBTR productivos ni evidencia de que funcionen todos los corredores y rutas de falla. La etiqueta `platform-v1.0.0` registra una línea base de entrega de software; no modifica esos límites de madurez. El Escenario B continúa siendo un prototipo experimental, según la Sección 8.
+
+**Implicaciones para la siguiente fase.** Las pruebas futuras deben organizarse alrededor de evidencia y no solo de demostraciones. Como mínimo deben incluir flujos bidireccionales y negativos; reconciliación por transacción; monitoreo funcional y transacciones sintéticas extremo a extremo; manejo seguro de emisiones pendientes sin duplicarlas; análisis y notificación de impacto a todos los participantes; medición de rendimiento y capacidad; y revisión formal de resultados por los participantes. Cualquier transición a valor real queda condicionada a finalidad jurídica, integración con LBTR, custodia de llaves, alta disponibilidad, respaldo y recuperación, revisión independiente de seguridad, economía operativa y una asignación aprobada de responsabilidades y pérdidas.
 
 ---
 
