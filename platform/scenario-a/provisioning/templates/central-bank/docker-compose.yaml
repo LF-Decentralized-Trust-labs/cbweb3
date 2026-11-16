@@ -32,6 +32,9 @@
 #                         TK-5 always needs this value to construct the join bundle enode.
 #                         NONE profile also passes it as --p2p-host.
 #   BESU_LOGGING          Besu log level (default: INFO)
+#   BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS
+#                         Ceiling on concurrent WebSocket RPC connections (default: 256,
+#                         positive integer). Besu's implicit 80 was exhausted in SUP-152.
 #   BESU_HOST_ALLOWLIST   Comma-separated host allowlist for RPC (default: '*' — restrict in prod)
 #   BESU_CORS_ORIGINS     CORS origins for RPC HTTP (default: 'all' — restrict in prod)
 
@@ -162,6 +165,8 @@ services:
       BESU_RPC_PORT_INTERNAL: "8545"
       BESU_WS_PORT_INTERNAL: "8546"
       BESU_LOGGING: ${BESU_LOGGING:-INFO}
+      # Empty when unset; entry.sh owns the default and validates the value.
+      BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS: ${BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS:-}
       BESU_HOST_ALLOWLIST: ${BESU_HOST_ALLOWLIST:-*}
       BESU_CORS_ORIGINS: ${BESU_CORS_ORIGINS:-all}
       BOOTNODE_ENODE: ${BOOTNODE_ENODE:-}

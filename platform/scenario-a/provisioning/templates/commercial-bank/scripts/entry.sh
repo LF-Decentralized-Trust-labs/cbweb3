@@ -17,6 +17,26 @@ BESU_RPC_PORT_INTERNAL="${BESU_RPC_PORT_INTERNAL:-8545}"
 BESU_WS_PORT_INTERNAL="${BESU_WS_PORT_INTERNAL:-8546}"
 BESU_LOGGING="${BESU_LOGGING:-INFO}"
 BOOTNODE_ENODE="${BOOTNODE_ENODE:-}"
+# Ceiling on concurrent JSON-RPC WebSocket connections. Besu's own default is 80,
+# and leaving it implicit is what took the Chile spoke down in SUP-152: leaked
+# connections filled all 80 slots, every new one was refused with "unexpected EOF",
+# Paladin could not open its block listener and never finished starting, and the
+# spoke settled nothing for fifteen days. The value is now explicit and tunable;
+# 256 leaves room above the handful of legitimate clients (Paladin, relay, NOC,
+# services) so a leak is caught by the besu_rpc_active_ws_connection_count gauge
+# well before it becomes an outage. An empty value (compose forwards ${VAR:-})
+# falls back to the default.
+BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS="${BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS:-256}"
+
+# Reject anything but a positive integer here, by name. Passed through, a typo makes
+# Besu fail on option parsing inside a restart loop, and 0 starts a node that refuses
+# every WebSocket client, which is the outage this setting exists to prevent.
+case "${BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS}" in
+    [1-9]*[!0-9]* | [!1-9]*)
+        echo "[entry] ERROR: BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS must be a positive integer, got '${BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS}'"
+        exit 1
+        ;;
+esac
 
 # Build NAT flags based on profile
 # ADR-001 three-profile matrix:
@@ -82,6 +102,7 @@ if [ -n "${BOOTNODE_ENODE}" ]; then
 fi
 
 echo "[entry] NAT profile: ${BESU_NAT_PROFILE} | flags: ${NAT_FLAGS}"
+echo "[entry] WebSocket max active connections: ${BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS}"
 
 # --revert-reason-enabled returns the revert data of a failed call instead of an
 # empty body. Paladin cannot decode what Besu does not send: without the flag a
@@ -109,6 +130,7 @@ exec /opt/besu/bin/besu \
     --rpc-ws-api=ETH,NET,QBFT,ADMIN \
     --rpc-ws-host=0.0.0.0 \
     --rpc-ws-port="${BESU_WS_PORT_INTERNAL}" \
+    --rpc-ws-max-active-connections="${BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS}" \
     --p2p-port="${BESU_P2P_PORT}" \
     --host-allowlist="${BESU_HOST_ALLOWLIST:-*}" \
     --rpc-http-cors-origins="${BESU_CORS_ORIGINS:-all}" \
