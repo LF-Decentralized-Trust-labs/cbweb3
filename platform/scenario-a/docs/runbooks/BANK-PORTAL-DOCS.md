@@ -294,14 +294,25 @@ Fill in the agreement form in two sections:
 
 #### Parties
 
+You choose three parties. The spokes are filled in for you, and the intermediaries are pre-filled under **Advanced**.
+
 | Field | Description |
 |---|---|
-| **Counterparty B Identity** | The Paladin identity of the receiving institution. |
-| **Settlement Agent Identity** | The Paladin identity of the settlement intermediary. |
-| **Custodian Identity** | The Paladin identity of the custodian. |
-| **Beneficiary Identity** | The Paladin identity of the end beneficiary. |
-| **Spoke-A HTLC Receiver** | (Optional) The HTLC receiver identity on the originating spoke. |
-| **Spoke-B HTLC Receiver** | (Optional) The HTLC receiver identity on the counterparty spoke. |
+| **Your Spoke** | Filled in from your bank's identity. Read-only. Asked for only if your bank is not found in the identity roster. |
+| **Counterparty's Spoke** | Filled in from the counterparty you choose. Read-only. |
+| **Counterparty Bank** | The bank you are trading with. Only commercial banks on other spokes are listed. |
+| **Receiver on Your Spoke** | Who receives your payment on your spoke (the HTLC receiver of your leg). Only members of your spoke are listed. Selected automatically when there is only one. |
+| **Receiver on Counterparty's Spoke** | Who receives the counterparty's payment on its spoke (the HTLC receiver of its leg). Defaults to the counterparty bank. |
+
+Under **Advanced** (click **Change** to edit):
+
+| Field | Default |
+|---|---|
+| **Settlement Agent** | Your spoke's central bank. |
+| **Custodian** | The counterparty bank. It must be a member of the counterparty's spoke. |
+| **Beneficiary** | The receiver on the counterparty's spoke. |
+
+Changing the counterparty resets the receiver on its spoke and the custodian to their defaults.
 
 #### Trade Terms
 

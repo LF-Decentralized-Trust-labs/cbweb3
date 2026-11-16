@@ -21,9 +21,17 @@ import {
 } from "@cbweb3/ui";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import {
+  centralBankOfSpoke,
+  counterpartyOptions,
+  ownIdentity,
+  spokeMembers,
+  spokeOfIdentity,
+} from "../features/fx/proposal-parties";
 import { spokeIdsFromRoster } from "../features/fx/spoke-roster";
 import { displayToBase } from "../types";
 import { usePaymentStore } from "../stores";
+import { useAuthStore } from "../stores/auth.store";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
 import { useIdentityStore } from "../stores/identity.store";
 
@@ -92,6 +100,7 @@ export function AgreementProposalPage() {
   const identityStatus = useIdentityStore((s) => s.status);
   const identityError = useIdentityStore((s) => s.error);
   const rosterConfigured = useIdentityStore((s) => s.configured);
+  const profile = useAuthStore((s) => s.profile);
 
   useEffect(() => {
     void fetchIdentities();
@@ -110,14 +119,55 @@ export function AgreementProposalPage() {
   // spoke id from the bank id — see features/fx/spoke-roster.ts.
   const spokes = useMemo(() => spokeIdsFromRoster(identities), [identities]);
 
-  const [counterpartyB, setCounterpartyB] = useState("");
-  const [settlementAgent, setSettlementAgent] = useState("");
-  const [custodian, setCustodian] = useState("");
-  const [beneficiary, setBeneficiary] = useState("");
-  const [sourceSpokeId, setSourceSpokeId] = useState("");
-  const [destSpokeId, setDestSpokeId] = useState("");
-  const [sourceReceiver, setSourceReceiver] = useState("");
-  const [destReceiver, setDestReceiver] = useState("");
+  // Only three parties are asked for; the rest are derived from who is proposing and to whom
+  // (features/fx/proposal-parties.ts). A derived value can still be overridden, and an override
+  // is kept as its own state so the default keeps following its source until then.
+  const [counterpartyB, setCounterpartyBValue] = useState("");
+  const [sourceReceiverChoice, setSourceReceiver] = useState("");
+  const [destReceiverOverride, setDestReceiver] = useState<string | null>(null);
+  const [settlementAgentOverride, setSettlementAgent] = useState<string | null>(null);
+  const [custodianOverride, setCustodian] = useState<string | null>(null);
+  const [beneficiaryOverride, setBeneficiary] = useState<string | null>(null);
+  const [sourceSpokeFallback, setSourceSpokeFallback] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // The proposer's own identity and spoke. When the roster does not let them be told apart
+  // (no bank id in the profile, or the bank is not in the roster) the spoke is asked for.
+  const me = useMemo(() => ownIdentity(identities, profile?.bankId ?? ""), [identities, profile]);
+  const ownSpoke = useMemo(() => (me ? spokeOfIdentity(me, spokes) : null), [me, spokes]);
+  const sourceSpokeId = ownSpoke ?? sourceSpokeFallback;
+  const destSpokeId = useMemo(
+    () => (counterpartyB ? spokeOfIdentity(counterpartyB, spokes) ?? "" : ""),
+    [counterpartyB, spokes],
+  );
+
+  const counterparties = useMemo(
+    () => counterpartyOptions(identities, spokes, sourceSpokeId || null),
+    [identities, spokes, sourceSpokeId],
+  );
+  const sourceReceivers = useMemo(
+    () => spokeMembers(identities, spokes, sourceSpokeId || null, me),
+    [identities, spokes, sourceSpokeId, me],
+  );
+  const destReceivers = useMemo(
+    () => spokeMembers(identities, spokes, destSpokeId || null),
+    [identities, spokes, destSpokeId],
+  );
+
+  // A single candidate is selected for the operator rather than left as a one-option dropdown.
+  const sourceReceiver = sourceReceiverChoice || (sourceReceivers.length === 1 ? sourceReceivers[0] : "");
+  const destReceiver = destReceiverOverride ?? counterpartyB;
+  const settlementAgent = settlementAgentOverride ?? centralBankOfSpoke(sourceSpokeId, identities) ?? "";
+  const custodian = custodianOverride ?? counterpartyB;
+  const beneficiary = beneficiaryOverride ?? destReceiver;
+
+  // The destination receiver and custodian belong to the counterparty's spoke, so an override
+  // chosen for one counterparty must not carry over to another.
+  const setCounterpartyB = (value: string) => {
+    setCounterpartyBValue(value);
+    setDestReceiver(null);
+    setCustodian(null);
+  };
   const [originAmount, setOriginAmount] = useState("");
   const originCurrency = SPOKE_CURRENCY;
   const [counterAmount, setCounterAmount] = useState("");
@@ -151,19 +201,30 @@ export function AgreementProposalPage() {
 
   const validate = () => {
     if (!counterpartyB.trim()) {
-      toast.error("Counterparty identity is required.");
+      toast.error("Counterparty bank is required.");
       return false;
     }
-    if (!settlementAgent.trim()) {
-      toast.error("Settlement agent identity is required.");
+    // The backend refuses a proposal without both spokes and both receivers. They used to be
+    // optional here and the refusal only arrived after the confirmation step.
+    if (!sourceSpokeId) {
+      toast.error("Your spoke could not be determined. Select it under Parties.");
       return false;
     }
-    if (!custodian.trim()) {
-      toast.error("Custodian identity is required.");
+    if (!destSpokeId) {
+      toast.error("The counterparty's spoke could not be determined. Choose another counterparty.");
       return false;
     }
-    if (!beneficiary.trim()) {
-      toast.error("Beneficiary identity is required.");
+    if (!sourceReceiver.trim()) {
+      toast.error("Receiver on your spoke is required.");
+      return false;
+    }
+    if (!destReceiver.trim()) {
+      toast.error("Receiver on the counterparty's spoke is required.");
+      return false;
+    }
+    if (!settlementAgent.trim() || !custodian.trim() || !beneficiary.trim()) {
+      setShowAdvanced(true);
+      toast.error("Settlement agent, custodian and beneficiary are required. Review them under Advanced.");
       return false;
     }
     if (!parsedOrigin.ok) {
@@ -213,10 +274,10 @@ export function AgreementProposalPage() {
         counter_currency: counterCurrency,
         rate: rate,
         expiry_date: Math.floor(new Date(expiryDateTime).getTime() / 1000),
-        source_spoke_id: sourceSpokeId.trim() || undefined,
-        dest_spoke_id: destSpokeId.trim() || undefined,
-        source_receiver: sourceReceiver.trim() || undefined,
-        dest_receiver: destReceiver.trim() || undefined,
+        source_spoke_id: sourceSpokeId,
+        dest_spoke_id: destSpokeId,
+        source_receiver: sourceReceiver.trim(),
+        dest_receiver: destReceiver.trim(),
       });
       toast.success("Trade agreement proposed successfully.");
       navigate(`/agreements/${result.trade_id}`);
@@ -254,40 +315,78 @@ export function AgreementProposalPage() {
       <Card>
         <CardHeader>
           <CardTitle>Parties</CardTitle>
-          <CardDescription>Select the counterparty and intermediary identities.</CardDescription>
+          <CardDescription>
+            Choose the counterparty and who receives each leg. The spokes and intermediaries are filled in for you.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="counterparty-b">Counterparty B Identity</Label>
-            <OptionSelect id="counterparty-b" value={counterpartyB} onChange={setCounterpartyB} options={identities} placeholder="Select a Paladin identity" />
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="source-spoke-id">Your Spoke</Label>
+              {ownSpoke ? (
+                <Input id="source-spoke-id" value={ownSpoke} readOnly disabled />
+              ) : (
+                <>
+                  <OptionSelect id="source-spoke-id" value={sourceSpokeFallback} onChange={setSourceSpokeFallback} options={spokes} placeholder="Select your spoke" />
+                  <p className="text-xs text-muted-foreground">Your bank was not found in the identity roster, so your spoke cannot be filled in.</p>
+                </>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="dest-spoke-id">Counterparty&apos;s Spoke</Label>
+              <Input id="dest-spoke-id" value={destSpokeId || "Select a counterparty"} readOnly disabled />
+            </div>
           </div>
+
           <div className="space-y-2">
-            <Label htmlFor="settlement-agent">Settlement Agent Identity</Label>
-            <OptionSelect id="settlement-agent" value={settlementAgent} onChange={setSettlementAgent} options={identities} placeholder="Select a Paladin identity" />
+            <Label htmlFor="counterparty-b">Counterparty Bank</Label>
+            <OptionSelect id="counterparty-b" value={counterpartyB} onChange={setCounterpartyB} options={counterparties} placeholder="Select the bank you are trading with" />
+            <p className="text-xs text-muted-foreground">Banks on other spokes.</p>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="custodian">Custodian Identity</Label>
-            <OptionSelect id="custodian" value={custodian} onChange={setCustodian} options={identities} placeholder="Select a Paladin identity" />
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="source-receiver">Receiver on Your Spoke</Label>
+              <OptionSelect id="source-receiver" value={sourceReceiver} onChange={setSourceReceiver} options={sourceReceivers} placeholder="Who receives your payment" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="dest-receiver">Receiver on Counterparty&apos;s Spoke</Label>
+              <OptionSelect id="dest-receiver" value={destReceiver} onChange={setDestReceiver} options={destReceivers} placeholder="Select a counterparty first" />
+              <p className="text-xs text-muted-foreground">Defaults to the counterparty bank.</p>
+            </div>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="beneficiary">Beneficiary Identity</Label>
-            <OptionSelect id="beneficiary" value={beneficiary} onChange={setBeneficiary} options={identities} placeholder="Select a Paladin identity" />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="source-spoke-id">Source Spoke ID</Label>
-            <OptionSelect id="source-spoke-id" value={sourceSpokeId} onChange={setSourceSpokeId} options={spokes} placeholder="Select a spoke" />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="dest-spoke-id">Destination Spoke ID</Label>
-            <OptionSelect id="dest-spoke-id" value={destSpokeId} onChange={setDestSpokeId} options={spokes} placeholder="Select a spoke" />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="source-receiver">Source Receiver</Label>
-            <OptionSelect id="source-receiver" value={sourceReceiver} onChange={setSourceReceiver} options={identities} placeholder="Select a Paladin identity" />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="dest-receiver">Destination Receiver</Label>
-            <OptionSelect id="dest-receiver" value={destReceiver} onChange={setDestReceiver} options={identities} placeholder="Select a Paladin identity" />
+
+          <div className="space-y-3 rounded-md border p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium">Advanced</p>
+                <p className="text-xs text-muted-foreground">
+                  Settlement agent: {settlementAgent || "—"} · Custodian: {custodian || "—"} · Beneficiary: {beneficiary || "—"}
+                </p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => setShowAdvanced((v) => !v)}>
+                {showAdvanced ? "Hide" : "Change"}
+              </Button>
+            </div>
+            {showAdvanced ? (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="settlement-agent">Settlement Agent</Label>
+                  <OptionSelect id="settlement-agent" value={settlementAgent} onChange={setSettlementAgent} options={identities} placeholder="Select a Paladin identity" />
+                  <p className="text-xs text-muted-foreground">Defaults to your spoke&apos;s central bank.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="custodian">Custodian</Label>
+                  <OptionSelect id="custodian" value={custodian} onChange={setCustodian} options={destReceivers} placeholder="Select a counterparty first" />
+                  <p className="text-xs text-muted-foreground">Defaults to the counterparty bank. Must be on the counterparty&apos;s spoke.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="beneficiary">Beneficiary</Label>
+                  <OptionSelect id="beneficiary" value={beneficiary} onChange={setBeneficiary} options={identities} placeholder="Select a Paladin identity" />
+                  <p className="text-xs text-muted-foreground">Defaults to the receiver on the counterparty&apos;s spoke.</p>
+                </div>
+              </div>
+            ) : null}
           </div>
         </CardContent>
       </Card>
@@ -390,13 +489,12 @@ export function AgreementProposalPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm">Counterparty: {counterpartyB}</p>
+            <p className="text-sm">Spokes: {sourceSpokeId} → {destSpokeId}</p>
+            <p className="text-sm">Receiver on your spoke: {sourceReceiver}</p>
+            <p className="text-sm">Receiver on counterparty&apos;s spoke: {destReceiver}</p>
             <p className="text-sm">Settlement Agent: {settlementAgent}</p>
             <p className="text-sm">Custodian: {custodian}</p>
             <p className="text-sm">Beneficiary: {beneficiary}</p>
-            <p className="text-sm">Source Spoke: {sourceSpokeId || "—"}</p>
-            <p className="text-sm">Destination Spoke: {destSpokeId || "—"}</p>
-            <p className="text-sm">Source Receiver: {sourceReceiver || "—"}</p>
-            <p className="text-sm">Destination Receiver: {destReceiver || "—"}</p>
             <p className="text-sm">
               Send: {originDisplay} {originCurrency}
             </p>
