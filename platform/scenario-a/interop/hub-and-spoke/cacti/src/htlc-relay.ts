@@ -732,7 +732,13 @@ export class HtlcRelay {
           this.log.warn(`[${spoke.id}] reconnecting Besu connector after ${failures} consecutive failures`);
           try {
             const fresh = await this.connectorFactory(spoke);
-            try { await connector.shutdown(); } catch { /* best-effort */ }
+            // Closing the old connector is what releases its Besu WebSocket slot. A failed close
+            // is not fatal to the rebuild, but it is a leaked slot and must be visible.
+            try {
+              await connector.shutdown();
+            } catch (closeErr) {
+              this.log.warn(`[${spoke.id}] closing the replaced Besu connector failed, its WebSocket may stay open on Besu: ${String(closeErr)}`);
+            }
             connector = fresh;
             this.cactiConnectors.set(spoke.id, fresh);
             failures = 0;

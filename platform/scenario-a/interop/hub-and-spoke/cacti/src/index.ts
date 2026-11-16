@@ -24,6 +24,7 @@ import express, { Request, Response } from "express";
 import { randomUUID, timingSafeEqual } from "crypto";
 import { PluginRegistry } from "@hyperledger/cactus-core";
 import { PluginLedgerConnectorBesu } from "@hyperledger/cactus-plugin-ledger-connector-besu";
+import { ClosingBesuConnector } from "./closing-besu-connector";
 import { config } from "./config";
 import { HtlcRelay, SpokeDep } from "./htlc-relay";
 import { RelayStore } from "./relay-store";
@@ -87,7 +88,8 @@ async function main(): Promise<void> {
   const pluginRegistry = new PluginRegistry();
   const connectors = new Map<string, PluginLedgerConnectorBesu>();
   const connectorFactory = async (spoke: SpokeDep): Promise<PluginLedgerConnectorBesu> => {
-    const connector = new PluginLedgerConnectorBesu({
+    // ClosingBesuConnector: the library shutdown() leaves the WebSocket open on Besu.
+    const connector = new ClosingBesuConnector({
       instanceId: `besu-connector-${spoke.id}-${randomUUID()}`,
       rpcApiHttpHost: spoke.besuRpc,
       rpcApiWsHost: spoke.besuWs,
@@ -346,8 +348,10 @@ async function main(): Promise<void> {
   const shutdown = (): void => {
     console.log("Shutting down…");
     abortController.abort();
-    for (const connector of connectors.values()) {
-      connector.shutdown().catch(() => {});
+    for (const [spokeId, connector] of connectors) {
+      connector.shutdown().catch((err) => {
+        console.warn(`[${spokeId}] closing the Besu connector on exit failed: ${String(err)}`);
+      });
     }
     httpServer.close(() => process.exit(0));
   };
