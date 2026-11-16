@@ -24,8 +24,10 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
 import {
+  baseToExactDisplay,
   currencyFromTokenSymbol,
   displayToBase,
+  formatBaseUnits,
 } from "../types";
 import { useHtlcStore, usePaymentStore } from "../stores";
 
@@ -111,6 +113,11 @@ export function HTLCNewPage() {
 
   const selectedAgreement = agreements.find((a) => a.trade_id === selectedAgreementId) ?? null;
 
+  // The agreement's amounts arrive in BASE units, while the amount fields hold what an operator
+  // would type and are scaled with displayToBase on submit. Pre-filling the raw value scaled it
+  // twice: an agreement of 1000000 at 2 decimals locked 100000000, and the orchestrator refused
+  // the lock as not matching the agreement. baseToExactDisplay keeps full precision, so the
+  // round trip through displayToBase gives back exactly the agreement's figure.
   function applyPrefill(tradeId: string, role: RoleOption) {
     const ag = agreements.find((a) => a.trade_id === tradeId);
     if (!ag) return;
@@ -118,16 +125,25 @@ export function HTLCNewPage() {
       setMode("lock");
       setAgreementId(tradeId);
       setLockReceiver(ag.source_receiver ?? "");
-      setLockAmount(ag.origin_amount);
+      setLockAmount(baseToExactDisplay(ag.origin_amount, tCeBMDecimals));
       setPrefillSource(tradeId);
     } else {
       setMode("lockWithHash");
       setHashAgreementId(tradeId);
       setHashReceiver(ag.dest_receiver ?? "");
-      setHashAmount(ag.counter_amount);
+      setHashAmount(baseToExactDisplay(ag.counter_amount, tCeBMDecimals));
       setPrefillSource(tradeId);
     }
   }
+
+  // The token decimals load with the balance and default to 2 until then. A pre-fill made before
+  // they arrive would be converted with the wrong scale and submitted with the right one, so it
+  // is redone once they change.
+  useEffect(() => {
+    if (prefillSource && selectedRole) applyPrefill(prefillSource, selectedRole);
+    // Only the decimals should retrigger this; the rest is read at that moment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tCeBMDecimals]);
 
   function onSelectAgreement(tradeId: string) {
     setSelectedAgreementId(tradeId);
@@ -283,7 +299,7 @@ export function HTLCNewPage() {
               <SelectContent>
                 {agreements.map((a) => (
                   <SelectItem key={a.trade_id} value={a.trade_id}>
-                    {a.trade_id.slice(0, 8)}… — {a.origin_amount} {a.origin_currency} ↔ {a.counter_amount} {a.counter_currency}
+                    {a.trade_id.slice(0, 8)}… — {formatBaseUnits(a.origin_amount, tCeBMDecimals)} {a.origin_currency} ↔ {formatBaseUnits(a.counter_amount, tCeBMDecimals)} {a.counter_currency}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -317,8 +333,8 @@ export function HTLCNewPage() {
               {selectedRole ? (
                 <p className="text-xs text-muted-foreground">
                   {selectedRole === "originator"
-                    ? `Pre-filling: receiver = ${selectedAgreement.source_receiver ?? "—"}, amount = ${selectedAgreement.origin_amount} ${selectedAgreement.origin_currency}`
-                    : `Pre-filling: receiver = ${selectedAgreement.dest_receiver ?? "—"}, amount = ${selectedAgreement.counter_amount} ${selectedAgreement.counter_currency}`}
+                    ? `Pre-filling: receiver = ${selectedAgreement.source_receiver ?? "—"}, amount = ${baseToExactDisplay(selectedAgreement.origin_amount, tCeBMDecimals)} ${selectedAgreement.origin_currency}`
+                    : `Pre-filling: receiver = ${selectedAgreement.dest_receiver ?? "—"}, amount = ${baseToExactDisplay(selectedAgreement.counter_amount, tCeBMDecimals)} ${selectedAgreement.counter_currency}`}
                 </p>
               ) : null}
             </div>
