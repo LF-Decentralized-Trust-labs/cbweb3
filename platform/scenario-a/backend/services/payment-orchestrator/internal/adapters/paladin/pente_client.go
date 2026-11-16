@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -40,6 +41,8 @@ type PenteClient struct {
 	identity        string
 	receiptTimeout  time.Duration
 	receiptInterval time.Duration
+	stuckAfter      time.Duration
+	guardTimeout    time.Duration
 	logger          *slog.Logger
 }
 
@@ -56,12 +59,24 @@ type PenteClientConfig struct {
 	// Logger is optional; slog.Default() is used when nil. Party-address resolution
 	// degrades to a placeholder on failure, and that has to be visible somewhere.
 	Logger *slog.Logger
+	// StuckPendingAfter is how long a Pente transaction may stay pending on this node before
+	// the node stops submitting new private transactions. Zero means DefaultStuckPendingAfter.
+	StuckPendingAfter time.Duration
 }
+
+// DefaultStuckPendingAfter is four times the receipt timeout: long enough that a transaction
+// which is merely slow is never mistaken for a stuck one, short enough that a caller retrying
+// after a timeout is stopped before the retries pile up.
+const DefaultStuckPendingAfter = 2 * time.Minute
 
 func NewPenteClient(cfg PenteClientConfig) *PenteClient {
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
+	}
+	stuckAfter := cfg.StuckPendingAfter
+	if stuckAfter <= 0 {
+		stuckAfter = DefaultStuckPendingAfter
 	}
 	return &PenteClient{
 		logger:          logger,
@@ -71,6 +86,8 @@ func NewPenteClient(cfg PenteClientConfig) *PenteClient {
 		httpClient:      &http.Client{Timeout: 30 * time.Second},
 		receiptTimeout:  30 * time.Second,
 		receiptInterval: 1500 * time.Millisecond,
+		stuckAfter:      stuckAfter,
+		guardTimeout:    5 * time.Second,
 	}
 }
 
@@ -239,9 +256,86 @@ func (c *PenteClient) resolveTarget(ctx context.Context) (ports.PenteFXTarget, e
 	return ports.PenteFXTarget{}, fmt.Errorf("missing Pente FX target (group/contract) in context")
 }
 
+// pendingPenteQuery selects this node's oldest pending Pente transaction. The shape follows the
+// Paladin v1.0.0 source: ptx_queryPendingTransactions(query, full), where query is a QueryJSON
+// ("eq"/"sort"/"limit") over the transaction filter fields, which include "domain" and
+// "created", and the result is a plain array of transactions whose "created" is RFC 3339.
+var pendingPenteQuery = map[string]any{
+	"eq":    []map[string]any{{"field": "domain", "value": penteDomain}},
+	"sort":  []string{"created"},
+	"limit": 1,
+}
+
+// checkNoStuckPending refuses a new private submission while this node has a Pente transaction
+// pending for longer than stuckAfter.
+//
+// Paladin v1.0.0 re-assembles a private transaction that cannot complete in a tight loop and
+// offers no way to cancel it (LFDT-Paladin/paladin#1356; fixed only after v1.0.0). In SUP-152
+// two such transactions held every database connection on a commercial bank node and flooded
+// its central bank node once it recovered. Every further submission from that node joins the
+// same queue and makes it worse, so the node stops taking new private work until an operator
+// has dealt with the stuck one.
+//
+// The check is node-wide rather than per privacy group on purpose: the damage of the incident
+// was to the node and its peer, not to one group.
+//
+// Two failure modes are distinguished. A node that does not answer within guardTimeout is the
+// wedged node of the incident, and is refused. A node that answers with a JSON-RPC error
+// rejected the query itself; the guard then cannot judge and steps aside with a WARN rather
+// than refusing every FX transaction because of its own query.
+func (c *PenteClient) checkNoStuckPending(ctx context.Context) error {
+	qctx, cancel := context.WithTimeout(ctx, c.guardTimeout)
+	defer cancel()
+
+	var pending []struct {
+		ID       string `json:"id"`
+		Function string `json:"function"`
+		Created  string `json:"created"`
+	}
+	err := c.rpc(qctx, "ptx_queryPendingTransactions", []any{pendingPenteQuery, false}, &pending)
+	if err != nil {
+		var rerr *rpcError
+		if errors.As(err, &rerr) {
+			c.logger.Warn("stuck-transaction guard skipped: Paladin rejected the pending-transaction query, submitting without it",
+				"error", err.Error())
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("%w: no answer to a pending-transaction query within %s: %v",
+			ports.ErrPrivacyLayerUnavailable, c.guardTimeout, err)
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+
+	oldest := pending[0]
+	created, perr := time.Parse(time.RFC3339Nano, oldest.Created)
+	if perr != nil {
+		c.logger.Warn("stuck-transaction guard skipped: cannot read the pending transaction's creation time",
+			"transaction_id", oldest.ID, "created", oldest.Created, "error", perr.Error())
+		return nil
+	}
+	age := time.Since(created)
+	if age < c.stuckAfter {
+		return nil
+	}
+	c.logger.Error("refusing a new private transaction: a Pente transaction on this node is stuck",
+		"stuck_transaction_id", oldest.ID, "function", oldest.Function,
+		"pending_for", age.Round(time.Second).String(), "threshold", c.stuckAfter.String())
+	return fmt.Errorf("%w: Pente transaction %s has been pending for %s (threshold %s); "+
+		"no new private transaction is submitted from this node until it completes",
+		ports.ErrPrivacyLayerStuck, oldest.ID, age.Round(time.Second), c.stuckAfter)
+}
+
 // sendTx submits a pgroup transaction and waits for its receipt, returning the on-chain
-// transaction hash. It errors if the transaction reverts.
+// transaction hash. It errors if the transaction reverts, if a Pente transaction on this node
+// is stuck (nothing is submitted), and with ErrPrivateTxUnconfirmed if no receipt arrives in time.
 func (c *PenteClient) sendTx(ctx context.Context, target ports.PenteFXTarget, fn map[string]any, input map[string]any) (string, error) {
+	if err := c.checkNoStuckPending(ctx); err != nil {
+		return "", err
+	}
 	params := []any{map[string]any{
 		"domain":   penteDomain,
 		"group":    target.GroupID,
@@ -299,7 +393,13 @@ func (c *PenteClient) waitReceipt(ctx context.Context, txID string) (string, err
 			return "", ctx.Err()
 		case <-time.After(c.receiptInterval):
 			if time.Now().After(deadline) {
-				return "", fmt.Errorf("timed out waiting for pgroup transaction %s receipt", txID)
+				// Not a failure: the transaction is still pending in Paladin and may complete
+				// later (in SUP-152, fifteen days later). Reporting it as failed is what made
+				// callers resubmit under a new trade id and pile up pending transactions.
+				c.logger.Warn("private transaction submitted but not confirmed in time; it is still pending in Paladin",
+					"transaction_id", txID, "waited", c.receiptTimeout.String())
+				return "", fmt.Errorf("%w: pgroup transaction %s has no receipt after %s and is still pending in Paladin; do not resubmit",
+					ports.ErrPrivateTxUnconfirmed, txID, c.receiptTimeout)
 			}
 		}
 	}

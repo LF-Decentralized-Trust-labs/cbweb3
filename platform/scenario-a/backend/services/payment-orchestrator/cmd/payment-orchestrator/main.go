@@ -140,11 +140,22 @@ func main() {
 		if penteURL == "" {
 			log.Fatal("FATAL: PENTE_BASE_URL (or PALADIN_URL) is required when PENTE_ENABLED=true")
 		}
+		// How long a Pente transaction may stay pending on this node before it stops submitting
+		// new private transactions (Paladin v1.0.0 cannot cancel a stuck one; see SUP-152).
+		var stuckAfter time.Duration
+		if v := strings.TrimSpace(os.Getenv("PENTE_STUCK_TX_THRESHOLD")); v != "" {
+			d, err := time.ParseDuration(v)
+			if err != nil || d <= 0 {
+				log.Fatalf("FATAL: PENTE_STUCK_TX_THRESHOLD must be a positive duration such as 2m, got %q", v)
+			}
+			stuckAfter = d
+		}
 		penteClient := paladinAdapter.NewPenteClient(paladinAdapter.PenteClientConfig{
 			BaseURL:            penteURL,
 			FXAgreementAddress: getEnv("FX_AGREEMENT_PENTE_CONTRACT_ADDRESS", os.Getenv("FX_AGREEMENT_ADDRESS")),
 			Identity:           getEnv("PALADIN_IDENTITY", "funded_operator@spoke-a-cb"),
 			Logger:             logger,
+			StuckPendingAfter:  stuckAfter,
 		})
 		pente = penteClient
 		fxAgreementPente = penteClient

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,15 +20,35 @@ import (
 
 // fakePaladin is a programmable Paladin JSON-RPC endpoint for hermetic tests.
 type fakePaladin struct {
+	mu           sync.Mutex
+	methods      []string
 	lastMethod   string
 	sendTxParams map[string]any
 	callParams   map[string]any
 	// programmable responses
 	receiptSuccess bool
 	receiptFailure string
+	noReceipt      bool // ptx_getTransactionFull answers with no receipt yet
 	callResult     json.RawMessage
 	callErr        *rpcError
 	groups         any
+	// ptx_queryPendingTransactions: the pending list, an RPC error, or a delay before answering.
+	pending       any
+	pendingErr    *rpcError
+	pendingDelay  time.Duration
+	pendingParams []json.RawMessage
+}
+
+// called reports whether method was received, safely across the server's goroutines.
+func (f *fakePaladin) called(method string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, m := range f.methods {
+		if m == method {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *fakePaladin) handler(w http.ResponseWriter, r *http.Request) {
@@ -36,17 +57,40 @@ func (f *fakePaladin) handler(w http.ResponseWriter, r *http.Request) {
 		Params []json.RawMessage `json:"params"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
+	f.mu.Lock()
 	f.lastMethod = req.Method
+	f.methods = append(f.methods, req.Method)
+	f.mu.Unlock()
 
 	writeResult := func(result any, rerr *rpcError) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": 1, "result": result, "error": rerr})
 	}
 
 	switch req.Method {
+	case "ptx_queryPendingTransactions":
+		f.mu.Lock()
+		f.pendingParams = req.Params
+		f.mu.Unlock()
+		if f.pendingDelay > 0 {
+			time.Sleep(f.pendingDelay)
+		}
+		if f.pendingErr != nil {
+			writeResult(nil, f.pendingErr)
+			return
+		}
+		pending := f.pending
+		if pending == nil {
+			pending = []any{}
+		}
+		writeResult(pending, nil)
 	case "pgroup_sendTransaction":
 		_ = json.Unmarshal(req.Params[0], &f.sendTxParams)
 		writeResult("tx-uuid-123", nil)
 	case "ptx_getTransactionFull":
+		if f.noReceipt {
+			writeResult(map[string]any{"receipt": nil}, nil)
+			return
+		}
 		writeResult(map[string]any{"receipt": map[string]any{
 			"success": f.receiptSuccess, "failureMessage": f.receiptFailure, "transactionHash": "0xdeadbeef",
 		}}, nil)

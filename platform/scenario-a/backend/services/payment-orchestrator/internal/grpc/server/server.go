@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -1104,6 +1105,29 @@ var decimalString = regexp.MustCompile(`^\d+(\.\d+)?$`)
 // exactly one way to write a given amount.
 var integerString = regexp.MustCompile(`^\d+$`)
 
+// fxChainError maps a failed on-chain FX call to a gRPC status.
+//
+// Three outcomes of a private submission are not "it failed, retry": a stuck Pente transaction
+// on this node made the adapter refuse to submit, Paladin did not answer, or the transaction was
+// submitted and is still pending without a receipt. All three used to surface as Internal, and
+// callers resubmitted under a new trade id, which on Paladin v1.0.0 adds another transaction that
+// cannot complete (SUP-152). FailedPrecondition reaches the portal as 409 and Unavailable as 503;
+// anything else keeps the Internal it always had.
+func (s *paymentOrchestratorService) fxChainError(tradeID, op string, err error) error {
+	switch {
+	case errors.Is(err, ports.ErrPrivacyLayerStuck), errors.Is(err, ports.ErrPrivateTxUnconfirmed):
+		s.logger.Warn("on-chain FX call not completed; do not resubmit until the pending private transaction resolves",
+			"trade_id", tradeID, "operation", op, "error", err.Error())
+		return status.Errorf(codes.FailedPrecondition, "on-chain FX %s: %v", op, err)
+	case errors.Is(err, ports.ErrPrivacyLayerUnavailable):
+		s.logger.Warn("on-chain FX call refused: the privacy layer is not answering",
+			"trade_id", tradeID, "operation", op, "error", err.Error())
+		return status.Errorf(codes.Unavailable, "on-chain FX %s: %v", op, err)
+	default:
+		return status.Errorf(codes.Internal, "on-chain FX %s: %v", op, err)
+	}
+}
+
 func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req *pb.ProposeFXAgreementRequest) (*pb.ProposeFXAgreementResponse, error) {
 	if req.CounterpartyB == "" || req.OriginAmount == "" || req.CounterAmount == "" ||
 		req.OriginCurrency == "" || req.CounterCurrency == "" || req.Rate == "" || req.ExpiryDate == 0 {
@@ -1284,7 +1308,7 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 			txHash, err = fxClient.Propose(fxCtx, params)
 		}
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "on-chain FX propose: %v", err)
+			return nil, s.fxChainError(tradeID, "propose", err)
 		}
 		record.OnChainTxHash = txHash
 	}
@@ -1357,7 +1381,7 @@ func (s *paymentOrchestratorService) AcceptFXAgreement(ctx context.Context, req 
 			txHash, err = fxClient.Accept(fxCtx, tradeIDBytes)
 		}
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "on-chain FX accept: %v", err)
+			return nil, s.fxChainError(req.TradeId, "accept", err)
 		}
 	}
 
@@ -1418,7 +1442,7 @@ func (s *paymentOrchestratorService) RejectFXAgreement(ctx context.Context, req 
 			txHash, err = fxClient.Reject(fxCtx, tradeIDBytes)
 		}
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "on-chain FX reject: %v", err)
+			return nil, s.fxChainError(req.TradeId, "reject", err)
 		}
 	}
 
@@ -1466,7 +1490,7 @@ func (s *paymentOrchestratorService) CancelFXAgreement(ctx context.Context, req 
 		var err error
 		txHash, err = fxClient.Cancel(fxCtx, tradeIDBytes)
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "on-chain FX cancel: %v", err)
+			return nil, s.fxChainError(req.TradeId, "cancel", err)
 		}
 	}
 
@@ -1513,7 +1537,7 @@ func (s *paymentOrchestratorService) SettleFXAgreement(ctx context.Context, req 
 		var err error
 		txHash, err = fxClient.Settle(fxCtx, tradeIDBytes)
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "on-chain FX settle: %v", err)
+			return nil, s.fxChainError(req.TradeId, "settle", err)
 		}
 	}
 

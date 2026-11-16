@@ -2,7 +2,27 @@
 
 package ports
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// Outcomes of a private (Pente) submission that are neither success nor a definitive failure.
+// Callers must not treat them as "failed, retry": each retry of a transaction that is still
+// pending in Paladin creates another pending transaction, which is how one unreachable peer
+// turned into a node-wide outage in SUP-152 (Paladin v1.0.0 cannot cancel a pending private
+// transaction; upstream LFDT-Paladin/paladin#1356).
+var (
+	// ErrPrivacyLayerStuck: this node already has a Pente transaction pending for longer than
+	// the stuck threshold, so no new private transaction is submitted from it.
+	ErrPrivacyLayerStuck = errors.New("a private transaction on this node is stuck")
+	// ErrPrivacyLayerUnavailable: the Paladin node did not answer a pending-transaction query in
+	// time, so it was not asked to take on more work.
+	ErrPrivacyLayerUnavailable = errors.New("the privacy layer did not answer")
+	// ErrPrivateTxUnconfirmed: the transaction was submitted but no receipt arrived in time. It
+	// is still pending in Paladin and may yet complete; resubmitting creates a second one.
+	ErrPrivateTxUnconfirmed = errors.New("private transaction submitted but not confirmed")
+)
 
 // PenteContextRequest carries the minimum business identifiers needed to
 // create or reuse a bilateral private context for an FX agreement.
