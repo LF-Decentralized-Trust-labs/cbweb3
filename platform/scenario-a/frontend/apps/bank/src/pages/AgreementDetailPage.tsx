@@ -13,6 +13,7 @@ import {
 } from "@cbweb3/ui";
 import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { formatAgreementAmount } from "../features/fx/agreement-amounts";
 import { identityBelongsToBank } from "../features/fx/identity";
 import { useAuthStore } from "../stores/auth.store";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
@@ -142,10 +143,10 @@ export function AgreementDetailPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               <p className="text-sm">
-                Send: {agreement.origin_amount} {agreement.origin_currency}
+                Send: {formatAgreementAmount(agreement.origin_amount, agreement.origin_currency)}
               </p>
               <p className="text-sm">
-                Receive: {agreement.counter_amount} {agreement.counter_currency}
+                Receive: {formatAgreementAmount(agreement.counter_amount, agreement.counter_currency)}
               </p>
               <p className="text-sm">Exchange Rate: {agreement.rate}</p>
               <p className="text-sm">Expiry: {new Date(agreement.expiry_date * 1000).toLocaleString()}</p>

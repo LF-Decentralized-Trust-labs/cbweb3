@@ -17,6 +17,7 @@ import {
 } from "@cbweb3/ui";
 import { useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { formatAgreementAmount } from "../features/fx/agreement-amounts";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
 import type { FXAgreementState } from "../types";
 
@@ -90,10 +91,10 @@ export function AgreementInboxPage() {
                   <TableCell className="font-medium">{truncate(a.trade_id)}</TableCell>
                   <TableCell>{truncate(a.originator ?? a.counterparty_b)}</TableCell>
                   <TableCell>
-                    {a.origin_amount} {a.origin_currency}
+                    {formatAgreementAmount(a.origin_amount, a.origin_currency)}
                   </TableCell>
                   <TableCell>
-                    {a.counter_amount} {a.counter_currency}
+                    {formatAgreementAmount(a.counter_amount, a.counter_currency)}
                   </TableCell>
                   <TableCell>{a.rate}</TableCell>
                   <TableCell>

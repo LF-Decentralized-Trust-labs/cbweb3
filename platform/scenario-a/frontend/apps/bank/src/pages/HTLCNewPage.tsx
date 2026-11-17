@@ -19,16 +19,16 @@ import {
   SelectValue,
   toast,
 } from "@cbweb3/ui";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
 import {
-  baseToExactDisplay,
-  currencyFromTokenSymbol,
-  displayToBase,
-  formatBaseUnits,
-} from "../types";
+  agreementAmountToInput,
+  agreementInputToBase,
+  formatAgreementAmount,
+} from "../features/fx/agreement-amounts";
+import { currencyFromTokenSymbol, displayToBase } from "../types";
 import { useHtlcStore, usePaymentStore } from "../stores";
 
 type DurationOption = "none" | "1h" | "6h" | "24h" | "custom";
@@ -99,25 +99,28 @@ export function HTLCNewPage() {
     void fetchAgreements({ state: "FX_STATE_ACCEPTED" });
   }, [fetchPayments, fetchAgreements]);
 
-  // Auto-prefill when navigated from agreement detail page
+  // Auto-prefill when navigated from the agreement detail page: once, when the agreement is
+  // first found. A later refresh of the agreement list must not overwrite what the operator has
+  // edited since.
+  const routePrefillDone = useRef(false);
   useEffect(() => {
-    if (routeState?.agreementId && agreements.length > 0) {
-      const ag = agreements.find((a) => a.trade_id === routeState.agreementId);
-      if (ag && selectedRole) {
-        applyPrefill(ag.trade_id, selectedRole);
-      }
+    if (routePrefillDone.current || !routeState?.agreementId || !selectedRole) return;
+    const ag = agreements.find((a) => a.trade_id === routeState.agreementId);
+    if (ag) {
+      routePrefillDone.current = true;
+      applyPrefill(ag.trade_id, selectedRole);
     }
-    // Only run once on mount after agreements load
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agreements]);
 
   const selectedAgreement = agreements.find((a) => a.trade_id === selectedAgreementId) ?? null;
 
   // The agreement's amounts arrive in BASE units, while the amount fields hold what an operator
-  // would type and are scaled with displayToBase on submit. Pre-filling the raw value scaled it
-  // twice: an agreement of 1000000 at 2 decimals locked 100000000, and the orchestrator refused
-  // the lock as not matching the agreement. baseToExactDisplay keeps full precision, so the
-  // round trip through displayToBase gives back exactly the agreement's figure.
+  // would type and are scaled on submit. Pre-filling the raw value scaled it twice: an agreement
+  // of 1000000 at 2 decimals locked 100000000, and the orchestrator refused the lock as not
+  // matching the agreement. Both directions use the agreement scale (agreement-amounts.ts), which
+  // is the same on both legs and does not wait for anything to load, so the round trip gives back
+  // exactly the agreement's figure and nothing has to be redone later.
   function applyPrefill(tradeId: string, role: RoleOption) {
     const ag = agreements.find((a) => a.trade_id === tradeId);
     if (!ag) return;
@@ -125,25 +128,16 @@ export function HTLCNewPage() {
       setMode("lock");
       setAgreementId(tradeId);
       setLockReceiver(ag.source_receiver ?? "");
-      setLockAmount(baseToExactDisplay(ag.origin_amount, tCeBMDecimals));
+      setLockAmount(agreementAmountToInput(ag.origin_amount));
       setPrefillSource(tradeId);
     } else {
       setMode("lockWithHash");
       setHashAgreementId(tradeId);
       setHashReceiver(ag.dest_receiver ?? "");
-      setHashAmount(baseToExactDisplay(ag.counter_amount, tCeBMDecimals));
+      setHashAmount(agreementAmountToInput(ag.counter_amount));
       setPrefillSource(tradeId);
     }
   }
-
-  // The token decimals load with the balance and default to 2 until then. A pre-fill made before
-  // they arrive would be converted with the wrong scale and submitted with the right one, so it
-  // is redone once they change.
-  useEffect(() => {
-    if (prefillSource && selectedRole) applyPrefill(prefillSource, selectedRole);
-    // Only the decimals should retrigger this; the rest is read at that moment.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tCeBMDecimals]);
 
   function onSelectAgreement(tradeId: string) {
     setSelectedAgreementId(tradeId);
@@ -237,7 +231,11 @@ export function HTLCNewPage() {
     try {
       const result = await lock({
         receiver: lockReceiver,
-        amount: displayToBase(parsedLockAmount.canonical, tCeBMDecimals),
+        // A lock that settles an agreement must match its leg base unit for base unit, so it is
+        // converted with the agreement scale, the one it was pre-filled with.
+        amount: agreementId.trim()
+          ? agreementInputToBase(parsedLockAmount.canonical)
+          : displayToBase(parsedLockAmount.canonical, tCeBMDecimals),
         ...(agreementId.trim() ? { agreement_id: agreementId.trim() } : {}),
         ...(timeLock !== undefined ? { time_lock: timeLock } : {}),
       });
@@ -260,7 +258,9 @@ export function HTLCNewPage() {
       const result = await lockWithHash({
         hash_lock: hashLock.trim(),
         receiver: hashReceiver,
-        amount: displayToBase(parsedHashAmount.canonical, tCeBMDecimals),
+        amount: hashAgreementId.trim()
+          ? agreementInputToBase(parsedHashAmount.canonical)
+          : displayToBase(parsedHashAmount.canonical, tCeBMDecimals),
         ...(hashAgreementId.trim() ? { agreement_id: hashAgreementId.trim() } : {}),
       });
       toast.success("PvP transfer continuation submitted successfully.");
@@ -299,7 +299,7 @@ export function HTLCNewPage() {
               <SelectContent>
                 {agreements.map((a) => (
                   <SelectItem key={a.trade_id} value={a.trade_id}>
-                    {a.trade_id.slice(0, 8)}… — {formatBaseUnits(a.origin_amount, tCeBMDecimals)} {a.origin_currency} ↔ {formatBaseUnits(a.counter_amount, tCeBMDecimals)} {a.counter_currency}
+                    {a.trade_id.slice(0, 8)}… — {formatAgreementAmount(a.origin_amount, a.origin_currency)} ↔ {formatAgreementAmount(a.counter_amount, a.counter_currency)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -333,8 +333,8 @@ export function HTLCNewPage() {
               {selectedRole ? (
                 <p className="text-xs text-muted-foreground">
                   {selectedRole === "originator"
-                    ? `Pre-filling: receiver = ${selectedAgreement.source_receiver ?? "—"}, amount = ${baseToExactDisplay(selectedAgreement.origin_amount, tCeBMDecimals)} ${selectedAgreement.origin_currency}`
-                    : `Pre-filling: receiver = ${selectedAgreement.dest_receiver ?? "—"}, amount = ${baseToExactDisplay(selectedAgreement.counter_amount, tCeBMDecimals)} ${selectedAgreement.counter_currency}`}
+                    ? `Pre-filling: receiver = ${selectedAgreement.source_receiver ?? "—"}, amount = ${formatAgreementAmount(selectedAgreement.origin_amount, selectedAgreement.origin_currency)}`
+                    : `Pre-filling: receiver = ${selectedAgreement.dest_receiver ?? "—"}, amount = ${formatAgreementAmount(selectedAgreement.counter_amount, selectedAgreement.counter_currency)}`}
                 </p>
               ) : null}
             </div>
