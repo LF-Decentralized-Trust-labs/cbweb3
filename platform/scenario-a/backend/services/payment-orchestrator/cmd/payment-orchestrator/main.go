@@ -141,7 +141,7 @@ func main() {
 			log.Fatal("FATAL: PENTE_BASE_URL (or PALADIN_URL) is required when PENTE_ENABLED=true")
 		}
 		// How long a Pente transaction may stay pending on this node before it stops submitting
-		// new private transactions (Paladin v1.0.0 cannot cancel a stuck one; see SUP-152).
+		// new private transactions (Paladin v1.0.0 cannot cancel a stuck one; see LFDT-Paladin/paladin#1356).
 		var stuckAfter time.Duration
 		if v := strings.TrimSpace(os.Getenv("PENTE_STUCK_TX_THRESHOLD")); v != "" {
 			d, err := time.ParseDuration(v)
@@ -355,6 +355,24 @@ func main() {
 			//#nosec G115 -- interval is a small positive value from config, fits int64 Duration
 			go workers.NewFXIndexer(fxChainReader, fxRepo, time.Duration(indexerSec)*time.Second, logger).Start(ctx)
 			logger.Info("fx indexer enabled", "interval_sec", indexerSec)
+		}
+	}
+
+	// Pending-operation reconciler: an FX operation whose private transaction was submitted but
+	// not confirmed is recorded as pending, and no other operation is submitted for that
+	// agreement until it resolves. This brings the record in line with the chain once it does.
+	// It runs on every node with Pente enabled: the pending records are this node's own.
+	if pendingChain, ok := fxChainReader.(ports.FXPendingChainPort); ok && fxChainReader != nil {
+		if store, ok := fxRepo.(workers.PendingFXStore); ok {
+			reconcileSec := uint64(30)
+			if v, err := strconv.ParseUint(getEnv("FX_PENDING_RECONCILE_INTERVAL_SEC", "30"), 10, 32); err == nil && v > 0 {
+				reconcileSec = v
+			}
+			//#nosec G115 -- interval is a small positive value from config, fits int64 Duration
+			go workers.NewFXPendingReconciler(store, pendingChain, time.Duration(reconcileSec)*time.Second, 0, logger).Start(ctx)
+			logger.Info("fx pending-operation reconciler enabled", "interval_sec", reconcileSec)
+		} else {
+			logger.Warn("FX repository cannot list pending operations — pending-operation reconciler not started")
 		}
 	}
 

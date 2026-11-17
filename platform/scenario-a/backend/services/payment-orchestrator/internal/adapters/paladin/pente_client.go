@@ -10,14 +10,17 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 )
 
 var (
+	_ ports.FXPendingChainPort      = (*PenteClient)(nil)
 	_ ports.PenteClientPort         = (*PenteClient)(nil)
 	_ ports.FXAgreementContractPort = (*PenteClient)(nil)
 	_ ports.FXChainReaderPort       = (*PenteClient)(nil)
@@ -43,7 +46,20 @@ type PenteClient struct {
 	receiptInterval time.Duration
 	stuckAfter      time.Duration
 	guardTimeout    time.Duration
+	guardCacheTTL   time.Duration
+	guard           guardState
 	logger          *slog.Logger
+}
+
+// guardState shares one stuck-transaction check across concurrent submissions and reuses its
+// answer for guardCacheTTL. The answer only matters at the granularity of the stuck threshold
+// (minutes), so one query every few seconds protects the node as well as one per submission,
+// without adding a query per FX call to a node that is already loaded.
+type guardState struct {
+	mu        sync.Mutex
+	checkedAt time.Time
+	result    error
+	inflight  chan struct{}
 }
 
 // PenteClientConfig configures the Paladin JSON-RPC endpoint and the calling node identity.
@@ -63,6 +79,9 @@ type PenteClientConfig struct {
 	// the node stops submitting new private transactions. Zero means DefaultStuckPendingAfter.
 	StuckPendingAfter time.Duration
 }
+
+// DefaultGuardCacheTTL is how long one stuck-transaction check answers for every submission.
+const DefaultGuardCacheTTL = 5 * time.Second
 
 // DefaultStuckPendingAfter is four times the receipt timeout: long enough that a transaction
 // which is merely slow is never mistaken for a stuck one, short enough that a caller retrying
@@ -88,6 +107,7 @@ func NewPenteClient(cfg PenteClientConfig) *PenteClient {
 		receiptInterval: 1500 * time.Millisecond,
 		stuckAfter:      stuckAfter,
 		guardTimeout:    5 * time.Second,
+		guardCacheTTL:   DefaultGuardCacheTTL,
 	}
 }
 
@@ -130,7 +150,11 @@ func (c *PenteClient) rpc(ctx context.Context, method string, params []any, out 
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("call %s: %w", method, err)
+		stage := rpcNoResponse
+		if notDelivered(err) {
+			stage = rpcNotDelivered
+		}
+		return &rpcCallError{Method: method, Stage: stage, Err: err}
 	}
 	defer resp.Body.Close()
 
@@ -139,17 +163,71 @@ func (c *PenteClient) rpc(ctx context.Context, method string, params []any, out 
 		Error  *rpcError       `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
-		return fmt.Errorf("decode %s response: %w", method, err)
+		return &rpcCallError{Method: method, Stage: rpcBadResponse, Err: err}
 	}
 	if envelope.Error != nil {
 		return envelope.Error
 	}
 	if out != nil && len(envelope.Result) > 0 {
 		if err := json.Unmarshal(envelope.Result, out); err != nil {
-			return fmt.Errorf("unmarshal %s result: %w", method, err)
+			return &rpcCallError{Method: method, Stage: rpcBadResponse, Err: err}
 		}
 	}
 	return nil
+}
+
+// rpcStage says how far a JSON-RPC call got before it failed. It decides whether a failed
+// submission can be retried: only one that never reached Paladin is known not to have been
+// accepted.
+type rpcStage int
+
+const (
+	// rpcNotDelivered: the connection could not be opened, so Paladin never saw the request.
+	rpcNotDelivered rpcStage = iota
+	// rpcNoResponse: the request may have been delivered, but no response came back (timeout,
+	// connection reset, cancelled context).
+	rpcNoResponse
+	// rpcBadResponse: something answered, but the body could not be read as the expected
+	// JSON-RPC response (a format change, or an HTML error page from a proxy).
+	rpcBadResponse
+)
+
+// rpcCallError is a failed JSON-RPC call that is not a JSON-RPC error from Paladin. A
+// JSON-RPC error is returned as *rpcError instead: Paladin answered and refused the request.
+type rpcCallError struct {
+	Method string
+	Stage  rpcStage
+	Err    error
+}
+
+func (e *rpcCallError) Error() string {
+	switch e.Stage {
+	case rpcBadResponse:
+		return fmt.Sprintf("decode %s response: %v", e.Method, e.Err)
+	default:
+		return fmt.Sprintf("call %s: %v", e.Method, e.Err)
+	}
+}
+
+func (e *rpcCallError) Unwrap() error { return e.Err }
+
+func rpcStageOf(err error) (rpcStage, bool) {
+	var ce *rpcCallError
+	if errors.As(err, &ce) {
+		return ce.Stage, true
+	}
+	return 0, false
+}
+
+// notDelivered reports whether an HTTP client error happened before the request could be sent:
+// a failed dial or name lookup. Anything later may have reached Paladin.
+func notDelivered(err error) bool {
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Op == "dial" {
+		return true
+	}
+	var dnsErr *net.DNSError
+	return errors.As(err, &dnsErr)
 }
 
 // ---------------------------------------------------------------------------
@@ -270,19 +348,21 @@ var pendingPenteQuery = map[string]any{
 // pending for longer than stuckAfter.
 //
 // Paladin v1.0.0 re-assembles a private transaction that cannot complete in a tight loop and
-// offers no way to cancel it (LFDT-Paladin/paladin#1356; fixed only after v1.0.0). In SUP-152
-// two such transactions held every database connection on a commercial bank node and flooded
-// its central bank node once it recovered. Every further submission from that node joins the
-// same queue and makes it worse, so the node stops taking new private work until an operator
+// offers no way to cancel it (LFDT-Paladin/paladin#1356; fixed only after v1.0.0). In
+// production, such transactions stayed pending for days, held every database connection on the
+// node, and flooded a peer node once it recovered. Every further submission from that node joins
+// the same queue and makes it worse, so the node stops taking new private work until an operator
 // has dealt with the stuck one.
 //
 // The check is node-wide rather than per privacy group on purpose: the damage of the incident
 // was to the node and its peer, not to one group.
 //
-// Two failure modes are distinguished. A node that does not answer within guardTimeout is the
-// wedged node of the incident, and is refused. A node that answers with a JSON-RPC error
-// rejected the query itself; the guard then cannot judge and steps aside with a WARN rather
-// than refusing every FX transaction because of its own query.
+// Only a node that cannot be reached, or does not answer within guardTimeout, is refused: that
+// is the wedged node of the incident. A node that answers, but with a JSON-RPC error or a body
+// the guard cannot read, has shown it is alive; the guard then cannot judge and steps aside with
+// a WARN, rather than turning a change in Paladin's response format into a node-wide FX outage.
+//
+// Callers go through ensureNoStuckPending, which shares and briefly caches the answer.
 func (c *PenteClient) checkNoStuckPending(ctx context.Context) error {
 	qctx, cancel := context.WithTimeout(ctx, c.guardTimeout)
 	defer cancel()
@@ -300,10 +380,12 @@ func (c *PenteClient) checkNoStuckPending(ctx context.Context) error {
 				"error", err.Error())
 			return nil
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if stage, ok := rpcStageOf(err); ok && stage == rpcBadResponse {
+			c.logger.Warn("stuck-transaction guard skipped: Paladin answered the pending-transaction query but the answer could not be read, submitting without it",
+				"error", err.Error())
+			return nil
 		}
-		return fmt.Errorf("%w: no answer to a pending-transaction query within %s: %v",
+		return fmt.Errorf("%w: Paladin could not be reached or did not answer a pending-transaction query within %s: %v",
 			ports.ErrPrivacyLayerUnavailable, c.guardTimeout, err)
 	}
 	if len(pending) == 0 {
@@ -329,13 +411,52 @@ func (c *PenteClient) checkNoStuckPending(ctx context.Context) error {
 		ports.ErrPrivacyLayerStuck, oldest.ID, age.Round(time.Second), c.stuckAfter)
 }
 
-// sendTx submits a pgroup transaction and waits for its receipt, returning the on-chain
-// transaction hash. It errors if the transaction reverts, if a Pente transaction on this node
-// is stuck (nothing is submitted), and with ErrPrivateTxUnconfirmed if no receipt arrives in time.
-func (c *PenteClient) sendTx(ctx context.Context, target ports.PenteFXTarget, fn map[string]any, input map[string]any) (string, error) {
-	if err := c.checkNoStuckPending(ctx); err != nil {
-		return "", err
+// ensureNoStuckPending runs checkNoStuckPending at most once per guardCacheTTL, shared by every
+// concurrent caller. The check runs on a context detached from the caller's cancellation (it
+// has its own guardTimeout), so one caller giving up does not fail the check for the others.
+func (c *PenteClient) ensureNoStuckPending(ctx context.Context) error {
+	for {
+		c.guard.mu.Lock()
+		if !c.guard.checkedAt.IsZero() && time.Since(c.guard.checkedAt) < c.guardCacheTTL {
+			result := c.guard.result
+			c.guard.mu.Unlock()
+			return result
+		}
+		if wait := c.guard.inflight; wait != nil {
+			c.guard.mu.Unlock()
+			select {
+			case <-wait:
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		done := make(chan struct{})
+		c.guard.inflight = done
+		c.guard.mu.Unlock()
+
+		result := c.checkNoStuckPending(context.WithoutCancel(ctx))
+
+		c.guard.mu.Lock()
+		c.guard.result = result
+		c.guard.checkedAt = time.Now()
+		c.guard.inflight = nil
+		c.guard.mu.Unlock()
+		close(done)
+		return result
 	}
+}
+
+// sendTx submits a pgroup transaction and waits for its receipt, returning the on-chain
+// transaction hash. Callers run ensureNoStuckPending first, before any other node RPC.
+//
+// Errors are classified by what is known about the submission:
+//   - Paladin refused it with a JSON-RPC error: an ordinary error; nothing was accepted.
+//   - It never reached Paladin (connection refused, name lookup failed): ErrPrivacyLayerUnavailable.
+//   - It may have been accepted but no transaction id came back (timeout, unreadable response):
+//     ErrPrivateTxUnconfirmed. Resubmitting could create a second transaction.
+//   - It was accepted but its outcome is unknown (see waitReceipt): ErrPrivateTxUnconfirmed.
+func (c *PenteClient) sendTx(ctx context.Context, target ports.PenteFXTarget, fn map[string]any, input map[string]any) (string, error) {
 	params := []any{map[string]any{
 		"domain":   penteDomain,
 		"group":    target.GroupID,
@@ -346,7 +467,21 @@ func (c *PenteClient) sendTx(ctx context.Context, target ports.PenteFXTarget, fn
 	}}
 	var txID string
 	if err := c.rpc(ctx, "pgroup_sendTransaction", params, &txID); err != nil {
-		return "", err
+		stage, transport := rpcStageOf(err)
+		switch {
+		case !transport:
+			return "", err
+		case stage == rpcNotDelivered:
+			return "", fmt.Errorf("%w: the submission did not reach Paladin: %w", ports.ErrPrivacyLayerUnavailable, err)
+		default:
+			c.logger.Warn("private transaction submission ended without an answer; Paladin may have accepted it",
+				"error", err.Error())
+			return "", &ports.PrivateTxUnconfirmedError{
+				Msg: fmt.Sprintf("Paladin may have accepted the submission but returned no transaction id (%v); "+
+					"check its pending transactions before resubmitting", err),
+				Err: err,
+			}
+		}
 	}
 	return c.waitReceipt(ctx, txID)
 }
@@ -366,6 +501,12 @@ func (c *PenteClient) callView(ctx context.Context, target ports.PenteFXTarget, 
 
 // waitReceipt polls ptx_getTransactionFull until a receipt is available, returning the
 // transaction hash on success or an error describing the revert on failure.
+//
+// Once Paladin has returned a transaction id, the transaction exists and may still complete.
+// Every exit other than a receipt (the deadline, a failed receipt query, the caller's context
+// ending) is therefore ErrPrivateTxUnconfirmed carrying that id, never an ordinary failure:
+// reporting it as failed is what made callers resubmit under a new trade id and pile up
+// pending transactions.
 func (c *PenteClient) waitReceipt(ctx context.Context, txID string) (string, error) {
 	deadline := time.Now().Add(c.receiptTimeout)
 	for {
@@ -377,7 +518,7 @@ func (c *PenteClient) waitReceipt(ctx context.Context, txID string) (string, err
 			} `json:"receipt"`
 		}
 		if err := c.rpc(ctx, "ptx_getTransactionFull", []any{txID}, &full); err != nil {
-			return "", err
+			return "", c.unconfirmed(txID, "reading its receipt failed", err)
 		}
 		if full.Receipt != nil {
 			if !full.Receipt.Success {
@@ -390,18 +531,50 @@ func (c *PenteClient) waitReceipt(ctx context.Context, txID string) (string, err
 		}
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return "", c.unconfirmed(txID, "the request ended before a receipt arrived", ctx.Err())
 		case <-time.After(c.receiptInterval):
 			if time.Now().After(deadline) {
-				// Not a failure: the transaction is still pending in Paladin and may complete
-				// later (in SUP-152, fifteen days later). Reporting it as failed is what made
-				// callers resubmit under a new trade id and pile up pending transactions.
-				c.logger.Warn("private transaction submitted but not confirmed in time; it is still pending in Paladin",
-					"transaction_id", txID, "waited", c.receiptTimeout.String())
-				return "", fmt.Errorf("%w: pgroup transaction %s has no receipt after %s and is still pending in Paladin; do not resubmit",
-					ports.ErrPrivateTxUnconfirmed, txID, c.receiptTimeout)
+				return "", c.unconfirmed(txID, fmt.Sprintf("has no receipt after %s", c.receiptTimeout), nil)
 			}
 		}
+	}
+}
+
+// unconfirmed reports a submitted transaction whose outcome is not known, with its Paladin id.
+func (c *PenteClient) unconfirmed(txID, why string, cause error) error {
+	c.logger.Warn("private transaction submitted but not confirmed; it may still complete in Paladin",
+		"transaction_id", txID, "reason", why, "error", fmt.Sprint(cause))
+	if cause != nil {
+		return &ports.PrivateTxUnconfirmedError{
+			TxID: txID,
+			Msg:  fmt.Sprintf("pgroup transaction %s: %s (%v); it may still complete in Paladin; do not resubmit", txID, why, cause),
+			Err:  cause,
+		}
+	}
+	return &ports.PrivateTxUnconfirmedError{
+		TxID: txID,
+		Msg:  fmt.Sprintf("pgroup transaction %s %s and is still pending in Paladin; do not resubmit", txID, why),
+	}
+}
+
+// PrivateTxOutcome reports whether a submitted private transaction has a receipt and how it
+// ended. Used by the pending-operation reconciler; it never submits anything.
+func (c *PenteClient) PrivateTxOutcome(ctx context.Context, txID string) (ports.PrivateTxOutcome, error) {
+	var full struct {
+		Receipt *struct {
+			Success bool `json:"success"`
+		} `json:"receipt"`
+	}
+	if err := c.rpc(ctx, "ptx_getTransactionFull", []any{txID}, &full); err != nil {
+		return ports.PrivateTxPending, err
+	}
+	switch {
+	case full.Receipt == nil:
+		return ports.PrivateTxPending, nil
+	case full.Receipt.Success:
+		return ports.PrivateTxSucceeded, nil
+	default:
+		return ports.PrivateTxFailed, nil
 	}
 }
 
@@ -536,7 +709,13 @@ func bigToString(v *big.Int) string {
 // FXAgreementContractPort
 // ---------------------------------------------------------------------------
 
+// Propose, ProposeOnBehalf and tradeIdTx run the stuck-transaction guard before any other node
+// RPC: proposeInput alone resolves up to five party addresses against the node the guard is
+// protecting.
 func (c *PenteClient) Propose(ctx context.Context, params ports.FXProposalParams) (string, error) {
+	if err := c.ensureNoStuckPending(ctx); err != nil {
+		return "", err
+	}
 	target, err := c.resolveTarget(ctx)
 	if err != nil {
 		return "", err
@@ -545,6 +724,9 @@ func (c *PenteClient) Propose(ctx context.Context, params ports.FXProposalParams
 }
 
 func (c *PenteClient) ProposeOnBehalf(ctx context.Context, params ports.FXProposalParams) (string, error) {
+	if err := c.ensureNoStuckPending(ctx); err != nil {
+		return "", err
+	}
 	target, err := c.resolveTarget(ctx)
 	if err != nil {
 		return "", err
@@ -553,6 +735,9 @@ func (c *PenteClient) ProposeOnBehalf(ctx context.Context, params ports.FXPropos
 }
 
 func (c *PenteClient) tradeIdTx(ctx context.Context, fnName string, tradeID [32]byte) (string, error) {
+	if err := c.ensureNoStuckPending(ctx); err != nil {
+		return "", err
+	}
 	target, err := c.resolveTarget(ctx)
 	if err != nil {
 		return "", err

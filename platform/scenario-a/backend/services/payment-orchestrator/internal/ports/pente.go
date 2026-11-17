@@ -10,19 +10,66 @@ import (
 // Outcomes of a private (Pente) submission that are neither success nor a definitive failure.
 // Callers must not treat them as "failed, retry": each retry of a transaction that is still
 // pending in Paladin creates another pending transaction, which is how one unreachable peer
-// turned into a node-wide outage in SUP-152 (Paladin v1.0.0 cannot cancel a pending private
-// transaction; upstream LFDT-Paladin/paladin#1356).
+// can turn into a node-wide outage (Paladin v1.0.0 cannot cancel a pending private transaction;
+// upstream LFDT-Paladin/paladin#1356).
 var (
 	// ErrPrivacyLayerStuck: this node already has a Pente transaction pending for longer than
 	// the stuck threshold, so no new private transaction is submitted from it.
 	ErrPrivacyLayerStuck = errors.New("a private transaction on this node is stuck")
-	// ErrPrivacyLayerUnavailable: the Paladin node did not answer a pending-transaction query in
-	// time, so it was not asked to take on more work.
+	// ErrPrivacyLayerUnavailable: the Paladin node could not be reached or did not answer in
+	// time, so nothing was submitted to it.
 	ErrPrivacyLayerUnavailable = errors.New("the privacy layer did not answer")
-	// ErrPrivateTxUnconfirmed: the transaction was submitted but no receipt arrived in time. It
-	// is still pending in Paladin and may yet complete; resubmitting creates a second one.
+	// ErrPrivateTxUnconfirmed: the transaction was, or may have been, accepted by Paladin, but its
+	// outcome is not known (no receipt in time, the receipt query failed, the request ended, or
+	// the submission itself got no answer). It may yet complete; resubmitting creates a second one.
 	ErrPrivateTxUnconfirmed = errors.New("private transaction submitted but not confirmed")
 )
+
+// PrivateTxUnconfirmedError is ErrPrivateTxUnconfirmed with the Paladin transaction id, when
+// one came back. errors.Is(err, ErrPrivateTxUnconfirmed) holds for it.
+type PrivateTxUnconfirmedError struct {
+	TxID string // empty when the submission got no answer, so no id is known
+	Msg  string
+	Err  error // the underlying cause, if any (a failed receipt query, a context error)
+}
+
+func (e *PrivateTxUnconfirmedError) Error() string {
+	return ErrPrivateTxUnconfirmed.Error() + ": " + e.Msg
+}
+
+func (e *PrivateTxUnconfirmedError) Is(target error) bool { return target == ErrPrivateTxUnconfirmed }
+
+func (e *PrivateTxUnconfirmedError) Unwrap() error { return e.Err }
+
+// UnconfirmedTxID returns the Paladin transaction id carried by an unconfirmed outcome, or "".
+func UnconfirmedTxID(err error) string {
+	var u *PrivateTxUnconfirmedError
+	if errors.As(err, &u) {
+		return u.TxID
+	}
+	return ""
+}
+
+// PrivateTxOutcome is what Paladin reports for a submitted private transaction.
+type PrivateTxOutcome int
+
+const (
+	// PrivateTxPending: no receipt yet.
+	PrivateTxPending PrivateTxOutcome = iota
+	// PrivateTxSucceeded: a successful receipt.
+	PrivateTxSucceeded
+	// PrivateTxFailed: a receipt that reports a failure (a revert); the operation did not happen.
+	PrivateTxFailed
+)
+
+// FXPendingChainPort is what the pending-operation reconciler reads from a Pente node.
+type FXPendingChainPort interface {
+	// PrivateTxOutcome reports whether the private transaction txID has a receipt and how it ended.
+	PrivateTxOutcome(ctx context.Context, txID string) (PrivateTxOutcome, error)
+	// GetFXAgreement reads an agreement's on-chain state from the group bound to ctx
+	// (WithPenteFXTarget). tradeID is the 0x-prefixed bytes32. (nil, nil) when it does not exist.
+	GetFXAgreement(ctx context.Context, tradeID string) (*PenteFXAgreementState, error)
+}
 
 // PenteContextRequest carries the minimum business identifiers needed to
 // create or reuse a bilateral private context for an FX agreement.

@@ -19,8 +19,8 @@ import (
 )
 
 // A private submission can end three ways that are not "it failed, try again": this node has a
-// stuck transaction and refused to add another, Paladin did not answer, or the transaction was
-// submitted and is still pending. The gateway turns FailedPrecondition into 409 and Unavailable
+// stuck transaction and refused to add another, Paladin could not be reached, or the transaction
+// was (or may have been) accepted and its outcome is unknown. The gateway turns FailedPrecondition into 409 and Unavailable
 // into 503; Internal (500) is what callers used to see for all three, and they resubmitted.
 
 // outcomeFXClient returns proposeErr from Propose and lifecycleErr from every other call.
@@ -89,21 +89,37 @@ func proposeReq(tid string) *pb.ProposeFXAgreementRequest {
 	}
 }
 
+// Both propose paths: the bank's own propose, and the relay's on-behalf propose on the
+// destination spoke, which is the one most likely to be retried by automation.
 func TestFX_Propose_MapsPrivacyOutcomes(t *testing.T) {
-	for _, tc := range privacyOutcomes {
-		t.Run(tc.name, func(t *testing.T) {
-			fx := &outcomeFXClient{proposeErr: tc.err}
-			env := setupFXChainEnv(t, server.Config{
-				FXRepo: newMemFXRepo(), Pente: &fakePente{}, FXAgreementBesu: fx, FXAgreementPente: fx,
+	for _, onBehalf := range []bool{false, true} {
+		for _, tc := range privacyOutcomes {
+			name := tc.name
+			if onBehalf {
+				name = "on-behalf/" + name
+			}
+			t.Run(name, func(t *testing.T) {
+				fx := &outcomeFXClient{proposeErr: tc.err}
+				env := setupFXChainEnv(t, server.Config{
+					FXRepo: newMemFXRepo(), Pente: &fakePente{}, FXAgreementBesu: fx, FXAgreementPente: fx,
+				})
+				req := proposeReq("T-OUT-" + strings.ReplaceAll(name, "/", "-"))
+				req.OnBehalf = onBehalf
+				_, err := env.client.ProposeFXAgreement(context.Background(), req)
+				if status.Code(err) != tc.want {
+					t.Fatalf("got %v, want %s", err, tc.want)
+				}
+				msg := status.Convert(err).Message()
+				if !strings.Contains(msg, "on-chain FX propose") {
+					t.Errorf("message lost the operation: %q", msg)
+				}
+				// An unconfirmed propose returns no response, so the error is the only place the
+				// caller learns which trade to follow up.
+				if tc.want != codes.Internal && !strings.Contains(msg, "trade_id="+req.TradeId) {
+					t.Errorf("message does not carry the trade id: %q", msg)
+				}
 			})
-			_, err := env.client.ProposeFXAgreement(context.Background(), proposeReq("T-OUT-"+tc.name))
-			if status.Code(err) != tc.want {
-				t.Fatalf("got %v, want %s", err, tc.want)
-			}
-			if !strings.Contains(status.Convert(err).Message(), "on-chain FX propose") {
-				t.Errorf("message lost the operation: %q", status.Convert(err).Message())
-			}
-		})
+		}
 	}
 }
 
@@ -121,7 +137,21 @@ func TestFX_Lifecycle_MapsPrivacyOutcomes(t *testing.T) {
 			_, err := c.CancelFXAgreement(context.Background(), &pb.CancelFXAgreementRequest{TradeId: tid})
 			return err
 		},
+		"accept-on-behalf": func(c pb.PaymentOrchestratorServiceClient, tid string) error {
+			_, err := c.AcceptFXAgreement(context.Background(), &pb.AcceptFXAgreementRequest{TradeId: tid, OnBehalf: true})
+			return err
+		},
+		"reject-on-behalf": func(c pb.PaymentOrchestratorServiceClient, tid string) error {
+			_, err := c.RejectFXAgreement(context.Background(), &pb.RejectFXAgreementRequest{TradeId: tid, OnBehalf: true})
+			return err
+		},
+		// settle needs an ACCEPTED agreement; acceptFirst below gets it there.
+		"settle": func(c pb.PaymentOrchestratorServiceClient, tid string) error {
+			_, err := c.SettleFXAgreement(context.Background(), &pb.SettleFXAgreementRequest{TradeId: tid})
+			return err
+		},
 	}
+	acceptFirst := map[string]bool{"settle": true}
 	for opName, op := range ops {
 		for _, tc := range privacyOutcomes {
 			t.Run(opName+"/"+tc.name, func(t *testing.T) {
@@ -130,9 +160,18 @@ func TestFX_Lifecycle_MapsPrivacyOutcomes(t *testing.T) {
 					FXRepo: newMemFXRepo(), Pente: &fakePente{}, FXAgreementBesu: fx, FXAgreementPente: fx,
 				})
 				tid := proposeChain(t, env.client, "T-LC-"+opName+"-"+tc.name)
+				if acceptFirst[opName] {
+					if _, err := env.client.AcceptFXAgreement(context.Background(), &pb.AcceptFXAgreementRequest{TradeId: tid}); err != nil {
+						t.Fatalf("accept before %s: %v", opName, err)
+					}
+				}
 				fx.setLifecycleErr(tc.err)
-				if err := op(env.client, tid); status.Code(err) != tc.want {
+				err := op(env.client, tid)
+				if status.Code(err) != tc.want {
 					t.Fatalf("got %v, want %s", err, tc.want)
+				}
+				if tc.want != codes.Internal && !strings.Contains(status.Convert(err).Message(), "trade_id="+tid) {
+					t.Errorf("message does not carry the trade id: %q", status.Convert(err).Message())
 				}
 			})
 		}

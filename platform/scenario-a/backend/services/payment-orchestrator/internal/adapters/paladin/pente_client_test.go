@@ -37,6 +37,36 @@ type fakePaladin struct {
 	pendingErr    *rpcError
 	pendingDelay  time.Duration
 	pendingParams []json.RawMessage
+	pendingRaw    string // when set, the raw body answered to ptx_queryPendingTransactions
+	// pgroup_sendTransaction: an RPC error, a raw (undecodable) body, or a delay before answering.
+	sendErr   *rpcError
+	sendRaw   string
+	sendDelay time.Duration
+	// ptx_getTransactionFull: an RPC error instead of the receipt.
+	receiptErr *rpcError
+}
+
+// count reports how many times method was received.
+func (f *fakePaladin) count(method string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, m := range f.methods {
+		if m == method {
+			n++
+		}
+	}
+	return n
+}
+
+// firstMethod is the first JSON-RPC method the client sent.
+func (f *fakePaladin) firstMethod() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.methods) == 0 {
+		return ""
+	}
+	return f.methods[0]
 }
 
 // called reports whether method was received, safely across the server's goroutines.
@@ -74,6 +104,10 @@ func (f *fakePaladin) handler(w http.ResponseWriter, r *http.Request) {
 		if f.pendingDelay > 0 {
 			time.Sleep(f.pendingDelay)
 		}
+		if f.pendingRaw != "" {
+			_, _ = w.Write([]byte(f.pendingRaw))
+			return
+		}
 		if f.pendingErr != nil {
 			writeResult(nil, f.pendingErr)
 			return
@@ -84,9 +118,27 @@ func (f *fakePaladin) handler(w http.ResponseWriter, r *http.Request) {
 		}
 		writeResult(pending, nil)
 	case "pgroup_sendTransaction":
-		_ = json.Unmarshal(req.Params[0], &f.sendTxParams)
-		writeResult("tx-uuid-123", nil)
+		var sent map[string]any
+		_ = json.Unmarshal(req.Params[0], &sent)
+		f.mu.Lock()
+		f.sendTxParams = sent
+		f.mu.Unlock()
+		if f.sendDelay > 0 {
+			time.Sleep(f.sendDelay)
+		}
+		switch {
+		case f.sendRaw != "":
+			_, _ = w.Write([]byte(f.sendRaw))
+		case f.sendErr != nil:
+			writeResult(nil, f.sendErr)
+		default:
+			writeResult("tx-uuid-123", nil)
+		}
 	case "ptx_getTransactionFull":
+		if f.receiptErr != nil {
+			writeResult(nil, f.receiptErr)
+			return
+		}
 		if f.noReceipt {
 			writeResult(map[string]any{"receipt": nil}, nil)
 			return
