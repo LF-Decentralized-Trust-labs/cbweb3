@@ -11,6 +11,10 @@ type IdentityState = {
   // it is set from the response on load, and forced false on fetch failure.
   configured: boolean;
   status: "idle" | "loading" | "error";
+  // True once a fetch has succeeded. "idle" alone cannot tell a loaded roster from one that
+  // has not been requested yet, and a form that derives parties from the roster must not treat
+  // "not loaded yet" as "not in the roster".
+  loaded: boolean;
   error: string | null;
   fetchAll: () => Promise<void>;
 };
@@ -19,12 +23,13 @@ export const useIdentityStore = create<IdentityState>((set) => ({
   identities: [],
   configured: true,
   status: "idle",
+  loaded: false,
   error: null,
   fetchAll: async () => {
     set({ status: "loading", error: null });
     try {
       const { identities, configured } = await identityApi.list();
-      set({ identities, configured, status: "idle" });
+      set({ identities, configured, status: "idle", loaded: true });
     } catch (error) {
       set({
         status: "error",
