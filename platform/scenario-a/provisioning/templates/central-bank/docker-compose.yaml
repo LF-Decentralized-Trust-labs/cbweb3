@@ -34,7 +34,8 @@
 #   BESU_LOGGING          Besu log level (default: INFO)
 #   BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS
 #                         Ceiling on concurrent WebSocket RPC connections (default: 256,
-#                         positive integer). Besu's implicit 80 was exhausted in SUP-152.
+#                         integer from 1 to 2147483647). Besu's implicit default of 80
+#                         was exhausted in production.
 #   BESU_HOST_ALLOWLIST   Comma-separated host allowlist for RPC (default: '*' — restrict in prod)
 #   BESU_CORS_ORIGINS     CORS origins for RPC HTTP (default: 'all' — restrict in prod)
 

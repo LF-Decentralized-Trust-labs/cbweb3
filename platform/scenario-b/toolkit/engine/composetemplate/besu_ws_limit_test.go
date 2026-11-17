@@ -3,12 +3,10 @@
 // Every Besu node that serves JSON-RPC over WebSocket must declare its connection
 // ceiling explicitly, as a parameter.
 //
-// Ported from the Scenario A incident (SUP-152): the Chile central bank's Besu ran
-// on the implicit default of --rpc-ws-max-active-connections=80, set nowhere in the
-// templates. Leaked connections filled all 80 slots, every new connection was
-// refused, the local Paladin node could not open its block listener and never
-// finished starting, and the spoke settled nothing for fifteen days. Nobody could
-// see the ceiling because it did not exist in configuration.
+// An implicit default of 80 connections was exhausted in production: Besu ran on
+// --rpc-ws-max-active-connections=80, set nowhere in the templates, and once leaked
+// connections filled every slot it refused new WebSocket clients, including the local
+// Paladin node. Nobody could see the ceiling because it did not exist in configuration.
 //
 // Scenario B runs the same Besu image with the same default. The defect is the
 // implicit value, not the scenario, so the guard is the same.
@@ -80,7 +78,7 @@ func TestBesuTemplates_DeclareWebSocketConnectionLimit(t *testing.T) {
 			case len(limits) == 0:
 				t.Errorf("service %q in %s enables WebSocket RPC without "+
 					"--rpc-ws-max-active-connections: it runs on Besu's implicit default of 80, "+
-					"which is the ceiling that took a Scenario A spoke down for fifteen days",
+					"a ceiling that has already been exhausted in production",
 					name, filepath.Base(path))
 			case len(limits) > 1:
 				t.Errorf("service %q in %s sets --rpc-ws-max-active-connections %d times (%v); "+

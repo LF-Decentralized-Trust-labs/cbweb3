@@ -26,14 +26,27 @@ describe("connector rebuild after failed poll cycles", () => {
     vi.unstubAllGlobals();
   });
 
-  async function runUntilRebuilt(oldShutdown: () => Promise<void>) {
+  async function runUntilRebuilt(
+    oldShutdown: () => Promise<void>,
+    opts: { failBuilds?: number; events?: string[] } = {},
+  ) {
     const store = new RelayStore(join(dir, "store.json"), quiet);
     await store.init();
 
     const warnings: string[] = [];
-    const shutdowns = vi.fn(oldShutdown);
+    const shutdowns = vi.fn(async () => {
+      opts.events?.push("close-old");
+      await oldShutdown();
+    });
     let built = 0;
+    let attempts = 0;
     const factory = async () => {
+      attempts++;
+      opts.events?.push(`build#${attempts}`);
+      // Build 1 is the registration; the next failBuilds rebuild attempts are refused.
+      if (attempts > 1 && attempts <= 1 + (opts.failBuilds ?? 0)) {
+        throw new Error("connection refused: too many WebSocket connections");
+      }
       built++;
       if (built === 1) {
         // The connector attached at registration: every poll fails the way a dropped WebSocket does.
@@ -62,7 +75,7 @@ describe("connector rebuild after failed poll cycles", () => {
       internalApiUrl: "http://a:1", grpcEndpoint: "a:1",
     } as any);
 
-    const deadline = Date.now() + 5_000;
+    const deadline = Date.now() + 10_000;
     while (built < 2 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
     await new Promise((r) => setTimeout(r, 50));
     controller.abort();
@@ -82,4 +95,23 @@ describe("connector rebuild after failed poll cycles", () => {
     expect(built).toBeGreaterThanOrEqual(2);
     expect(warnings.some((w) => w.includes("spoke-a") && w.includes("provider gone"))).toBe(true);
   }, 15_000);
+
+  // When Besu is at its connection ceiling, the old connector's slot is the one the new socket
+  // needs, so the old connector must be closed before the new one is built.
+  it("closes the old connector before building the new one", async () => {
+    const events: string[] = [];
+    const { built } = await runUntilRebuilt(async () => {}, { events });
+    expect(built).toBeGreaterThanOrEqual(2);
+    expect(events.slice(0, 3)).toEqual(["build#1", "close-old", "build#2"]);
+  }, 15_000);
+
+  // A rebuild that cannot build its replacement has already closed the old connector; the next
+  // attempt must not close it again, only retry the build.
+  it("closes the old connector once across failed rebuild attempts", async () => {
+    const events: string[] = [];
+    const { built, shutdowns } = await runUntilRebuilt(async () => {}, { failBuilds: 1, events });
+    expect(built).toBeGreaterThanOrEqual(2);
+    expect(shutdowns).toHaveBeenCalledTimes(1);
+    expect(events.slice(0, 4)).toEqual(["build#1", "close-old", "build#2", "build#3"]);
+  }, 20_000);
 });

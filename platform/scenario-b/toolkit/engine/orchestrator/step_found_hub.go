@@ -324,8 +324,15 @@ func (c HubConfig) provisionKeycloakRealm(ctx context.Context) error {
 // `docker compose --env-file` step resolves its ${...}. Ports derive from the
 // besu RPC port by fixed offsets (single hub per host). Local dev creds only.
 func (c HubConfig) renderHubComposeEnv() error {
+	wsLimit, err := besuWSMaxActiveConnections()
+	if err != nil {
+		return err
+	}
 	e := c.ContainerPrefix
 	vars := map[string]string{
+		// Validated above; written so the ceiling in force is the one the toolkit checked.
+		BesuWSMaxActiveConnectionsVar: wsLimit,
+
 		// besu (hub template)
 		"BESU_IMAGE":           c.BesuImage,
 		"HUB_CONTAINER_PREFIX": c.ContainerPrefix,

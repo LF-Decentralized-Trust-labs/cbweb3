@@ -18,25 +18,29 @@ BESU_WS_PORT_INTERNAL="${BESU_WS_PORT_INTERNAL:-8546}"
 BESU_LOGGING="${BESU_LOGGING:-INFO}"
 BOOTNODE_ENODE="${BOOTNODE_ENODE:-}"
 # Ceiling on concurrent JSON-RPC WebSocket connections. Besu's own default is 80,
-# and leaving it implicit is what took the Chile spoke down in SUP-152: leaked
-# connections filled all 80 slots, every new one was refused with "unexpected EOF",
-# Paladin could not open its block listener and never finished starting, and the
-# spoke settled nothing for fifteen days. The value is now explicit and tunable;
-# 256 leaves room above the handful of legitimate clients (Paladin, relay, NOC,
-# services) so a leak is caught by the besu_rpc_active_ws_connection_count gauge
-# well before it becomes an outage. An empty value (compose forwards ${VAR:-})
-# falls back to the default.
+# and an implicit default of 80 connections was exhausted in production: once every
+# slot was taken, Besu refused new WebSocket clients, including the local Paladin
+# node. The value is now explicit and tunable; 256 leaves room above the handful of
+# legitimate clients (Paladin, relay, NOC, services) so a leak is caught by the
+# besu_rpc_active_ws_connection_count gauge well before it becomes an outage. An
+# empty value (compose forwards ${VAR:-}) falls back to the default.
 BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS="${BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS:-256}"
 
-# Reject anything but a positive integer here, by name. Passed through, a typo makes
-# Besu fail on option parsing inside a restart loop, and 0 starts a node that refuses
-# every WebSocket client, which is the outage this setting exists to prevent.
+# Reject anything but an integer in [1, 2147483647] here, by name. Besu parses the
+# option as a Java int: a typo or a larger value makes it fail option parsing inside
+# a restart loop, and 0 starts a node that refuses every WebSocket client, which is
+# the outage this setting exists to prevent.
 case "${BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS}" in
     [1-9]*[!0-9]* | [!1-9]*)
         echo "[entry] ERROR: BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS must be a positive integer, got '${BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS}'"
         exit 1
         ;;
 esac
+# The length check keeps the numeric comparison within the shell's integer range.
+if [ "${#BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS}" -gt 10 ] || [ "${BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS}" -gt 2147483647 ]; then
+    echo "[entry] ERROR: BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS must be at most 2147483647, got '${BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS}'"
+    exit 1
+fi
 
 # Build NAT flags based on profile
 # ADR-001 three-profile matrix:

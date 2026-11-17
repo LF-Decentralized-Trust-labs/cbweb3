@@ -3,11 +3,10 @@
 // Every Besu entrypoint must pass an explicit, parameterised WebSocket connection
 // ceiling, and every compose file that runs it must forward the parameter.
 //
-// SUP-152: the Chile central bank's Besu ran on the implicit default of
-// --rpc-ws-max-active-connections=80, set nowhere in these templates. Leaked
-// connections filled all 80 slots and every new connection was refused with
-// "unexpected EOF". The local Paladin node could not open its block listener, never
-// finished starting, and the spoke settled nothing for fifteen days.
+// An implicit default of 80 connections was exhausted in production: Besu ran on
+// --rpc-ws-max-active-connections=80, set nowhere in these templates, and once leaked
+// connections filled every slot it refused new WebSocket clients, including the local
+// Paladin node.
 //
 // The entrypoint is EXECUTED here against a stub besu binary, not grepped. What
 // matters is the argument vector Besu receives; a flag that is present in the
@@ -107,16 +106,19 @@ func TestBesuEntrypoint_WebSocketLimitDefaultsExplicitly(t *testing.T) {
 
 func TestBesuEntrypoint_WebSocketLimitIsOverridable(t *testing.T) {
 	for _, tmpl := range besuTemplateDirs {
-		t.Run(tmpl, func(t *testing.T) {
-			args, out, err := runEntrypoint(t, tmpl, map[string]string{wsLimitVar: "512"})
-			if err != nil {
-				t.Fatalf("entry.sh failed with %s=512: %v\n%s", wsLimitVar, err, out)
-			}
-			got := wsLimitArgs(args)
-			if len(got) != 1 || got[0] != wsLimitFlag+"=512" {
-				t.Fatalf("Besu received %v, want exactly [%s=512]", got, wsLimitFlag)
-			}
-		})
+		// 2147483647 is the largest value Besu accepts; the bound must not refuse it.
+		for _, v := range []string{"512", "2147483647"} {
+			t.Run(tmpl+"/"+v, func(t *testing.T) {
+				args, out, err := runEntrypoint(t, tmpl, map[string]string{wsLimitVar: v})
+				if err != nil {
+					t.Fatalf("entry.sh failed with %s=%s: %v\n%s", wsLimitVar, v, err, out)
+				}
+				got := wsLimitArgs(args)
+				if len(got) != 1 || got[0] != wsLimitFlag+"="+v {
+					t.Fatalf("Besu received %v, want exactly [%s=%s]", got, wsLimitFlag, v)
+				}
+			})
+		}
 	}
 }
 
@@ -138,13 +140,13 @@ func TestBesuEntrypoint_WebSocketLimitEmptyFallsBackToDefault(t *testing.T) {
 	}
 }
 
-// A value that is not a positive integer must stop the container with a message
-// naming the variable. Passing it through would make Besu fail with a generic
-// option-parsing error and a restart loop, or, for 0, start a node that refuses
-// every WebSocket client.
+// A value that is not an integer in [1, 2147483647] must stop the container with a
+// message naming the variable. Passing it through would make Besu fail with a generic
+// option-parsing error and a restart loop (Besu parses the option as a Java int), or,
+// for 0, start a node that refuses every WebSocket client.
 func TestBesuEntrypoint_WebSocketLimitRejectsInvalidValues(t *testing.T) {
 	for _, tmpl := range besuTemplateDirs {
-		for _, bad := range []string{"0", "-5", "abc", "12x", "1 2", "08"} {
+		for _, bad := range []string{"0", "-5", "abc", "12x", "1 2", "08", "2147483648", "99999999999", "99999999999999999999999"} {
 			t.Run(tmpl+"/"+bad, func(t *testing.T) {
 				args, out, err := runEntrypoint(t, tmpl, map[string]string{wsLimitVar: bad})
 				if err == nil {

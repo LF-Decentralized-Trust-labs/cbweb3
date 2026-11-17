@@ -40,7 +40,8 @@ services:
       - "--rpc-ws-host=0.0.0.0"
       - "--rpc-http-port=8545"
       - "--rpc-ws-port=8546"
-      # Explicit ceiling; Besu's implicit 80 was exhausted in SUP-152 (Scenario A).
+      # Explicit ceiling; Besu's implicit default of 80 was exhausted in production. The
+      # toolkit validates the value and writes it into the env it renders.
       - "--rpc-ws-max-active-connections=${BESU_RPC_WS_MAX_ACTIVE_CONNECTIONS:-256}"
       - "--p2p-port=30303"
     ports:
