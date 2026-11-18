@@ -2,7 +2,11 @@
 
 package domain
 
-import "time"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"time"
+)
 
 // FXState mirrors the on-chain FXAgreementState enum.
 type FXState string
@@ -44,8 +48,70 @@ type FXAgreementRecord struct {
 	// Pente bilateral context — optional, populated when Pente integration is active.
 	GroupID         string // Pente privacy group identifier
 	ContractAddress string // deployed FXAgreement Pente contract address
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// Pending records an on-chain operation that was, or may have been, accepted by Paladin but
+	// whose outcome is not known yet (see FXPending). Empty when nothing is pending.
+	Pending   FXPending
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// FXPendingOp names an on-chain FX operation whose outcome is not known yet.
+type FXPendingOp string
+
+const (
+	FXPendingPropose FXPendingOp = "propose"
+	FXPendingAccept  FXPendingOp = "accept"
+	FXPendingReject  FXPendingOp = "reject"
+	FXPendingCancel  FXPendingOp = "cancel"
+	FXPendingSettle  FXPendingOp = "settle"
+)
+
+// TargetState is the on-chain state the agreement reaches when the operation completes.
+func (op FXPendingOp) TargetState() FXState {
+	switch op {
+	case FXPendingPropose:
+		return FXStateProposed
+	case FXPendingAccept:
+		return FXStateAccepted
+	case FXPendingReject:
+		return FXStateRejected
+	case FXPendingCancel:
+		return FXStateCancelled
+	case FXPendingSettle:
+		return FXStateSettled
+	default:
+		return FXStateInvalid
+	}
+}
+
+// FXPending is an operation submitted to Paladin whose receipt has not been seen.
+//
+// Paladin v1.0.0 can leave a private transaction pending indefinitely and cannot cancel it
+// (upstream LFDT-Paladin/paladin#1356). Such a transaction may still commit, days later. The
+// record keeps the operation so that the database can be reconciled with the chain when it
+// does (FXPendingReconciler), and so that no second operation is submitted for the same
+// agreement meanwhile.
+//
+// A pending propose is stored with State INVALID: the agreement is not on chain yet, and the
+// relay forwards only PROPOSED agreements, so nothing is propagated until it is confirmed.
+type FXPending struct {
+	Op    FXPendingOp
+	TxID  string    // Paladin transaction id; empty when the submission got no answer at all
+	Since time.Time // when the operation was submitted
+}
+
+// IsSet reports whether an operation is pending.
+func (p FXPending) IsSet() bool { return p.Op != "" }
+
+// OnChainTradeID is the bytes32 trade id an off-chain trade id maps to on chain: the id itself
+// when it is 32 bytes of hex, otherwise its SHA-256.
+func OnChainTradeID(tradeID string) [32]byte {
+	var out [32]byte
+	if b, err := hex.DecodeString(tradeID); err == nil && len(b) == 32 {
+		copy(out[:], b)
+		return out
+	}
+	return sha256.Sum256([]byte(tradeID))
 }
 
 // EventSource indicates the origin of a lifecycle event.

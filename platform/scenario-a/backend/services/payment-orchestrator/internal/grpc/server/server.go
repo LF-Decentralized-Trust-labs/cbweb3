@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -1104,6 +1105,67 @@ var decimalString = regexp.MustCompile(`^\d+(\.\d+)?$`)
 // exactly one way to write a given amount.
 var integerString = regexp.MustCompile(`^\d+$`)
 
+// fxChainError maps a failed on-chain FX call to a gRPC status.
+//
+// Three outcomes of a private submission are not "it failed, retry": a stuck Pente transaction
+// on this node made the adapter refuse to submit, Paladin could not be reached, or the
+// transaction was (or may have been) accepted and its outcome is unknown. All three used to
+// surface as Internal, and callers resubmitted under a new trade id, which on Paladin v1.0.0 adds
+// another transaction that cannot complete (upstream LFDT-Paladin/paladin#1356).
+// FailedPrecondition reaches the portal as 409 and Unavailable as 503; anything else keeps the
+// Internal it always had.
+//
+// The message carries trade_id=<id>: on a propose the trade id is generated here, and an
+// unconfirmed propose returns no response, so the error is the only place the caller learns
+// which trade to follow up.
+func (s *paymentOrchestratorService) fxChainError(tradeID, op string, err error) error {
+	switch {
+	case errors.Is(err, ports.ErrPrivacyLayerStuck), errors.Is(err, ports.ErrPrivateTxUnconfirmed):
+		s.logger.Warn("on-chain FX call not completed; do not resubmit until the pending private transaction resolves",
+			"trade_id", tradeID, "operation", op, "error", err.Error())
+		return status.Errorf(codes.FailedPrecondition, "on-chain FX %s (trade_id=%s): %v", op, tradeID, err)
+	case errors.Is(err, ports.ErrPrivacyLayerUnavailable):
+		s.logger.Warn("on-chain FX call refused: the privacy layer is not answering",
+			"trade_id", tradeID, "operation", op, "error", err.Error())
+		return status.Errorf(codes.Unavailable, "on-chain FX %s (trade_id=%s): %v", op, tradeID, err)
+	default:
+		return status.Errorf(codes.Internal, "on-chain FX %s: %v", op, err)
+	}
+}
+
+// recordPending persists an operation whose outcome is unknown (ErrPrivateTxUnconfirmed), so
+// that the database can be reconciled with the chain when it completes (FXPendingReconciler)
+// and no second operation is submitted for the agreement meanwhile. Any other error is left
+// alone. A failure to persist is logged: the caller still gets the unconfirmed error.
+func (s *paymentOrchestratorService) recordPending(ctx context.Context, record *domain.FXAgreementRecord, op domain.FXPendingOp, err error, isCreate bool) {
+	if !errors.Is(err, ports.ErrPrivateTxUnconfirmed) {
+		return
+	}
+	now := time.Now().UTC()
+	record.Pending = domain.FXPending{Op: op, TxID: ports.UnconfirmedTxID(err), Since: now}
+	record.UpdatedAt = now
+	if saveErr := s.saveFXAgreement(ctx, record, isCreate); saveErr != nil {
+		s.logger.Error("could not record a pending FX operation; reconcile this trade manually",
+			"trade_id", record.TradeID, "operation", string(op), "paladin_tx_id", record.Pending.TxID, "error", saveErr.Error())
+		return
+	}
+	s.logger.Warn("FX operation recorded as pending until its private transaction resolves",
+		"trade_id", record.TradeID, "operation", string(op), "paladin_tx_id", record.Pending.TxID)
+}
+
+// pendingConflict refuses a new operation on an agreement that already has one pending:
+// submitting it would add a second private transaction behind one that may never complete.
+func pendingConflict(record *domain.FXAgreementRecord, op string) error {
+	txID := record.Pending.TxID
+	if txID == "" {
+		txID = "unknown"
+	}
+	return status.Errorf(codes.FailedPrecondition,
+		"FX %s refused (trade_id=%s): a %s submitted at %s is still pending (Paladin transaction %s); "+
+			"no other operation is submitted for this agreement until it resolves",
+		op, record.TradeID, record.Pending.Op, record.Pending.Since.UTC().Format(time.RFC3339), txID)
+}
+
 func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req *pb.ProposeFXAgreementRequest) (*pb.ProposeFXAgreementResponse, error) {
 	if req.CounterpartyB == "" || req.OriginAmount == "" || req.CounterAmount == "" ||
 		req.OriginCurrency == "" || req.CounterCurrency == "" || req.Rate == "" || req.ExpiryDate == 0 {
@@ -1181,6 +1243,9 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 	tradeID := req.TradeId
 	if tradeID == "" {
 		tradeID = newUUID()
+	} else if existing, err := s.getFXAgreement(ctx, tradeID); err == nil && existing != nil && existing.Pending.IsSet() {
+		// A caller (or the relay) retrying a propose whose first submission is still pending.
+		return nil, pendingConflict(existing, "propose")
 	}
 
 	// Bind the originator to the authenticated caller on a normal (non-on-behalf)
@@ -1284,7 +1349,11 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 			txHash, err = fxClient.Propose(fxCtx, params)
 		}
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "on-chain FX propose: %v", err)
+			// An unconfirmed propose may still commit: keep the record, as INVALID (not on chain
+			// yet, so the relay does not forward it), with the pending operation.
+			record.State = domain.FXStateInvalid
+			s.recordPending(ctx, record, domain.FXPendingPropose, err, true)
+			return nil, s.fxChainError(tradeID, "propose", err)
 		}
 		record.OnChainTxHash = txHash
 	}
@@ -1313,6 +1382,9 @@ func (s *paymentOrchestratorService) AcceptFXAgreement(ctx context.Context, req 
 	}
 	if record == nil {
 		return nil, status.Errorf(codes.NotFound, "FX agreement %q not found", req.TradeId)
+	}
+	if record.Pending.IsSet() {
+		return nil, pendingConflict(record, "accept")
 	}
 	if record.State != domain.FXStateProposed {
 		return nil, status.Errorf(codes.FailedPrecondition, "FX agreement %q is in state %s, expected PROPOSED", req.TradeId, record.State)
@@ -1357,7 +1429,8 @@ func (s *paymentOrchestratorService) AcceptFXAgreement(ctx context.Context, req 
 			txHash, err = fxClient.Accept(fxCtx, tradeIDBytes)
 		}
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "on-chain FX accept: %v", err)
+			s.recordPending(ctx, record, domain.FXPendingAccept, err, false)
+			return nil, s.fxChainError(req.TradeId, "accept", err)
 		}
 	}
 
@@ -1392,6 +1465,9 @@ func (s *paymentOrchestratorService) RejectFXAgreement(ctx context.Context, req 
 	if record == nil {
 		return nil, status.Errorf(codes.NotFound, "FX agreement %q not found", req.TradeId)
 	}
+	if record.Pending.IsSet() {
+		return nil, pendingConflict(record, "reject")
+	}
 	if record.State != domain.FXStateProposed {
 		return nil, status.Errorf(codes.FailedPrecondition, "FX agreement %q is in state %s, expected PROPOSED", req.TradeId, record.State)
 	}
@@ -1418,7 +1494,8 @@ func (s *paymentOrchestratorService) RejectFXAgreement(ctx context.Context, req 
 			txHash, err = fxClient.Reject(fxCtx, tradeIDBytes)
 		}
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "on-chain FX reject: %v", err)
+			s.recordPending(ctx, record, domain.FXPendingReject, err, false)
+			return nil, s.fxChainError(req.TradeId, "reject", err)
 		}
 	}
 
@@ -1448,6 +1525,9 @@ func (s *paymentOrchestratorService) CancelFXAgreement(ctx context.Context, req 
 	if record == nil {
 		return nil, status.Errorf(codes.NotFound, "FX agreement %q not found", req.TradeId)
 	}
+	if record.Pending.IsSet() {
+		return nil, pendingConflict(record, "cancel")
+	}
 	if record.State != domain.FXStateProposed && record.State != domain.FXStateAccepted {
 		return nil, status.Errorf(codes.FailedPrecondition, "FX agreement %q is in state %s, expected PROPOSED or ACCEPTED", req.TradeId, record.State)
 	}
@@ -1466,7 +1546,8 @@ func (s *paymentOrchestratorService) CancelFXAgreement(ctx context.Context, req 
 		var err error
 		txHash, err = fxClient.Cancel(fxCtx, tradeIDBytes)
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "on-chain FX cancel: %v", err)
+			s.recordPending(ctx, record, domain.FXPendingCancel, err, false)
+			return nil, s.fxChainError(req.TradeId, "cancel", err)
 		}
 	}
 
@@ -1496,6 +1577,9 @@ func (s *paymentOrchestratorService) SettleFXAgreement(ctx context.Context, req 
 	if record == nil {
 		return nil, status.Errorf(codes.NotFound, "FX agreement %q not found", req.TradeId)
 	}
+	if record.Pending.IsSet() {
+		return nil, pendingConflict(record, "settle")
+	}
 	if record.State != domain.FXStateAccepted {
 		return nil, status.Errorf(codes.FailedPrecondition, "FX agreement %q is in state %s, expected ACCEPTED", req.TradeId, record.State)
 	}
@@ -1513,7 +1597,8 @@ func (s *paymentOrchestratorService) SettleFXAgreement(ctx context.Context, req 
 		var err error
 		txHash, err = fxClient.Settle(fxCtx, tradeIDBytes)
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "on-chain FX settle: %v", err)
+			s.recordPending(ctx, record, domain.FXPendingSettle, err, false)
+			return nil, s.fxChainError(req.TradeId, "settle", err)
 		}
 	}
 
@@ -1834,12 +1919,8 @@ func (s *paymentOrchestratorService) appendFXAuditEvent(ctx context.Context, tra
 // tradeIDBytes32 converts a trade ID string to bytes for the on-chain [32]byte parameter.
 // If hex-decodable, uses the hex bytes; otherwise hashes the string.
 func tradeIDBytes32(tradeID string) []byte {
-	b, err := hex.DecodeString(tradeID)
-	if err == nil && len(b) == 32 {
-		return b
-	}
-	h := sha256.Sum256([]byte(tradeID))
-	return h[:]
+	b := domain.OnChainTradeID(tradeID)
+	return b[:]
 }
 
 // tradeIDBytes is an alias used in the FX agreement gate for HTLC lock.

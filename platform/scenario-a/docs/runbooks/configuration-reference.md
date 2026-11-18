@@ -171,6 +171,8 @@ Default mapping: bank-a=0, bank-b=1, central-bank-a=2, bank-c=3, bank-d=4, centr
 |----------|---------|------|-------------|
 | `PENTE_ENABLED` | `false` | bool | Enable Pente integration |
 | `PENTE_BASE_URL` | `http://host.docker.internal:31658` | URL | Paladin/Pente node URL |
+| `PENTE_STUCK_TX_THRESHOLD` | `2m` | duration | How long a Pente transaction may stay pending on this node before the orchestrator refuses new private transactions (409). Paladin v1.0.0 cannot cancel a stuck one, and each new submission adds to it (upstream LFDT-Paladin/paladin#1356). The check is shared across concurrent submissions and its answer reused for 5 s |
+| `FX_PENDING_RECONCILE_INTERVAL_SEC` | `30` | integer (seconds) | How often the orchestrator reconciles FX agreements whose last on-chain operation was submitted but not confirmed. Runs on every node with `PENTE_ENABLED=true`. See `fx-agreement-reconciliation.md`, "Pending on-chain operations" |
 
 ---
 

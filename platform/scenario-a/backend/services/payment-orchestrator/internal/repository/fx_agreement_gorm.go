@@ -82,8 +82,32 @@ func (r *gormFXAgreementRepository) UpdateAgreement(ctx context.Context, rec *do
 			"on_chain_tx_hash": rec.OnChainTxHash,
 			"group_id":         rec.GroupID,
 			"contract_address": rec.ContractAddress,
+			"pending_op":       string(rec.Pending.Op),
+			"pending_tx_id":    rec.Pending.TxID,
+			"pending_since":    pendingSince(rec.Pending),
 			"updated_at":       rec.UpdatedAt,
 		}).Error
+}
+
+// ListPendingAgreements returns agreements with an on-chain operation whose outcome is not
+// known yet, oldest first, at most limit of them.
+func (r *gormFXAgreementRepository) ListPendingAgreements(ctx context.Context, limit int) ([]*domain.FXAgreementRecord, error) {
+	if limit <= 0 || limit > MaxFXAgreementPageSize {
+		limit = MaxFXAgreementPageSize
+	}
+	var models []FXAgreementModel
+	if err := r.db.WithContext(ctx).
+		Where("pending_op IS NOT NULL AND pending_op <> ''").
+		Order("pending_since ASC, trade_id ASC").
+		Limit(limit).
+		Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domain.FXAgreementRecord, len(models))
+	for i, m := range models {
+		out[i] = fxAgreementFromModel(m)
+	}
+	return out, nil
 }
 
 // MaxFXAgreementPageSize bounds ListAgreements (finding R2-M-14). The query had no LIMIT at
