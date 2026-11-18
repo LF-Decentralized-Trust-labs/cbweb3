@@ -31,6 +31,36 @@ test("runtime.stop() stops both connector and watcher", async () => {
     createWatcher: async () => ({ watcher: {}, stop: () => { stops++; } }),
   };
   const [rt] = await createSpokeRuntimes([mk("a")], f);
-  rt.stop();
+  await rt.stop();
   assert.equal(stops, 2);
+});
+
+// A stop that fails is a Besu WebSocket that may stay open: it must reach the caller.
+test("runtime.stop() waits for both stops and reports the one that failed", async () => {
+  let watcherStopped = false;
+  const f: RuntimeFactories = {
+    createConnector: async () => ({ connector: {}, stop: async () => { throw new Error("provider gone"); } }),
+    createWatcher: async () => ({
+      watcher: {},
+      stop: async () => { await new Promise((r) => setTimeout(r, 20)); watcherStopped = true; },
+    }),
+  };
+  const [rt] = await createSpokeRuntimes([mk("a")], f);
+  await assert.rejects(rt.stop(), (err: unknown) => {
+    assert.ok(err instanceof AggregateError);
+    assert.match(String(err.message), /provider gone/);
+    return true;
+  });
+  assert.equal(watcherStopped, true);
+});
+
+// The connector already holds a Besu WebSocket when the watcher fails; nothing else owns it.
+test("a failed watcher creation stops the connector it was paired with", async () => {
+  let connectorStops = 0;
+  const f: RuntimeFactories = {
+    createConnector: async () => ({ connector: {}, stop: () => { connectorStops++; } }),
+    createWatcher: async () => { throw new Error("watcher boom"); },
+  };
+  await assert.rejects(createSpokeRuntimes([mk("a")], f), /watcher boom/);
+  assert.equal(connectorStops, 1);
 });

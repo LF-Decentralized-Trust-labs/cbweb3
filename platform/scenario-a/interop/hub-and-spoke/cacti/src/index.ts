@@ -24,6 +24,8 @@ import express, { Request, Response } from "express";
 import { randomUUID, timingSafeEqual } from "crypto";
 import { PluginRegistry } from "@hyperledger/cactus-core";
 import { PluginLedgerConnectorBesu } from "@hyperledger/cactus-plugin-ledger-connector-besu";
+import { ClosingBesuConnector, closeConnectors } from "./closing-besu-connector";
+import { logJson } from "./structured-log";
 import { config } from "./config";
 import { HtlcRelay, SpokeDep } from "./htlc-relay";
 import { RelayStore } from "./relay-store";
@@ -87,15 +89,15 @@ async function main(): Promise<void> {
   const pluginRegistry = new PluginRegistry();
   const connectors = new Map<string, PluginLedgerConnectorBesu>();
   const connectorFactory = async (spoke: SpokeDep): Promise<PluginLedgerConnectorBesu> => {
-    const connector = new PluginLedgerConnectorBesu({
+    // ClosingBesuConnector: the library shutdown() leaves the WebSocket open on Besu, and
+    // open() closes the connector again when its initialisation fails.
+    return ClosingBesuConnector.open({
       instanceId: `besu-connector-${spoke.id}-${randomUUID()}`,
       rpcApiHttpHost: spoke.besuRpc,
       rpcApiWsHost: spoke.besuWs,
       pluginRegistry,
       logLevel: "INFO",
     });
-    await connector.onPluginInit();
-    return connector;
   };
 
   // ── Relay store + dynamic spoke registry ─────────────────────────────────
@@ -343,16 +345,25 @@ async function main(): Promise<void> {
   });
 
   // ── Graceful shutdown ───────────────────────────────────────────────────
-  const shutdown = (): void => {
-    console.log("Shutting down…");
+  // Every connector is closed, and every failed close logged, before the process exits: a
+  // close that has not finished when process.exit() runs may never send its close frame.
+  let shuttingDown = false;
+  const shutdown = async (): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logJson("info", "shutting down");
     abortController.abort();
-    for (const connector of connectors.values()) {
-      connector.shutdown().catch(() => {});
+    const failures = await closeConnectors(connectors);
+    for (const { spokeId, error } of failures) {
+      logJson("warn", "closing the Besu connector on exit failed; its WebSocket may stay open on the Besu node", {
+        spoke: spokeId,
+        error: String(error),
+      });
     }
     httpServer.close(() => process.exit(0));
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", () => void shutdown());
+  process.on("SIGTERM", () => void shutdown());
 }
 
 main().catch((err: unknown) => {

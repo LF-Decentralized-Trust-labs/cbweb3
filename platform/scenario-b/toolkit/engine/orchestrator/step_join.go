@@ -300,6 +300,10 @@ func (c JoinConfig) ComposeEnv() []string {
 		}
 	}
 	vars := map[string]string{
+		// Validated by the start-besu step; an invalid value is left empty here so the step,
+		// not compose, reports it.
+		BesuWSMaxActiveConnectionsVar: besuWSMaxActiveConnectionsOrEmpty(),
+
 		// besu (join template)
 		"BESU_IMAGE":       c.BesuImage,
 		"CONTAINER_PREFIX": c.ContainerPrefix,
@@ -578,6 +582,10 @@ func JoinSteps(c JoinConfig) []Step {
 			Name: "start-besu-join",
 			Deps: []string{"write-static-nodes"},
 			Run: func(ctx context.Context) error {
+				// Refuse an invalid ceiling by name before Besu sees it.
+				if _, err := besuWSMaxActiveConnections(); err != nil {
+					return err
+				}
 				if _, err := c.Runner.Run(ctx, "docker", c.composeUpArgs("entity-besu-join")...); err != nil {
 					return err
 				}

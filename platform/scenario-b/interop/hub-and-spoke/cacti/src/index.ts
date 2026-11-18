@@ -16,7 +16,8 @@ import express, { Request, Response } from "express";
 import { randomUUID } from "crypto";
 import { Server as SocketIoServer } from "socket.io";
 import { PluginRegistry } from "@hyperledger/cactus-core";
-import { PluginLedgerConnectorBesu } from "@hyperledger/cactus-plugin-ledger-connector-besu";
+import { ClosingBesuConnector } from "./closing-besu-connector";
+import { logJson } from "./structured-log";
 import { config, loadSpokesFromEnv } from "./config";
 import { SpokeRegistry, Spoke } from "./spoke-registry";
 import { RelayStore } from "./relay-store";
@@ -79,17 +80,29 @@ async function main(): Promise<void> {
   // web services (watchBlocksV1). The "watcher" handle mirrors the connector.
   const factories: RuntimeFactories = {
     async createConnector(spoke: Spoke) {
-      const connector = new PluginLedgerConnectorBesu({
+      // ClosingBesuConnector: the library shutdown() leaves the WebSocket open on Besu, and
+      // open() closes the connector again when its initialisation fails.
+      const connector = await ClosingBesuConnector.open({
         instanceId: `besu-connector-${spoke.spokeId}-${randomUUID()}`,
         rpcApiHttpHost: spoke.besuRpc,
         rpcApiWsHost: spoke.besuWs,
         pluginRegistry,
         logLevel: "INFO",
       });
-      await connector.onPluginInit();
-      await connector.registerWebServices(app, ioServer);
+      try {
+        await connector.registerWebServices(app, ioServer);
+      } catch (err) {
+        await connector.shutdown().catch((closeErr: unknown) => {
+          logJson("warn", "closing the Besu connector after a failed web service registration failed; its WebSocket may stay open on the Besu node", {
+            spoke: spoke.spokeId,
+            error: String(closeErr),
+          });
+        });
+        throw err;
+      }
       console.log(`[cacti] connector for ${spoke.spokeId} initialized`);
-      return { connector, stop: () => connector.shutdown().catch(() => {}) };
+      // A failed close is not swallowed: it rejects, and the caller logs it.
+      return { connector, stop: () => connector.shutdown() };
     },
     async createWatcher(spoke: Spoke) {
       // Per-spoke watcher handle (web services registered with the connector).
@@ -184,16 +197,30 @@ async function main(): Promise<void> {
     console.log(`Cacti Liquidity Relay API listening on :${config.apiPort}`);
   });
 
-  const shutdown = (): void => {
-    console.log("Shutting down…");
+  // Every runtime is stopped, and every failed stop logged, before the process exits: a close
+  // that has not finished when process.exit() runs may never send its close frame.
+  let shuttingDown = false;
+  const shutdown = async (): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logJson("info", "shutting down");
     abortController.abort();
     lcrWatcher?.stop();
-    for (const rt of runtimes.values()) rt.stop();
+    await Promise.all(
+      [...runtimes.values()].map((rt) =>
+        rt.stop().catch((err: unknown) => {
+          logJson("warn", "stopping the spoke runtime on exit failed; its Besu WebSocket may stay open on the Besu node", {
+            spoke: rt.spokeId,
+            error: String(err),
+          });
+        }),
+      ),
+    );
     ioServer.close();
     httpServer.close(() => process.exit(0));
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", () => void shutdown());
+  process.on("SIGTERM", () => void shutdown());
 }
 
 main().catch((err: unknown) => {

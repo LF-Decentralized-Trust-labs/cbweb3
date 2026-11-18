@@ -718,6 +718,10 @@ func (c SpokeConfig) ComposeEnv() []string {
 		hubPort = u.Port()
 	}
 	vars := map[string]string{
+		// Validated by the start-besu step; an invalid value is left empty here so the step,
+		// not compose, reports it.
+		BesuWSMaxActiveConnectionsVar: besuWSMaxActiveConnectionsOrEmpty(),
+
 		// besu (founder template)
 		"BESU_IMAGE":           c.BesuImage,
 		"CONTAINER_PREFIX":     c.ContainerPrefix,
@@ -1138,6 +1142,10 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				// so it uses the bootnode-less founder template (later banks join via
 				// entity-besu with BOOTNODE_ENODE from the spoke bundle). Plumbing
 				// (${...}) comes from the runner's process env (ComposeEnv).
+				// Refuse an invalid ceiling by name before Besu sees it.
+				if _, err := besuWSMaxActiveConnections(); err != nil {
+					return err
+				}
 				if _, err := c.Runner.Run(ctx, "docker", c.composeUpArgs("entity-besu-founder")...); err != nil {
 					return err
 				}
