@@ -1,5 +1,5 @@
 # Build stage
-FROM node:22-alpine AS builder
+FROM node:26-alpine AS builder
 WORKDIR /app
 
 # Copy proto file needed at runtime by @grpc/proto-loader
@@ -27,7 +27,7 @@ COPY interop/hub-and-spoke/cacti/src/ ./src/
 RUN npx tsc
 
 # ── Runtime stage ──────────────────────────────────────────────────────────
-FROM node:22-alpine
+FROM node:26-alpine
 WORKDIR /app
 
 RUN apk add --no-cache ca-certificates
