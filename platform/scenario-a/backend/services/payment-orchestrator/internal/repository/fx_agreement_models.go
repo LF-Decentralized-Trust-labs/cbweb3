@@ -31,8 +31,13 @@ type FXAgreementModel struct {
 	OnChainTxHash   string    `gorm:"column:on_chain_tx_hash"`
 	GroupID         string    `gorm:"column:group_id"`
 	ContractAddress string    `gorm:"column:contract_address"`
-	CreatedAt       time.Time `gorm:"autoCreateTime"`
-	UpdatedAt       time.Time `gorm:"autoUpdateTime"`
+	// Pending on-chain operation (domain.FXPending). Nullable, so AutoMigrate adds them to an
+	// existing table without a backfill.
+	PendingOp    string     `gorm:"column:pending_op;index:idx_fx_agreements_pending_op"`
+	PendingTxID  string     `gorm:"column:pending_tx_id"`
+	PendingSince *time.Time `gorm:"column:pending_since"`
+	CreatedAt    time.Time  `gorm:"autoCreateTime"`
+	UpdatedAt    time.Time  `gorm:"autoUpdateTime"`
 }
 
 func (FXAgreementModel) TableName() string { return "fx_agreements" }
@@ -96,9 +101,28 @@ func fxAgreementToModel(r *domain.FXAgreementRecord) FXAgreementModel {
 		OnChainTxHash:   r.OnChainTxHash,
 		GroupID:         r.GroupID,
 		ContractAddress: r.ContractAddress,
+		PendingOp:       string(r.Pending.Op),
+		PendingTxID:     r.Pending.TxID,
+		PendingSince:    pendingSince(r.Pending),
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.UpdatedAt,
 	}
+}
+
+func pendingSince(p domain.FXPending) *time.Time {
+	if !p.IsSet() || p.Since.IsZero() {
+		return nil
+	}
+	t := p.Since
+	return &t
+}
+
+func pendingFromModel(m FXAgreementModel) domain.FXPending {
+	p := domain.FXPending{Op: domain.FXPendingOp(m.PendingOp), TxID: m.PendingTxID}
+	if m.PendingSince != nil {
+		p.Since = *m.PendingSince
+	}
+	return p
 }
 
 func fxAgreementFromModel(m FXAgreementModel) *domain.FXAgreementRecord {
@@ -123,6 +147,7 @@ func fxAgreementFromModel(m FXAgreementModel) *domain.FXAgreementRecord {
 		OnChainTxHash:   m.OnChainTxHash,
 		GroupID:         m.GroupID,
 		ContractAddress: m.ContractAddress,
+		Pending:         pendingFromModel(m),
 		CreatedAt:       m.CreatedAt,
 		UpdatedAt:       m.UpdatedAt,
 	}
