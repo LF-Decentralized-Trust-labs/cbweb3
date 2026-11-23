@@ -21,6 +21,7 @@ import {
 } from "@cbweb3/ui";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { agreementInputToBase } from "../features/fx/agreement-amounts";
 import {
   deriveParties,
   NO_PARTY_CHOICES,
@@ -30,8 +31,6 @@ import {
   type PartyChoices,
 } from "../features/fx/proposal-parties";
 import { spokeIdsFromRoster } from "../features/fx/spoke-roster";
-import { displayToBase } from "../types";
-import { usePaymentStore } from "../stores";
 import { useAuthStore } from "../stores/auth.store";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
 import { useIdentityStore } from "../stores/identity.store";
@@ -93,8 +92,6 @@ const defaultExpiry = () => {
 export function AgreementProposalPage() {
   const navigate = useNavigate();
   const propose = useFxAgreementStore((s) => s.propose);
-  // The FX leg carries the same unit as the HTLC leg that settles it (ADR-009).
-  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
   const status = useFxAgreementStore((s) => s.status);
   const identities = useIdentityStore((s) => s.identities);
   const fetchIdentities = useIdentityStore((s) => s.fetchAll);
@@ -256,8 +253,8 @@ export function AgreementProposalPage() {
         beneficiary: beneficiary.trim(),
         // Scaled with the SAME decimals the HTLC leg uses. The two must stay equal:
         // sample-tryout locks an HTLC of the origin amount against this very field.
-        origin_amount: displayToBase(parsedOrigin.canonical, tCeBMDecimals),
-        counter_amount: displayToBase(parsedCounter.canonical, tCeBMDecimals),
+        origin_amount: agreementInputToBase(parsedOrigin.canonical),
+        counter_amount: agreementInputToBase(parsedCounter.canonical),
         origin_currency: originCurrency,
         counter_currency: counterCurrency,
         rate: rate,
