@@ -13,7 +13,11 @@ export interface SpokeRuntime {
   spokeId: string;
   connector: unknown;
   watcher: unknown;
-  stop(): void;
+  /**
+   * Stops the connector and the watcher and waits for both. Rejects with an AggregateError
+   * listing every stop that failed, so a connector left open is reported, never swallowed.
+   */
+  stop(): Promise<void>;
 }
 
 export interface RuntimeFactories {
@@ -29,16 +33,31 @@ export async function createSpokeRuntimes(
   const runtimes: SpokeRuntime[] = [];
   for (const spoke of spokes) {
     const c = await factories.createConnector(spoke);
-    const w = await factories.createWatcher(spoke);
+    let w: Awaited<ReturnType<RuntimeFactories["createWatcher"]>>;
+    try {
+      w = await factories.createWatcher(spoke);
+    } catch (watchErr) {
+      // The connector already holds a Besu WebSocket; with no runtime to own it, nobody else
+      // would ever close it.
+      await stopAll(spoke.spokeId, [c.stop]).catch((closeErr: unknown) => {
+        throw new AggregateError([watchErr, closeErr], `${spoke.spokeId}: watcher creation failed and stopping its connector also failed`);
+      });
+      throw watchErr;
+    }
     runtimes.push({
       spokeId: spoke.spokeId,
       connector: c.connector,
       watcher: w.watcher,
-      stop: () => {
-        void c.stop();
-        void w.stop();
-      },
+      stop: () => stopAll(spoke.spokeId, [c.stop, w.stop]),
     });
   }
   return runtimes;
+}
+
+async function stopAll(spokeId: string, stops: Array<() => void | Promise<void>>): Promise<void> {
+  const results = await Promise.allSettled(stops.map(async (stop) => stop()));
+  const errors = results.flatMap((r) => (r.status === "rejected" ? [r.reason] : []));
+  if (errors.length > 0) {
+    throw new AggregateError(errors, `${spokeId}: ${errors.map(String).join("; ")}`);
+  }
 }

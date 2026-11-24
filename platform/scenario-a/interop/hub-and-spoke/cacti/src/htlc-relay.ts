@@ -488,6 +488,9 @@ export class HtlcRelay {
     // recover from a dropped WebSocket ("connection not open on send()"), which never self-heals.
     let failures = 0;
     const RECONNECT_AFTER = 3;
+    // True once the current connector has been shut down for a rebuild whose replacement could
+    // not be built yet; the next rebuild then skips the close instead of repeating it.
+    let connectorClosed = false;
 
     // ethers Interface used only for ABI decoding of raw EvmLog topics/data.
     const iface = new ethers.Interface(HTLC_ABI);
@@ -730,10 +733,22 @@ export class HtlcRelay {
         }
         if (failures >= RECONNECT_AFTER && this.connectorFactory) {
           this.log.warn(`[${spoke.id}] reconnecting Besu connector after ${failures} consecutive failures`);
+          // Close the old connector BEFORE building the new one. Closing is what releases its
+          // Besu WebSocket slot, and when Besu is at its connection ceiling that slot is the one
+          // the new socket needs; built first, the new socket would be refused. A failed close
+          // is not fatal to the rebuild, but it is a leaked slot and must be visible.
+          if (!connectorClosed) {
+            try {
+              await connector.shutdown();
+            } catch (closeErr) {
+              this.log.warn(`[${spoke.id}] closing the replaced Besu connector failed, its WebSocket may stay open on Besu: ${String(closeErr)}`);
+            }
+            connectorClosed = true;
+          }
           try {
             const fresh = await this.connectorFactory(spoke);
-            try { await connector.shutdown(); } catch { /* best-effort */ }
             connector = fresh;
+            connectorClosed = false;
             this.cactiConnectors.set(spoke.id, fresh);
             failures = 0;
             this.log.info(`[${spoke.id}] Besu connector reconnected`);
