@@ -11,7 +11,7 @@ The **Test Net** will build upon the technological capabilities and infrastructu
 
 ## How it works
 
-CBWeb3 connects domestic central bank networks through a shared transnational hub, enabling three types of transactions:
+CBWeb3 is a sandbox reference platform for connecting domestic central-bank networks either directly (Scenario A) or through an experimental shared hub (Scenario B), covering three transaction types:
 
 ![CBWeb3 Transaction Types](docs/images/CBWeb3%20transactions.png)
 
@@ -20,6 +20,8 @@ CBWeb3 connects domestic central bank networks through a shared transnational hu
 | **Domestic issuance & redemption** | A central bank issues or redeems tCeBM within its own network |
 | **Enhanced Correspondent Banking** | Two parties settle a cross-border payment atomically using Hash Time-Lock Contracts (HTLC) |
 | **Automated Market Maker (AMM)** | Commercial banks exchange currencies through a shared liquidity pool on the transnational hub |
+
+> **Maturity note:** Scenario A has been exercised end to end by participants in a bounded sandbox. Scenario B has completed a technical happy path on a dedicated hub, but it has not been validated by participating institutions and is not production-ready. Its hub is transparent in Phase I; privacy, resilience, governance, performance and production controls remain open.
 
 ### Enhanced Correspondent Banking (PvP with HTLC)
 
@@ -41,13 +43,13 @@ A hub-based liquidity pool for multi-currency exchange:
 
 ![AMM flow](docs/images/CBWeb3%20AMM.png)
 
-Commercial banks bridge tCeBM to the transnational network, where an AMM contract determines exchange rates algorithmically and executes swaps atomically.
+In the Scenario B prototype, commercial banks bridge tCeBM to the transnational network, where an AMM contract determines exchange rates algorithmically and executes swaps. This is an experimental sandbox flow, not a production liquidity service.
 
 ---
 
 ## Architecture
 
-The platform uses a **Hub & Spoke topology**: each country operates a domestic Besu network (Spoke), connected through a shared transnational settlement layer (Hub) via Hyperledger Cacti.
+The platform uses a **Hub & Spoke topology**: each country operates a domestic Besu network (Spoke). Scenario A coordinates settlement directly between spokes; Scenario B uses a shared transnational Hub and Hyperledger Cacti-based interoperability components.
 
 ![CBWeb3 System Component Architecture](docs/images/CBWeb3-ComponentDiagramV3.png)
 

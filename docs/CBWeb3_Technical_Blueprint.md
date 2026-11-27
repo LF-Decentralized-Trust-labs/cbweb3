@@ -76,13 +76,13 @@ CBWeb3 is an IDB Lab initiative, built on the technological capabilities of LACC
 
 We set out to answer a specific question: **how can institutions with different mandates, different legal regimes and very different levels of digital readiness settle wholesale transactions with one another — atomically, privately and under their own supervision — without surrendering sovereignty over their domestic infrastructure?** Our answer is a modular hub-and-spoke architecture in which each jurisdiction runs its own ledger, privacy is treated as an architectural layer rather than a feature, and interoperability is achieved through replaceable components instead of a single mandatory platform.
 
-What CBWeb3 delivers is **more than a pilot or a prototype**. The project produced a working reference implementation — two independent permissioned blockchain networks ("spokes"), privacy-preserving token transfers, cross-network atomic settlement, an identity and compliance stack, and a roadmap toward a foreign-exchange liquidity hub. But the working code is not, by itself, the contribution we want to leave behind. The contribution is a **reusable technical and governance foundation**: a structured, documented and conformance-tested basis that institutions can adopt, adapt, validate and extend.
+CBWeb3 delivers a **working reference prototype and reusable foundation**. The project produced independent permissioned blockchain networks ("spokes"), privacy-enabled token transfers, cross-network atomic settlement, an identity and compliance stack, and an experimental foreign-exchange liquidity hub. The implementation is sandbox evidence, not a production system or institutional authorization. Its durable contribution is a **reusable technical and governance foundation**: a structured and documented basis that institutions can adopt, adapt, validate and extend.
 
 That is why the primary knowledge product is a **blueprint and not only a technical report**. A report mainly documents what happened. A blueprint enables what happens next. We have written this document so that the engineering team of a participating institution can read it, understand the decisions and their rationale, identify what they can reuse directly, and begin building — without re-deriving the architecture, re-litigating the trade-offs, or starting from zero.
 
 This framing matters for the **twelve participating banks** and for the broader regional ecosystem in three concrete ways. First, the blueprint lowers the cost of entry: an institution adopts a baseline, not a research problem. Second, it preserves optionality: because the architecture is modular and vendor-neutral, an institution can replace components — a ledger, a privacy mechanism, an interoperability connector — as its needs evolve. Third, it makes the work durable: by being developed as a **Digital Public Good** aligned with **LF Decentralized Trust (LFDT)**, the project is openly licensed, transparently governed and co-owned by the community, which is what allows it to outlive any single implementation phase or vendor relationship.
 
-In short: we set out to make regional wholesale settlement interoperable, private and sovereign-respecting; we built a working reference implementation to prove the approach; and we are leaving behind a blueprint — and a supporting Toolbox — so that the institutions of Latin America and the Caribbean can continue this work together, on open and shared foundations.
+In short: we set out to make regional wholesale settlement interoperable, privacy-aware and sovereignty-respecting; we built a working reference implementation to demonstrate the technical approach under sandbox conditions; and we are leaving behind a blueprint — and a supporting Toolbox — so that institutions can continue testing and strengthening it on open foundations.
 
 ---
 
@@ -142,10 +142,10 @@ This section defines the concrete solution space of the project. CBWeb3 is not a
 
 Two interoperability scenarios drove the design and keep it concrete:
 
-- **Scenario A — Enhanced Correspondent Banking.** Two institutions in different jurisdictions settle a cross-border obligation through cross-spoke atomic swaps. An initiator bank locks funds on its own spoke; a responder bank locks corresponding funds on the other spoke against the same cryptographic condition; a relay bridges the secret so that settlement is atomic across both ledgers, with no shared ledger and no principal risk. This scenario is implemented end-to-end in the reference platform.
-- **Scenario B — International Hub with FX Liquidity Pool.** A dedicated international hub network operates an automated-market-maker (AMM) liquidity pool for foreign exchange. Spokes settle cross-currency transactions through the hub, which provides continuous pricing and pooled liquidity. The settlement contracts for this scenario exist in the reference platform; full hub deployment, orchestration and end-to-end flows are deferred to a later phase. **[TO CONFIRM against research paper: Interoperability_Analysis_for_CBWeb3.pdf — the relative priority and target phase of Scenario B.]**
+- **Scenario A — Enhanced Correspondent Banking.** Two institutions in different jurisdictions coordinate tokenized legs through cross-spoke atomic swaps. An initiator bank locks funds on its own spoke; a responder bank locks corresponding funds on the other spoke against the same cryptographic condition; a relay bridges the secret so that the tested ledger state transitions complete together or expire and refund. This scenario is implemented end to end in the reference platform; legal discharge and finality remain jurisdiction-specific questions.
+- **Scenario B — International Hub with FX Liquidity Pool.** A dedicated international hub network on chain 1337 operates an automated-market-maker (AMM) liquidity pool for foreign exchange. Its technical happy path has run end to end in the reference environment. The Phase I hub is transparent, however, and the scenario has not been validated by participating institutions. Privacy, signer concurrency, multi-validator operation, stressed-swap performance, resilience, governance and production operations remain open.
 
-These two scenarios are deliberately complementary. Scenario A proves that atomic cross-border settlement is possible *without* central infrastructure; Scenario B explores what becomes possible *with* a shared liquidity hub. Together they let the blueprint speak honestly about a spectrum of interoperability topologies rather than advocating a single one.
+These two scenarios are deliberately complementary. Scenario A demonstrates coordinated atomic ledger behavior *without* central infrastructure under the tested configuration; Scenario B explores what becomes possible *with* a shared liquidity hub. Together they let the blueprint speak honestly about a spectrum of interoperability topologies rather than advocating a single one.
 
 ### 3.3 Problems we aimed to solve, by domain
 
@@ -161,7 +161,7 @@ These two scenarios are deliberately complementary. Scenario A proves that atomi
 
 **In scope for the current phase.** The reference implementation of Scenario A (enhanced correspondent banking) end-to-end; tokenized central bank money issuance and lifecycle (deposit, tokenization/escrow, redemption); privacy-preserving transfers; the cross-spoke atomic settlement mechanism; the identity, onboarding and compliance stack; the governance primitives; and the documentation and Toolbox assets that make the work reusable.
 
-**Intentionally deferred to later phases.** Full deployment and orchestration of the Scenario B FX hub; production-grade hardening (Section 16); broad scaling and performance optimization beyond test-network conditions; retail use cases and the additional consumer-protection obligations they carry; and integration with live external systems such as production RTGS or international messaging networks, which are designed for but not connected in this phase.
+**Intentionally deferred to later phases.** Institutional validation and production hardening of the Scenario B FX hub; a privacy design for the hub; production-grade hardening across both scenarios (Section 16); broad scaling and performance optimization beyond test-network conditions; retail use cases and the additional consumer-protection obligations they carry; and integration with live external systems such as production RTGS or international messaging networks, which are designed for but not connected in this phase.
 
 We state this scope explicitly because honesty about maturity is part of what makes a blueprint trustworthy. The value of this phase is that it establishes the foundation and validates the approach; it does not claim to deliver a production system.
 
@@ -225,7 +225,7 @@ Public experimentation has explored a spectrum of privacy techniques: relying on
 
 **What we learned.** Permissioning is not privacy. Restricting *who* can join a network does nothing to stop the institutions that are already on it from seeing one another's transactions. Wholesale use demands genuine confidentiality. But total opacity is also wrong, because supervisors must retain visibility. The workable answer is **selective disclosure**: cryptographic confidentiality toward peers, combined with a controlled, verifiable disclosure path toward regulators.
 
-**How it shaped CBWeb3.** We made privacy an architectural layer (Section 10) and adopted a privacy framework — Hyperledger Paladin — that offers a graded set of privacy domains: a notarized model where the issuing central bank retains visibility, a zero-knowledge model where even the issuer does not see amounts directly, and a privacy-preserving market-maker model for FX. Supervisors verify compliance through zero-knowledge audit, without decryption.
+**How it shaped CBWeb3.** We made privacy an architectural layer (Section 10) and adopted Hyperledger Paladin for spoke-level privacy models. The Phase I Scenario B hub does not implement a private AMM, and a governed supervisory disclosure or audit channel remains a design requirement rather than a validated capability.
 
 ### 5.5 Governance models and their operating implications
 
@@ -250,7 +250,7 @@ The summary table below distills the chapter:
 | Shared-ledger / common platform | Governance and sovereignty are harder than the technology | No single mandatory shared ledger; shared infrastructure only for bounded purposes |
 | Hub-and-spoke / interlinking | Preserves sovereignty; coordination complexity is manageable | Adopted as the core architecture |
 | Bilateral / hybrid | Does not scale; only safe with common semantics | Common settlement semantics across all topologies |
-| Privacy approaches | Permissioning ≠ privacy; need selective disclosure | Privacy as a layer; graded Paladin domains; ZK-audit for supervisors |
+| Privacy approaches | Permissioning ≠ privacy; need selective disclosure | Spoke-level Paladin privacy; supervisory disclosure and hub privacy remain open design items |
 | Governance models | Governance decides adoption | Governance designed as part of the architecture; open LFDT process |
 
 ---
@@ -469,7 +469,7 @@ sequenceDiagram
 
 Two properties make this safe. First, the **asymmetric time-locks**: the initiator's lock lasts longer than the responder's, so the responder is never left exposed after the initiator can no longer be claimed against. Second, **atomicity through the secret**: revealing the secret to claim one leg necessarily makes the secret available — through the relay — to settle the other. If the secret is never revealed, both locks expire and both sets of funds refund. There is no state in which one party is paid and the other is not.
 
-This is what the reference implementation proves: **atomic cross-border settlement with no shared ledger and no principal risk.** The same pattern serves PvP (both legs are payments, in different currencies) and DvP (one leg is a payment, the other a tokenized-asset delivery); only the locked instruments differ.
+This is what the reference implementation demonstrates technically: **coordinated atomic state transitions across two ledgers without a shared ledger.** In the tested model the HTLC removes the risk that one tokenized leg completes while the other remains permanently locked, subject to correct timeout and refund behavior. The same pattern can support PvP or DvP, but legal finality, asset validity and operational recovery must be established separately.
 
 The platform also models a structured **FX agreement** lifecycle for cross-currency trades — proposed, accepted or rejected, settled or cancelled — with explicit roles for the originator, the counterparty, the settlement agent, the custodian and the beneficiary. The FX agreement coordinates *what* is to be settled and between whom; the HTLC mechanism executes the settlement atomically.
 
@@ -521,32 +521,32 @@ Paladin matters for three strategic reasons. First, it is purpose-built for **pr
 
 ### 10.4 The privacy domains and how they differ
 
-Paladin organizes privacy into **domains**. CBWeb3 uses three, and the choice between them is an architectural decision per use case, not a user setting.
+Paladin organizes privacy into **domains**. The reference design evaluates three models, but the Phase I evidence does not establish all three as deployed with the same maturity.
 
 | Domain | What it hides | Who retains visibility | Primary CBWeb3 use |
 |---|---|---|---|
 | **Noto** (notarized tokens) | Amounts and balances from external observers | The issuing central bank, acting as notary, sees balances and endorses transfers | tCeBM where the issuing central bank requires a complete view |
 | **Zeto** (zero-knowledge tokens) | Amounts and balances from everyone, including the issuer | No one sees amounts directly; validity is proven by zero-knowledge proof | High-confidentiality tCeBM transfers and the privacy-preserving cross-spoke settlement leg |
-| **Private AMM** | FX pool reserves, swap amounts and liquidity-provider positions | Verifiable by zero-knowledge proof; reserves hidden by cryptographic commitments | The Scenario B FX liquidity pool |
+| **Private AMM** *(future option)* | FX pool reserves, swap amounts and liquidity-provider positions | Intended to use cryptographic commitments and zero-knowledge proofs | Candidate privacy model for a future Scenario B hub; not implemented in the Phase I hub |
 
-The **Noto** model is the right choice when the issuing central bank's mandate requires it to see balances at all times — it keeps amounts confidential toward other participants and the public, while preserving the issuer's complete audit trail, at a lower computational cost than zero-knowledge proofs. The **Zeto** model is the right choice when even the issuer should not see individual amounts: balances are held as cryptographic commitments and every transfer carries a zero-knowledge proof that the transfer is valid — that the sender had sufficient funds, that no tokens were created from nothing, that amounts are within valid ranges — which verifiers check *without learning the amounts*. The **Private AMM** model extends the same idea to foreign exchange: pool reserves are hidden behind commitments, and the constant-product invariant that governs pricing is proven, on every swap, by a zero-knowledge proof rather than being read off a public ledger.
+The **Noto** model applies when the issuing central bank must retain visibility and endorse transfers. The **Zeto** model uses cryptographic commitments and zero-knowledge proofs so verifiers can validate transfers without learning amounts. A **Private AMM** could extend these techniques to foreign exchange, but the Phase I Scenario B implementation does not do so: its hub transactions and pool state are transparent. Any future private-AMM design must also define supervisory visibility, recovery, governance and performance requirements.
 
 The reference implementation realizes the cross-spoke settlement leg with Zeto-based tokens, so that the dual-layer HTLC of Section 9 settles confidentially — the coordination of the swap is visible enough to be safe, but the amounts are not exposed.
 
 ### 10.5 Reconciling confidentiality with supervisory visibility
 
-The point on which this architecture must not fail is the regulator. We reconcile confidentiality with supervision through **selective disclosure** and **zero-knowledge audit**, rather than by giving supervisors a master key.
+The point on which this architecture must not fail is the regulator. The target design is **selective disclosure** under governed conditions rather than ambient visibility or an unrestricted master key. Phase I does not yet demonstrate a complete supervisory zero-knowledge audit channel.
 
-A supervisor does not, in general, need to see raw amounts. A supervisor needs *assurance*: that a transaction complied with policy, that a participant's activity is within limits, that no prohibited counterparty was involved. Zero-knowledge audit delivers exactly that. The supervisor's tools can request a proof that a given compliance property holds for a transaction or a set of transactions, and verify that proof, **without the underlying amounts ever being decrypted**. Where a supervisor's mandate genuinely requires the underlying data, the Noto model already provides the issuing central bank with that view by construction, and any broader disclosure happens through a defined, logged, governed path — not through ambient visibility.
+A supervisor needs assurance that transactions comply with policy and participant limits, and some mandates may require access to underlying records. Zero-knowledge proofs are a candidate mechanism for providing part of that assurance without revealing transaction amounts. Where the issuing central bank must see balances directly, the Noto model can provide that view. The exact proof requests, disclosure authority, audit trail and access path still require implementation, institutional agreement and testing.
 
-This is the resolution of the paradox in Section 10.2: participants get cryptographic confidentiality, and supervisors get verifiable assurance, and neither is achieved at the other's expense.
+This is the design objective for resolving the paradox in Section 10.2. The current implementation provides useful spoke-level privacy primitives, but the supervisory channel and hub-privacy model remain open work.
 
 ### 10.6 The key points this design lets us make
 
 - We treat **privacy as an architectural layer**, not as a feature of the token contract — which is what lets the privacy model be chosen per use case and evolved over time.
-- We support **selective disclosure and verifiable confidentiality** — confidentiality that can still be proven correct.
+- We provide privacy primitives that can support **selective disclosure and verifiable confidentiality**, subject to a governed supervisory implementation.
 - We **avoid exposing unnecessary transaction data** to unrelated participants by default, rather than as an opt-in.
-- We **enable supervisory access under clear, governed conditions** through zero-knowledge audit and the notary model.
+- We use the notary model where issuer visibility is required and leave the broader supervisory access model for institutional design and validation.
 - We position **Paladin** as a mechanism that strengthens privacy *without* breaking compliance or the project's scalability and openness goals.
 
 > **Why this is strategically important.** Privacy is the requirement most likely to determine whether wholesale institutions adopt a shared settlement network at all. By solving it as an architectural layer with graded, open-source, verifiable mechanisms, CBWeb3 turns the hardest objection to shared infrastructure into a designed-in property. This is also why the privacy layer must remain replaceable behind a port (Section 8): privacy technology will advance, and the architecture must be able to advance with it.
@@ -593,7 +593,7 @@ Day-to-day access is mediated by an **OIDC identity provider** that issues short
 
 Compliance in CBWeb3 is **structural**. The compliance service performs KYC/AML checks at onboarding and on an ongoing basis, queries the on-chain identity registry to confirm a counterparty's status before a transaction proceeds, and writes an **immutable audit log** of consequential actions — who did what, when, against whom, with what result and correlation identifier. Because identity status is on-chain, a transaction involving a frozen or revoked participant can be prevented at the ledger, not merely flagged after the fact.
 
-Crucially, compliance and privacy are designed to coexist. As Section 10.5 described, supervisors obtain compliance assurance through **selective disclosure and zero-knowledge audit** — they verify that compliance properties hold without the confidential transaction data being exposed. Compliance evidence is therefore something the system can *produce on demand and prove*, rather than something that requires the network to be transparent by default.
+Crucially, compliance and privacy are designed to coexist. As Section 10.5 describes, selective disclosure and zero-knowledge proofs are candidate mechanisms for producing compliance assurance without exposing confidential transaction data by default. The Phase I implementation does not establish a complete supervisory audit channel; that capability requires governance, implementation and institutional validation.
 
 ### 11.6 Credential lifecycle, revocation, and future evolution
 
@@ -672,7 +672,7 @@ Not every institution will adopt everything at once, and they should not have to
 | Ledger node | Operate or have access to a spoke node | Operate a full validator set |
 | Identity | Hold a central-bank-issued credential; complete proof-of-possession onboarding | Operate as a sub-CA for own sub-participants |
 | tCeBM | Hold and transfer tCeBM within a spoke | Issue (central banks only) |
-| Privacy | Transact in the privacy domain mandated for tCeBM | Use additional domains (e.g. Private AMM) |
+| Privacy | Transact in the validated spoke privacy domain mandated for tCeBM | Evaluate additional domains, including a future private-AMM design |
 | Settlement | Participate in cross-spoke atomic settlement as initiator or responder | Operate relay / interoperability infrastructure |
 | Compliance | Integrate KYC/AML and audit logging | Operate a supervisor view |
 | Interfaces | Consume the REST API; validate tokens | Build custom adapters and portals |
@@ -719,13 +719,13 @@ We recommend institutions sequence adoption rather than attempt it all at once:
 |---|---|---|
 | **0 — Prepare** | Provision a spoke node; obtain credentials; complete onboarding | The institution is a recognized, registered participant |
 | **1 — Hold & transfer** | tCeBM holding and intra-spoke transfer in the mandated privacy domain | Domestic tokenized operations work |
-| **2 — Settle cross-border** | Cross-spoke atomic settlement (Scenario A) as initiator and responder | The institution can settle internationally with finality |
+| **2 — Settle cross-border** | Cross-spoke atomic settlement (Scenario A) as initiator and responder | The institution can execute both technical legs in the sandbox; legal finality remains a separate gate |
 | **3 — Integrate systems** | Connect internal core/treasury systems via API and SDKs | CBWeb3 operations are driven from existing systems |
 | **4 — Extend** | Build adapters, contribute components, optionally take on FX/hub roles | The institution extends the ecosystem |
 
 ### 13.7 What can be implemented now versus later
 
-Honesty about maturity (Principle from Section 5.6) applies to adoption too. Stages 0–3 above rest on capabilities that are **implemented and conformance-tested** in the reference platform. Stage 4, and any reliance on the Scenario B FX hub, rests on capabilities that are **designed but not yet fully implemented** — an institution can plan for them, design toward them, and contribute to them, but should not assume them as delivered. The roadmap in Section 17 sets out the sequence in which the deferred capabilities are expected to mature.
+Honesty about maturity (Principle from Section 5.6) applies to adoption too. Stages 0–3 rest on implemented sandbox capabilities, but institutional acceptance, production controls and legal finality remain separate gates. Scenario B has completed a technical happy path on a dedicated hub, yet participant validation, hub privacy and production hardening remain open. An institution can evaluate and extend these capabilities but should not treat them as production-ready.
 
 > **The takeaway for an implementation team.** Your work begins at integration and extension, not at design. The architecture, the contracts, the reference code and the conformance criteria already exist. Read the decision records so you know what is safe to change, adopt the baseline, sequence the stages, and validate against the Toolbox at every step.
 
@@ -813,7 +813,7 @@ The system's security rests on cryptographic keys: the central bank certificate 
 
 ### 16.3 Observability and operational monitoring
 
-The architecture includes an **observability** capability and a **Network Operations Center (NOC)** view: aggregated metrics, centralized logs, distributed traces, and operational dashboards covering the ledgers, the privacy layer and the services. Indicative operational targets used in the reference design — for example, settlement latency, settlement success rate and system availability — give operators concrete signals to monitor. These targets are design references, not service-level commitments; each production deployment must set and agree its own. **[TO CONFIRM: the operational service-level targets the participating institutions will formally commit to.]**
+The architecture includes an **observability** capability and a **Network Operations Center (NOC)** view: aggregated metrics, centralized logs, distributed traces and operational dashboards. Phase I incident evidence showed that process and port reachability could remain positive while peer communication and confirmations were stuck, so these surfaces are not sufficient evidence of functional readiness. Future deployments need end-to-end synthetic transactions, queue-age and peer-communication alerts, and agreed service levels. **[TO CONFIRM: the operational service-level targets participating institutions will formally commit to.]**
 
 ### 16.4 Fault handling and recovery
 
@@ -834,7 +834,7 @@ We state plainly what must be strengthened before any production use:
 - **Formal incident response** — agreed escalation paths, responsibilities and timelines across institutions.
 - **Production compliance and privacy review** — confirmation that the deployed configuration meets each jurisdiction's regulatory requirements.
 
-The honest summary: this phase has **laid the right security foundations** — secure-by-design choices, safe failure behavior, isolation, observability — and has **identified the hardening that production requires**. It has not delivered a production-hardened system, and it does not claim to.
+The honest summary: this phase has established useful security and isolation primitives and has exposed important gaps in failure handling, monitoring, key management, resilience and operational governance. It has not delivered a production-hardened system, and it does not claim to.
 
 ---
 
@@ -844,7 +844,7 @@ This section sets out how an institution, and the program as a whole, can move f
 
 ### 17.1 What this phase establishes
 
-The current phase establishes a **validated foundation**: a reference architecture; a working reference implementation of Scenario A (cross-spoke atomic settlement) end-to-end; tokenized central bank money with a full lifecycle (deposit, escrow/tokenization, redemption); a privacy layer with graded domains; an identity, onboarding and compliance stack; the governance primitives; and the documentation and Toolbox assets that make all of it reusable. This is the basis the twelve banks build on.
+The current phase establishes an **evidence-backed sandbox foundation**: a reference architecture; a working Scenario A implementation exercised end to end; a technical Scenario B happy path on a dedicated hub; tokenized central bank money lifecycle functions; spoke-level privacy primitives; an identity, onboarding and compliance stack; governance primitives; and reusable documentation and Toolbox assets. These results support further validation; they do not constitute production authorization or signed institutional UAT.
 
 ### 17.2 What has been validated conceptually versus technically
 
@@ -852,12 +852,12 @@ A blueprint should not blur these. The table below states, for the major capabil
 
 | Capability | Status |
 |---|---|
-| Cross-spoke atomic settlement — Scenario A (HTLC + relay) | Technically validated |
-| tCeBM lifecycle (deposit / escrow / redeem) | Technically validated |
-| Privacy domains for tCeBM (Noto / Zeto) | Technically validated |
-| Identity, PKI onboarding, compliance, audit | Technically validated |
-| Governance primitives (registry, circuit breaker, parameters) | Technically validated |
-| FX hub with AMM liquidity pool — Scenario B | Conceptually validated (contracts present; orchestration and end-to-end flows not implemented) |
+| Cross-spoke atomic settlement — Scenario A (HTLC + relay) | Exercised end to end in the sandbox; legal finality and failure-path coverage open |
+| tCeBM lifecycle (deposit / escrow / redeem) | Exercised in the reference environment; live reserve-system integration open |
+| Spoke privacy domains for tCeBM (Noto / Zeto) | Implemented in the reference environment; production and supervisory validation open |
+| Identity, PKI onboarding and compliance controls | Implemented in the reference environment; production security boundary and audit workflow open |
+| Governance primitives (registry, circuit breaker, parameters) | Implemented in the reference environment; institutional governance and production authorization open |
+| FX hub with AMM liquidity pool — Scenario B | Technical happy path executed on dedicated Hub chain 1337; participant validation, privacy and production hardening open |
 | Integration with external RTGS / messaging | Conceptually designed; not implemented |
 | Production hardening (Section 16.6) | Future work |
 | Performance at production scale | Future work |
@@ -865,7 +865,7 @@ A blueprint should not blur these. The table below states, for the major capabil
 
 ### 17.3 Technical priorities for the next stage
 
-In rough priority order: complete and exercise the **Scenario B FX hub** end-to-end; conduct the **independent security review** of contracts and cryptographic components; build the **external-system adapters** (RTGS, messaging) that connect CBWeb3 to existing infrastructure; carry out **performance and load engineering** to establish real production envelopes; and harden **key management, high availability and disaster recovery**.
+In rough priority order: validate **Scenario B** with participating institutions and decide its hub-privacy and supervisory model; conduct the **independent security review** of contracts and cryptographic components; build the **external-system adapters** (RTGS, messaging); carry out **performance and load engineering** to establish real production envelopes; generalize Scenario A beyond its current two-spoke assumptions; and harden **key management, multi-validator operation, high availability and disaster recovery**.
 
 ### 17.4 Institutional priorities for the next stage
 
@@ -885,13 +885,13 @@ An individual institution should sequence its work as the stepwise model of Sect
 
 CBWeb3 set out to address a problem that no institution in Latin America and the Caribbean can solve alone: the absence of a shared, neutral, interoperable foundation for settling wholesale tokenized central bank money and tokenized assets across borders — atomically, privately, and under each institution's own supervision.
 
-We resolved that problem at the level a blueprint can resolve it. We designed a hub-and-spoke architecture that preserves the sovereignty of each jurisdiction while enabling atomic cross-border settlement. We proved, in a working reference implementation, that two independent ledgers can settle with finality and without principal risk, using no shared ledger at all. We treated privacy as an architectural layer rather than an afterthought, and showed how confidentiality toward peers and verifiable visibility for supervisors can hold at the same time. We anchored identity and compliance in a trust model that central banks can stand behind, and we made governance part of the architecture instead of an appendix to it. And we chose, at every level — a hexagonal core, open standards, open-source dependencies, an open license, a neutral foundation — to keep the result modular, vendor-neutral and reusable.
+We advanced that problem at the level a blueprint and sandbox prototype can address it. We designed a hub-and-spoke architecture that preserves jurisdictional control while coordinating cross-border settlement. Scenario A demonstrated atomic technical execution across independent ledgers under test conditions; that result is not, by itself, legal settlement finality or proof that every failure path is safe. Scenario B demonstrated a technical hub happy path while leaving participant validation, privacy and production controls open. We treated privacy, identity, compliance and governance as architectural concerns and documented the remaining institutional decisions rather than presenting them as closed.
 
 The blueprint matters because of what it lets happen next. Its central contribution is not the code, valuable though the reference implementation is. The contribution is a **structured, documented, conformance-tested and openly governed foundation** that the twelve participating banks — and, in principle, institutions beyond them — can adopt, adapt, validate and extend. It converts the work of joining a regional settlement network from a design-and-discovery problem into an integration-and-extension problem. That is the difference between a report and a blueprint, and it is the difference this project was created to make.
 
 This work is relevant beyond CBWeb3 itself. The patterns it records — interoperability that respects sovereignty, privacy as a layer with selective disclosure, governance as architecture, and the discipline of building a Digital Public Good — are patterns other regions facing the same fragmentation could adapt. By developing CBWeb3 in the open, under LF Decentralized Trust, and toward Digital Public Good recognition, the project makes that reuse possible rather than merely conceivable.
 
-The main takeaway we want every reader to leave with is this: **CBWeb3 leaves behind a practical and extensible foundation for interoperable wholesale tCeBM in the region.** The hard architectural questions have been answered and the answers have been written down. The reference implementation proves the approach works. The Toolbox makes it adoptable. What remains — completing the FX hub, hardening for production, onboarding the full set of institutions, growing the community — is real work, but it is work that now starts from this blueprint rather than from a blank page. That was the goal, and it is the foundation on which the next phase of the region's settlement infrastructure can be built, together.
+The main takeaway is this: **CBWeb3 leaves behind a practical and extensible sandbox foundation for evaluating interoperable wholesale tCeBM in the region.** The reference implementation and Toolbox reduce the cost of the next round of institutional testing. What remains — legal and governance decisions, participant validation of Scenario B, hub privacy, independent security review, production controls, external-system integration, measurable operating economics and formal readiness decisions — is material work. The next phase starts from evidence and reusable components rather than from a blank page.
 
 ---
 
@@ -918,7 +918,7 @@ The annexes are implementation aids. They are meant to be used — by architects
 | **Paladin** | The open-source (LFDT) privacy framework providing programmable privacy on EVM ledgers. |
 | **Noto domain** | A Paladin privacy model with a notary (the issuing central bank) that retains visibility of balances. |
 | **Zeto domain** | A Paladin privacy model using zero-knowledge proofs; amounts are hidden from everyone, including the issuer. |
-| **Private AMM** | A privacy-preserving automated market maker with hidden reserves and ZK-verified pricing. |
+| **Private AMM** | A candidate future AMM model with hidden reserves and ZK-verified pricing; not implemented in the Phase I hub. |
 | **ZK proof** | Zero-knowledge proof — a proof that a statement is true without revealing the underlying data. |
 | **Selective disclosure** | Revealing only the specific information a party is entitled to, rather than all transaction data. |
 | **PKI** | Public-key infrastructure — the X.509-certificate-based identity foundation of this phase. |
@@ -955,8 +955,8 @@ This is a summary; full ADRs should be maintained in the repository. Each record
 | Intra-spoke transfer | — | Zeto | Intra-spoke | Implemented |
 | Cross-border PvP (currency exchange) | A | Zeto | Cross-spoke HTLC | Implemented |
 | Cross-border DvP (asset vs. payment) | A | Zeto | Cross-spoke HTLC | Designed; pattern proven via PvP |
-| FX via shared liquidity pool | B | Private AMM | Hub-mediated | Contracts present; not yet end-to-end |
-| Supervisory ZK-audit | — | All | — | Implemented |
+| FX via shared liquidity pool | B | Transparent Hub in Phase I; private AMM is a future option | Hub-mediated | Technical happy path executed; participant validation and production controls open |
+| Supervisory selective disclosure / ZK-audit | — | Candidate across privacy domains | — | Design objective; governance and implementation not validated |
 
 ### Annex D — Standards mapping
 
@@ -1015,7 +1015,7 @@ Summary of the nine DPGA criteria; the full assessment is a separate working doc
 | Payment-orchestration service | Backend service | tCeBM lifecycle, FX agreement, HTLC orchestration |
 | API gateway | Backend service | Authenticated REST entry point per institution |
 | Ledger gateway / settlement adapters | Integration | Ledger access and cross-network settlement adapters |
-| Paladin privacy layer | Privacy infrastructure | Noto, Zeto and Private AMM domains |
+| Paladin privacy layer | Privacy infrastructure | Noto and Zeto in the reference design; Private AMM remains a future option |
 | Besu networks | Ledger | Per-spoke permissioned QBFT ledgers |
 | Portals | Frontend | Bank, governance, supervisor, treasury, NOC |
 
@@ -1048,7 +1048,7 @@ Indicative backlog of community-extensible work; the live backlog is maintained 
 
 | Item | Type | Notes |
 |---|---|---|
-| Scenario B FX hub orchestration & end-to-end flows | Core | Contracts present; orchestration to be built |
+| Scenario B participant validation, privacy and hardening | Core | Technical happy path exists; institutional testing and production controls remain open |
 | External-system adapters (RTGS, ISO 20022 messaging) | Extension | Adapter-level work behind existing ports |
 | Additional ledger adapters | Extension | Demonstrate ledger replaceability |
 | Decentralized-identity adapter | Extension | Evolution path beyond PKI |

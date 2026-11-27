@@ -1,12 +1,24 @@
-# Knowledge Product 1 — Draft v0.3
+# Knowledge Product 1 — Draft v0.4
 ## Tokenized Central Bank Money in LAC: From Issuance to Cross-Border Integration
 ## Dinero Digital de Banco Central en ALC: De la Emisión a la Integración Transfronteriza
 
 **Status:** Draft for working group review
-**Version:** v0.3 — 2026-11-06
+**Version:** v0.4 — 2026-11-26
 **Author:** CBWeb3 Working Group / LNET
 **GitHub issue:** [#46 — Knowledge Product 1 Proposed Structure](https://github.com/LF-Decentralized-Trust-labs/cbweb3/issues/46)
 **Audience:** Central bankers, policymakers, and broad financial sector stakeholders
+
+---
+
+> **Changelog v0.3 → v0.4 (2026-11-26)**
+>
+> Incorporating evidence from the 25 November 2026 CBWeb3 Working Group closing session and survey:
+>
+> - **§13** — Added closing-session feedback on access, platform stability, repeated testing, support response times, multi-role test profiles and Phase II resource clarity
+> - **§13** — Added the four-response closing survey as a qualitative, non-binding signal; no respondent reported testing Scenario B
+> - **§11/§13** — Added the proposed Phase II sequence of institutional intent, bilateral readiness work and a controlled pilot, with interoperability as a parallel track
+> - **§8** — Recorded Nuam's reported self-contained sandbox test while preserving the evidence boundary: transaction-level evidence was not archived at the cut-off
+> - **Throughout** — Added participant support, access preparation and communication-service expectations to the readiness criteria
 
 ---
 
@@ -272,7 +284,7 @@ In this model, the CSDs of participating countries act as authorized intermediar
 
 *Requirements:* Central bank authorization for each CSD to operate tCeBM-related functions; formal agreement on liability allocation between central banks and CSDs; common connectivity and messaging standards between CSDs; coordinated supervisory oversight between central bank and securities regulator.
 
-*Candidate for evaluation:* Jurisdictions where CSDs are already involved in regional integration and have established relationships with central banks and securities supervisors. Nuam's Colombia–Chile–Peru integration offers a relevant institutional context to study, but the 2026 CBWeb3 evidence establishes connectivity and testing participation only. It does not establish central-bank authorization, access to settlement accounts, a cross-border cash-finality model or selection of this corridor for a real-value pilot.
+*Candidate for evaluation:* Jurisdictions where CSDs are already involved in regional integration and have established relationships with central banks and securities supervisors. Nuam's Colombia–Chile–Peru integration offers a relevant institutional context to study. Nuam subsequently reported completing a self-contained sandbox cross-border test while operating both commercial-bank roles; the date and transaction-level evidence had not been archived at the evidence cut-off. This result supports further evaluation but does not establish an external-counterparty corridor, central-bank authorization, access to settlement accounts, a cross-border cash-finality model or selection of the corridor for a real-value pilot.
 
 **Coexistence in practice.** These four models are not mutually exclusive. A realistic regional architecture will likely see multiple models in use simultaneously: enhanced bilateral correspondent banking for corridors with existing commercial relationships, direct central bank bilateral corridors for the highest-volume pairs, a shared regional platform as the backbone for multilateral connectivity, and CSD interconnection for institutional capital markets flows. The CBWeb3 platform is designed to support Models 1 through 3 directly, with Model 4 representing a natural extension as FMI participation expands.
 
@@ -328,6 +340,8 @@ Tokenized central bank money raises a set of policy questions that do not have u
 
 The 2026 evidence supports continued controlled experimentation, not a universal decision to deploy. CBWeb3 provides a reference implementation and interoperability workflow tested under bounded sandbox conditions. It does not yet establish a production service, legal settlement finality, integration with live RTGS systems, an approved multi-country liability framework or a sustainable operating model. Each authority should proceed only when its measured problem, available alternatives and risk appetite justify the next gate.
 
+The Working Group closing session proposed a practical near-term sequence: a non-binding expression of institutional intent, bilateral readiness work to define controls and resources, and only then a controlled pilot. Interoperability with other tokenized-money networks should be treated as a parallel workstream. This sequence remains a proposal, not an approved regional commitment.
+
 **Summary Action Roadmap**
 
 The following roadmap organizes the key actions by phase. The month ranges are indicative planning bands, not commitments. Phase transitions require an accountable `go`, `conditional go`, or `no-go` decision supported by evidence.
@@ -343,7 +357,10 @@ The following roadmap organizes the key actions by phase. The month ranges are i
 
 *Phase 2 — Technical Engagement and Testnet Connection (Months 3–6)*
 
+- Record a non-binding expression of institutional intent and designate an accountable point of contact
+- Conduct a bilateral readiness session covering scope, roles, resources, controls, support expectations and the institution's access path
 - Complete technical integration with the CBWeb3 testnet using the standardized API specifications and test vectors available in the public repository
+- Complete a pre-flight access and environment check; establish one support channel and response-time commitments for the testing period
 - Execute the 15-minute PvP quickstart tutorial and validate technical connectivity
 - Define the initial closed user group according to the eligibility criteria in Section 6
 - Commission legal validation of participation agreements, liability allocation, and smart contract enforceability under applicable law
@@ -408,17 +425,19 @@ The following register identifies the primary risk categories associated with tC
 
 The evidence available from the 2026 participant testing changes the basis on which CBWeb3 should be discussed. It moves Scenario A beyond a purely conceptual design, while also showing why a successful technical flow is only one part of institutional readiness.
 
-> **Evidence note.** This section synthesizes participant feedback from BCRP dated 7 October 2026, BCCR feedback dated 30 September 2026, an internal record of the Costa Rica–Peru joint test, the 2 October 2026 DPGWG coordination notes, platform-delivery reviews, and the 6 November 2026 support incident review. Several of these are internal project records rather than public or independently audited sources; publication requires confirmation by the responsible institutions and removal of any restricted operational detail.
+> **Evidence note.** This section synthesizes participant feedback from BCRP dated 7 October 2026, BCCR feedback dated 30 September 2026, an internal record of the Costa Rica–Peru joint test, the 2 October 2026 DPGWG coordination notes, platform-delivery reviews, the 6 November 2026 support incident review, and the 25 November 2026 Working Group closing session and four-response survey. Several are internal project records rather than public or independently audited sources; publication requires confirmation by the responsible institutions and removal of restricted operational detail. Survey results are qualitative and non-binding because of the small sample.
 
 **What was observed.** During the first participant testing batch, the Banco Central de Reserva del Perú reported completing the Scenario A cross-border PvP flow in the sandbox, including onboarding, issuance, reserve tokenization, the FX agreement, HTLC locking, settlement and interoperability between participant networks. Banco Central de Costa Rica reported that the exercise made the roles and cross-border flow more concrete and valuable than a conceptual presentation alone. A Costa Rica–Peru participant-operated PvP was recorded as successful. These results are evidence that the Scenario A workflow can be operated end to end under the tested configuration.
 
 **What participants learned.** The largest adoption frictions included internal security review, VPN and virtual-machine provisioning, permissions, credentials, environment preparation and coordination between institutions. Participants requested clearer definitions of settlement agent, custodian and correspondent roles; rules for non-resident tCeBM holdings; balance limits, remuneration, convertibility and redemption; foreign-exchange data governance; KYC guidance; RTGS/LBTR funding and integration; and a concrete scope and resource plan for a next phase. BCCR also asked for failure and exception scenarios, stronger participant interaction and a clearer distinction between laboratory capabilities and production requirements.
 
+**Closing-session evidence.** At the 25 November closing session, participants asked for more opportunities to repeat tests, the ability for one institution to exercise multiple roles without waiting for another institution, clearer Phase II scope and resource requirements, and defined support response times through a reliable channel. All four survey respondents indicated a preliminary willingness to assign a team to another testing round, but this was non-binding. Three prioritized access and environment preparation, and no respondent reported testing Scenario B. Five central banks subsequently requested bilateral Phase II discussions. These signals demonstrate continued interest, not institutional commitment or authorization.
+
 **Operational evidence from failure.** A later incident in the Chile Scenario A homologation environment showed that technical reachability is not equivalent to functional readiness. Five tokenization attempts totaling CLP 1,840,000 remained pending while reserve balances had already changed. After the affected nodes were restored, the queued issuances completed without reissuance and with no reported loss. The incident nevertheless exposed prolonged silent pending states, insufficient functional monitoring, missing queue-age escalation and a serious reconciliation problem. A successful post-recovery PvP retest was not included in the available incident evidence.
 
-**Limits of the evidence.** The available record is participant feedback and technical evidence from a sandbox. It is not a jointly signed institutional UAT acceptance, production authorization, proof of legal settlement finality, connection to live RTGS/LBTR systems or evidence that every corridor and failure path works. The `platform-v1.0.0` tag records a software handoff baseline; it does not change those maturity boundaries. Scenario B remains an experimental prototype, as described in Section 8.
+**Limits of the evidence.** The available record is participant feedback and technical evidence from a sandbox. It is not a jointly signed institutional UAT acceptance, production authorization, proof of legal settlement finality, connection to live RTGS/LBTR systems or evidence that every corridor and failure path works. The closing survey had four responses and cannot be treated as statistically representative. Nuam's reported self-contained test lacks archived transaction-level evidence at the cut-off. The `platform-v1.0.0` tag records a software handoff baseline; it does not change those maturity boundaries. Scenario B remains an experimental prototype, as described in Section 8.
 
-**Implications for the next phase.** Future testing should be organized around evidence, not demonstrations alone. At minimum it should include bidirectional and negative-path flows; transaction-level reconciliation; functional health and synthetic end-to-end monitoring; safe handling of pending issuance without duplicate reissuance; participant-wide impact analysis and notification; performance and capacity measurement; and formal participant review of results. Any transition to real value remains conditional on legal finality, RTGS integration, key custody, high availability, backup and recovery, independent security review, operating economics and an approved allocation of responsibility and losses.
+**Implications for the next phase.** Future testing should be organized around evidence, not demonstrations alone. At minimum it should include bidirectional and negative-path flows; transaction-level reconciliation; functional health and synthetic end-to-end monitoring; safe handling of pending issuance without duplicate reissuance; participant-wide impact analysis and notification; performance and capacity measurement; repeatable multi-role test profiles; access-readiness support; response-time commitments; and formal participant review of results. The sequence proposed at the closing session was an expression of institutional intent, followed by bilateral readiness work and then a controlled pilot, with interoperability as a parallel track. Any transition to real value remains conditional on legal finality, RTGS integration, key custody, high availability, backup and recovery, independent security review, operating economics and an approved allocation of responsibility and losses.
 
 ---
 
@@ -628,7 +647,7 @@ En este modelo, los DCV de los países participantes actúan como infraestructur
 
 *Requerimientos:* Autorización del banco central para cada DCV; acuerdo formal sobre asignación de responsabilidades; estándares de conectividad y mensajería comunes entre DCV; supervisión coordinada entre el banco central y el regulador de valores.
 
-*Candidato para evaluación:* Las jurisdicciones donde los DCV ya participan en procesos de integración regional. La integración Colombia–Chile–Perú de Nuam ofrece un contexto institucional relevante para estudiar, pero la evidencia CBWeb3 de 2026 demuestra conectividad y participación en pruebas, no autorización de bancos centrales, acceso a cuentas de liquidación, un modelo de finalidad transfronteriza ni la selección del corredor para un piloto con valor real.
+*Candidato para evaluación:* Las jurisdicciones donde los DCV ya participan en procesos de integración regional. La integración Colombia–Chile–Perú de Nuam ofrece un contexto institucional relevante para estudiar. Posteriormente, Nuam reportó haber completado una prueba transfronteriza autocontenida en sandbox, operando ambos roles de banco comercial; a la fecha de corte no se habían archivado la fecha ni la evidencia transaccional. El resultado respalda una evaluación adicional, pero no demuestra un corredor con contraparte externa, autorización de bancos centrales, acceso a cuentas de liquidación, un modelo de finalidad transfronteriza ni la selección del corredor para un piloto con valor real.
 
 **Coexistencia en la práctica.** Estos cuatro modelos no son mutuamente excluyentes y la arquitectura regional probablemente verá los cuatro en uso simultáneo: corresponsalía mejorada para corredores con relaciones comerciales existentes, corredores bilaterales directos para los pares de mayor volumen, una plataforma regional compartida como columna vertebral multilateral, e interconexión de DCV para flujos institucionales de mercados de capitales.
 
@@ -668,6 +687,8 @@ El desafío de gestión de liquidez en un sistema de liquidación tokenizado mul
 
 La evidencia de 2026 respalda continuar con experimentación controlada, no una decisión universal de desplegar. CBWeb3 ofrece una implementación de referencia y un flujo de interoperabilidad probado bajo condiciones acotadas de sandbox. Todavía no constituye un servicio productivo, no establece finalidad jurídica, no está integrado con LBTR productivos y no cuenta con un marco multinacional aprobado de responsabilidad ni con un modelo operativo sostenible. Cada autoridad debe avanzar solo cuando el problema medido, las alternativas disponibles y su tolerancia al riesgo justifiquen la siguiente etapa.
 
+La sesión de cierre del Grupo de Trabajo propuso una secuencia práctica de corto plazo: una expresión no vinculante de intención institucional, trabajo bilateral de preparación para definir controles y recursos y, solo entonces, un piloto controlado. La interoperabilidad con otras redes de dinero tokenizado debe tratarse como un eje paralelo. Esta secuencia es una propuesta, no un compromiso regional aprobado.
+
 **Hoja de Ruta de Acción Resumida**
 
 Los rangos de meses son bandas indicativas de planificación, no compromisos. Cada transición exige una decisión responsable de `avance`, `avance condicionado` o `no avance`, sustentada en evidencia.
@@ -683,7 +704,10 @@ Los rangos de meses son bandas indicativas de planificación, no compromisos. Ca
 
 *Fase 2 — Involucramiento Técnico y Conexión al Testnet (Meses 3–6)*
 
+- Registrar una expresión no vinculante de intención institucional y designar un punto de contacto responsable
+- Realizar una sesión bilateral de preparación sobre alcance, roles, recursos, controles, expectativas de soporte y ruta de acceso institucional
 - Completar integración técnica con el testnet CBWeb3
+- Completar una verificación previa de accesos y entorno; establecer un canal único de soporte y compromisos de tiempo de respuesta durante las pruebas
 - Ejecutar el tutorial de inicio rápido PvP de 15 minutos y validar conectividad técnica
 - Definir el grupo cerrado de usuarios inicial (criterios en Sección 6)
 - Encargar validación legal de acuerdos de participación, asignación de responsabilidades y ejecutabilidad de contratos inteligentes bajo la ley aplicable
@@ -748,17 +772,19 @@ El siguiente registro identifica las principales categorías de riesgo asociadas
 
 La evidencia disponible de las pruebas con participantes en 2026 cambia la base sobre la cual debe discutirse CBWeb3. Lleva al Escenario A más allá de un diseño puramente conceptual y, al mismo tiempo, demuestra por qué un flujo técnico exitoso es solo una parte de la preparación institucional.
 
-> **Nota de evidencia.** Esta sección sintetiza retroalimentación del BCRP del 7 de octubre de 2026, retroalimentación del BCCR del 30 de septiembre de 2026, un registro interno de la prueba conjunta Costa Rica–Perú, notas de coordinación DPGWG del 2 de octubre de 2026, revisiones de entregables de plataforma y la revisión del incidente de soporte del 6 de noviembre de 2026. Varias son fuentes internas del proyecto y no fuentes públicas ni auditadas independientemente; su publicación exige confirmación de las instituciones responsables y eliminación de cualquier detalle operativo restringido.
+> **Nota de evidencia.** Esta sección sintetiza retroalimentación del BCRP del 7 de octubre de 2026, retroalimentación del BCCR del 30 de septiembre de 2026, un registro interno de la prueba conjunta Costa Rica–Perú, notas de coordinación DPGWG del 2 de octubre de 2026, revisiones de entregables de plataforma, la revisión del incidente de soporte del 6 de noviembre de 2026 y la sesión de cierre y encuesta de cuatro respuestas del 25 de noviembre de 2026. Varias son fuentes internas y no fuentes públicas ni auditadas independientemente; su publicación exige confirmación institucional y eliminación de detalles operativos restringidos. Por su muestra reducida, la encuesta ofrece señales cualitativas y no vinculantes.
 
 **Qué se observó.** Durante el primer lote de pruebas, el Banco Central de Reserva del Perú reportó haber completado en el sandbox el flujo PvP transfronterizo del Escenario A, incluyendo onboarding, emisión, tokenización de reservas, acuerdo FX, bloqueo HTLC, liquidación e interoperabilidad entre redes participantes. El Banco Central de Costa Rica indicó que el ejercicio permitió comprender de forma práctica los roles y el flujo transfronterizo. Se registró como exitoso un PvP Costa Rica–Perú operado por participantes. Estos resultados evidencian que el flujo del Escenario A puede operarse de extremo a extremo bajo la configuración probada.
 
 **Qué aprendieron los participantes.** Las mayores fricciones de adopción incluyeron revisión interna de seguridad, aprovisionamiento de VPN y máquinas virtuales, permisos, credenciales, preparación del entorno y coordinación entre instituciones. Se solicitó aclarar los roles de agente de liquidación, custodio y corresponsal; las reglas para tenencia de tCeBM por no residentes; límites de saldo, remuneración, convertibilidad y redención; gobernanza de datos cambiarios; lineamientos KYC; fondeo e integración con LBTR; y alcance y recursos de una siguiente fase. BCCR también pidió escenarios de falla y excepción, mayor interacción entre participantes y una distinción clara entre capacidades de laboratorio y requisitos productivos.
 
+**Evidencia de la sesión de cierre.** En la sesión del 25 de noviembre, los participantes solicitaron más oportunidades para repetir pruebas, perfiles que permitan a una institución ejercer varios roles sin esperar a otra, mayor claridad sobre alcance y recursos de la Fase II y tiempos de respuesta definidos mediante un canal de soporte confiable. Los cuatro encuestados indicaron una disposición preliminar y no vinculante a asignar un equipo a otra ronda; tres priorizaron el acceso y la preparación del entorno, y ninguno reportó haber probado el Escenario B. Posteriormente, cinco bancos centrales solicitaron conversaciones bilaterales sobre la Fase II. Estas señales demuestran interés continuado, no compromiso institucional ni autorización.
+
 **Evidencia operacional derivada de una falla.** Un incidente posterior en el entorno de homologación de Chile para el Escenario A mostró que la conectividad técnica no equivale a preparación funcional. Cinco intentos de tokenización por CLP 1.840.000 quedaron pendientes mientras los saldos de reservas ya habían cambiado. Tras recuperar los nodos afectados, las emisiones en cola se completaron sin reemisión y sin pérdida reportada. Sin embargo, el incidente reveló estados pendientes silenciosos prolongados, monitoreo funcional insuficiente, ausencia de escalamiento por antigüedad de cola y un problema serio de reconciliación. La evidencia disponible del incidente no incluyó un nuevo PvP exitoso posterior a la recuperación.
 
-**Límites de la evidencia.** El registro disponible corresponde a retroalimentación de participantes y evidencia técnica de sandbox. No constituye una aceptación UAT institucional firmada, autorización productiva, prueba de finalidad jurídica, conexión con LBTR productivos ni evidencia de que funcionen todos los corredores y rutas de falla. La etiqueta `platform-v1.0.0` registra una línea base de entrega de software; no modifica esos límites de madurez. El Escenario B continúa siendo un prototipo experimental, según la Sección 8.
+**Límites de la evidencia.** El registro disponible corresponde a retroalimentación de participantes y evidencia técnica de sandbox. No constituye una aceptación UAT institucional firmada, autorización productiva, prueba de finalidad jurídica, conexión con LBTR productivos ni evidencia de que funcionen todos los corredores y rutas de falla. La encuesta tuvo cuatro respuestas y no es estadísticamente representativa. La prueba autocontenida reportada por Nuam no contaba con evidencia transaccional archivada a la fecha de corte. La etiqueta `platform-v1.0.0` registra una línea base de entrega de software; no modifica esos límites de madurez. El Escenario B continúa siendo un prototipo experimental, según la Sección 8.
 
-**Implicaciones para la siguiente fase.** Las pruebas futuras deben organizarse alrededor de evidencia y no solo de demostraciones. Como mínimo deben incluir flujos bidireccionales y negativos; reconciliación por transacción; monitoreo funcional y transacciones sintéticas extremo a extremo; manejo seguro de emisiones pendientes sin duplicarlas; análisis y notificación de impacto a todos los participantes; medición de rendimiento y capacidad; y revisión formal de resultados por los participantes. Cualquier transición a valor real queda condicionada a finalidad jurídica, integración con LBTR, custodia de llaves, alta disponibilidad, respaldo y recuperación, revisión independiente de seguridad, economía operativa y una asignación aprobada de responsabilidades y pérdidas.
+**Implicaciones para la siguiente fase.** Las pruebas futuras deben organizarse alrededor de evidencia y no solo de demostraciones. Como mínimo deben incluir flujos bidireccionales y negativos; reconciliación por transacción; monitoreo funcional y transacciones sintéticas extremo a extremo; manejo seguro de emisiones pendientes sin duplicarlas; análisis y notificación de impacto; medición de rendimiento y capacidad; perfiles de prueba repetibles con múltiples roles; apoyo para preparación de accesos; compromisos de tiempo de respuesta; y revisión formal por participantes. La secuencia propuesta en el cierre fue una expresión de intención institucional, seguida por trabajo bilateral de preparación y luego un piloto controlado, con interoperabilidad como eje paralelo. Cualquier transición a valor real queda condicionada a finalidad jurídica, integración con LBTR, custodia de llaves, alta disponibilidad, respaldo y recuperación, revisión independiente de seguridad, economía operativa y una asignación aprobada de responsabilidades y pérdidas.
 
 ---
 
